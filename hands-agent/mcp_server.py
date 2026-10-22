@@ -21,7 +21,7 @@ GEMINI_API_KEY (optional) - enables 'locate' via vision model.
 """
 import json, os, queue, socket, sys, threading, time, urllib.request, uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import hands, vision
+import hands, vision, cdp
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 INBOX = os.path.join(BASE, "queue", "inbox")
@@ -109,6 +109,17 @@ def run_recipe(name, params):
                 hands.scroll(st.get("amount", 3), st.get("direction", "down"))
             elif act == "wait":
                 time.sleep(st.get("seconds", 1))
+            elif act == "dom_find":
+                pos = cdp.dom_rect(st["url"], st["target"])
+                if not pos:
+                    return {"error": f"step{i}: dom target not found: {st['target']}", "log": log_line}
+                ctx[st.get("into", "pos")] = (pos["x"], pos["y"])
+                log_line.append(f"step{i} dom '{st['target']}' -> {pos['found']}")
+            elif act == "click_dom":
+                r = cdp.click_dom(st["url"], st["target"])
+                if r.get("error"):
+                    return {"error": f"step{i}: {r['error']}", "log": log_line}
+                log_line.append(f"step{i} click_dom '{st['target']}' -> {r['clicked']['found']}")
             elif act == "shot":
                 p = vision.screenshot(os.path.join(BASE, "queue", "done",
                                                    st.get("name", f"step{i}.png")))
@@ -173,6 +184,13 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["name"],
         "properties": {"name": {"type": "string"},
                        "params": {"type": "object"}}}},
+    {"name": "dom_find", "description": "DOM-read element center -> screen {x,y} (read-only DOM, click via OS)",
+     "inputSchema": {"type": "object", "required": ["url", "target"],
+        "properties": {"url": {"type": "string", "description": "substring of tab URL"},
+                       "target": {"type": "string", "description": "visible text/aria-label substring"}}}},
+    {"name": "click_dom", "description": "Find element by text via DOM-read, then real OS click",
+     "inputSchema": {"type": "object", "required": ["url", "target"],
+        "properties": {"url": {"type": "string"}, "target": {"type": "string"}}}},
     {"name": "task_status", "description": "Queue task status",
      "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}}}},
 ]
@@ -200,6 +218,10 @@ def call_tool(name, args):
         return {"x": hit[0], "y": hit[1]} if hit else {"x": -1, "y": -1}
     if name == "locate":
         return gemini_locate(args["description"], args.get("hint", ""))
+    if name == "dom_find":
+        return cdp.dom_rect(args["url"], args["target"]) or {"x": -1, "y": -1}
+    if name == "click_dom":
+        return cdp.click_dom(args["url"], args["target"])
     if name == "run_recipe":
         tid = str(uuid.uuid4())[:8]
         res = run_recipe(args["name"], args.get("params", {}))
