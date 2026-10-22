@@ -11,12 +11,12 @@ ENV["DISPLAY"] = os.environ.get("HANDS_DISPLAY", ":1")
 ENV["XAUTHORITY"] = os.environ.get("HANDS_XAUTHORITY", os.path.expanduser("~/.Xauthority"))
 
 def _xd(*args):
-    subprocess.run(["xdotool", *[str(a) for a in args]],
-                   env=ENV, check=True, capture_output=True)
+    return subprocess.run(["xdotool", *[str(a) for a in args]],
+                          env=ENV, check=True, capture_output=True)
 
 def mouse_pos():
     out = _xd("getmouselocation").stdout.decode()
-    p = dict(t.split("=") for t in out.split())
+    p = dict(t.split(":") for t in out.split() if ":" in t)
     return int(p["x"]), int(p["y"])
 
 def _bezier(p0, p1, p2, p3, n):
