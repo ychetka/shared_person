@@ -1,0 +1,34 @@
+# Facebook personal-profile post recipe (MVP).
+# Driven entirely by vision - zero DOM selectors.
+# Params: text (post body), [image_path]
+# Templates in ./templates/ are platform-specific UI pieces
+# (captured per-account once; FB UI changes just need new PNGs).
+name: facebook_post
+steps:
+  # 1. Locate the "What's on your mind" composer in the open FB tab
+  - action: locate
+    target: composer box "Поделитесь мыслями" / "What's on your mind"
+    hint: usually top-center of the profile/feed page
+    into: composer
+  - action: click
+    pos: composer
+  - action: wait
+    seconds: 2
+  # 2. Type the post text into the focused composer
+  - action: type
+    text: "{text}"
+  - action: wait
+    seconds: 1
+  # 3. Locate and click the publish button
+  - action: locate
+    target: blue "Опубликовать" / "Post" button
+    hint: bottom-right of the composer dialog
+    into: post_btn
+  - action: shot
+    name: fb_post_ready.png
+  - action: click
+    pos: post_btn
+  - action: wait
+    seconds: 3
+  - action: shot
+    name: fb_post_done.png

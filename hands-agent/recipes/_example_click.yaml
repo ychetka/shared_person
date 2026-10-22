@@ -1,0 +1,16 @@
+# Minimal smoke-test recipe: takes a screenshot, moves mouse to a
+# located point, takes another. Safe to run anytime.
+name: example_click
+steps:
+  - action: shot
+    name: before.png
+  - action: locate
+    target: "browser tab bar"
+    hint: "top of screen"
+    into: pos
+  - action: move
+    pos: pos
+  - action: wait
+    seconds: 1
+  - action: shot
+    name: after.png
