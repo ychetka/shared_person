@@ -1,0 +1,17 @@
+# Secrets - never commit
+ENV
+.env
+.env.*
+*.key
+*.pem
+secrets/
+credentials*.json
+
+# OS / IDE / Python
+.DS_Store
+Thumbs.db
+*.swp
+__pycache__/
+*.pyc
+node_modules/
+*.log
