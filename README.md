@@ -41,9 +41,17 @@ rootless docker daemon - nothing from this project runs bare on the host
 
 ## Env
 
-All project secrets/config live in `../ENV` (gitignored):
+All project secrets/config live in `../ENV` (not part of this repo):
 `TELEGRAM_BOT_TOKEN` (@shared_person_bot), `OPENROUTER_API_KEY`,
-`GEMINI_API_KEY`, `GITHUB_PAT`, `N8N_OWNER_EMAIL`, `N8N_OWNER_PASSWORD`.
+`GEMINI_API_KEY`, `GITHUB_PAT`, `N8N_OWNER_EMAIL`, `N8N_OWNER_PASSWORD`,
+`VK_ACCESS_TOKEN`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`,
+`LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN`.
+
+## Platform access
+
+See `PLATFORM_ACCESS.md` - how VK/LinkedIn credentials were obtained
+(via the logged-in browser through CDP), how to re-issue them, API
+endpoints and caveats.
 
 ## Public ingress
 
