@@ -51,6 +51,7 @@ def pump(a, b):
 def handle(conn):
     try:
         up = socket.create_connection(("127.0.0.1", TARGET_PORT), timeout=10)
+        up.settimeout(None)  # connect timeout must not persist into relay
     except OSError:
         conn.close()
         return

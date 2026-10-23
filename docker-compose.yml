@@ -72,5 +72,5 @@ services:
       - RSS_PORT=8788
       - LLM_GATEWAY_URL=http://127.0.0.1:8787
     volumes:
-      - ./rss-reader/feeds.yaml:/app/feeds.yaml:ro
+      - ./rss-reader/feeds.yaml:/app/feeds.yaml
       - rss_state:/app/state
