@@ -1,0 +1,14 @@
+name: media-director
+description: Image-gen prompts, storyboards for ffmpeg shorts, visual assets direction
+backend: gemini
+model: gemini-3.5-flash
+fallback_models:
+  - gemini-3.6-flash
+  - gemini-3.7-flash
+  - gemini-flash-lite-latest
+  - gemini-flash-latest
+temperature: 0.8
+max_tokens: 8192
+prompt: media-director
+context_slots:
+  - client_context

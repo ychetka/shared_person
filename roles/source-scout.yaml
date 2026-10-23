@@ -1,0 +1,16 @@
+name: source-scout
+description: Curates RSS/feed source lists for profile promotion goals (tech + algo-trading + author stack)
+backend: gemini
+model: gemini-3.5-flash
+fallback_models:
+  - gemini-3.6-flash
+  - gemini-3.7-flash
+  - gemini-flash-lite-latest
+  - gemini-flash-latest
+temperature: 0.4
+max_tokens: 8192
+prompt: source-scout
+context_slots:
+  - client_context
+output:
+  type: json

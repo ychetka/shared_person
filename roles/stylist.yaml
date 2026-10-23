@@ -1,0 +1,12 @@
+name: stylist
+description: Author voice analysis from writing samples, style guide production
+backend: gemini
+model: gemini-3.5-flash
+fallback_models:
+  - gemini-3.6-flash
+  - gemini-3.7-flash
+  - gemini-flash-lite-latest
+  - gemini-flash-latest
+temperature: 0.3
+max_tokens: 8192
+prompt: stylist

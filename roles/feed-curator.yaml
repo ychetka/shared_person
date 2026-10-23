@@ -1,0 +1,11 @@
+name: feed-curator
+description: Scores and selects digest items by relevance to author positioning (called by rss-reader)
+backend: openrouter
+model: google/gemini-2.5-flash
+temperature: 0.2
+max_tokens: 4096
+prompt: feed-curator
+context_slots:
+  - client_context
+output:
+  type: json
