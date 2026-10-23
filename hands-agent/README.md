@@ -86,3 +86,9 @@ Poller consumes -> `queue/done/` or `queue/failed/` + in-memory `task_status`.
 - Bezier mouse + jittered typing/delays
 - Per-recipe screenshots into `queue/done/` for moderation audit trail
 - Vision-model `locate` degrades gracefully to template `find`
+
+## UX rules (mandatory in recipes)
+
+- **Ad/popup dismissal**: before acting, check for blocking overlays (ads, cookie banners, upsell modals) and close them first: click_dom on "Close/X/Not now/Не сейчас" or Escape. Insert a dismiss step at recipe start and after navigations.
+- **Verify before click**: dom_find > shot > click; after each mutating step take a shot.
+- **Moderation gate**: never publish without an explicit approve step (test posts = neutral AI-themed text + neutral image).

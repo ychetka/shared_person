@@ -1,11 +1,28 @@
 # Facebook personal-profile post recipe.
+# Verified end-to-end 2025-10-23 (DISPLAY :1, 1400x1050): real published
+# post with text + image on a personal page.
+#
 # DOM-read for targeting (getBoundingClientRect -> screen coords),
 # real OS input for all actions. Params: text, [image_path]
+#
+# Notes from the verified run:
+# - click_dom "нового" opens "Создать публикацию"; the editor autofocuses -
+#   type directly, no extra click needed.
+# - "Опубликовать" needs exact-match dom_rect (cdp.py): the feed share
+#   widget also contains "опубликовать" in its aria-label and substring
+#   matching hits it instead of the dialog button.
+# - The feed "Обновить" pill can overlap the composer text; if the open
+#   click lands on it the feed just refreshes - scroll top (ctrl+Home)
+#   and retry.
+# - Image attach: "Фото/видео" icon -> GTK file chooser -> ctrl+l -> type
+#   absolute path -> Return.
 name: facebook_post
 steps:
+  - action: shot
+    name: fb_0_start.png
   - action: click_dom
     url: facebook.com
-    target: "нового?"
+    target: "нового"
   - action: wait
     seconds: 2
   - action: type
@@ -13,11 +30,33 @@ steps:
   - action: wait
     seconds: 1
   - action: shot
-    name: fb_ready.png
+    name: fb_1_typed.png
+  # optional image attach (skipped when image_path param is empty)
+  - action: click_dom
+    url: facebook.com
+    target: "Фото/видео"
+    if: "{image_path}"
+  - action: wait
+    seconds: 3
+    if: "{image_path}"
+  - action: key
+    keys: ctrl+l
+    if: "{image_path}"
+  - action: type
+    text: "{image_path}"
+    if: "{image_path}"
+  - action: key
+    keys: Return
+    if: "{image_path}"
+  - action: wait
+    seconds: 4
+    if: "{image_path}"
+  - action: shot
+    name: fb_2_ready.png
   - action: click_dom
     url: facebook.com
     target: "Опубликовать"
   - action: wait
-    seconds: 3
+    seconds: 5
   - action: shot
-    name: fb_done.png
+    name: fb_3_done.png

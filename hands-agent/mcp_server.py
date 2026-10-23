@@ -82,9 +82,22 @@ def run_recipe(name, params):
         return {"error": "python3-yaml not installed"}
     ctx = dict(params)
     log_line = []
+
+    class _Safe(dict):
+        def __missing__(self, k):
+            return ""
+
     for i, st in enumerate(recipe.get("steps", [])):
-        st = {k: (v.format(**ctx) if isinstance(v, str) else v)
-              for k, v in st.items()}
+        # conditional step: `if: "{param}"` - skipped when the formatted
+        # value is empty/false (missing params format to "")
+        cond = st.get("if")
+        if cond is not None:
+            cv = str(cond).format_map(_Safe(ctx)).strip().lower()
+            if cv in ("", "0", "false", "no"):
+                log_line.append(f"step{i} skipped (if -> {cv!r})")
+                continue
+        st = {k: (v.format(**ctx) if isinstance(v, str) and k != "if" else v)
+              for k, v in st.items() if k != "if"}
         act = st.get("action")
         try:
             if act == "find":
@@ -100,7 +113,11 @@ def run_recipe(name, params):
                 ctx[st.get("into", "pos")] = (r["x"], r["y"])
             elif act in ("click", "move"):
                 fn = hands.click if act == "click" else hands.move
-                fn(st["x"], st["y"]) if "x" in st else fn(*ctx[st.get("pos", "pos")])
+                if "x" in st:
+                    fn(st["x"], st["y"])
+                else:
+                    x, y = ctx[st.get("pos", "pos")]
+                    fn(x + st.get("dx", 0), y + st.get("dy", 0))
             elif act == "type":
                 hands.type_text(st["text"])
             elif act == "key":

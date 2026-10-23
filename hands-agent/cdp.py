@@ -64,17 +64,27 @@ def dom_rect(url_substr, query):
     expr = """(() => {
       const q = %s.toLowerCase();
       const els = Array.from(document.querySelectorAll('button,a,[role=button],input,textarea,[contenteditable=true],[role=textbox],div[tabindex]'));
-      let best = null;
-      for (const e of els) {
-        const txt = ((e.innerText||'') + ' ' + (e.getAttribute('aria-label')||'') + ' ' + (e.placeholder||'')).toLowerCase();
-        if (!txt.includes(q)) continue;
+      const cand = (e) => {
+        const it = (e.innerText||'').trim().toLowerCase();
+        const al = (e.getAttribute('aria-label')||'').trim().toLowerCase();
+        const ph = (e.placeholder||'').trim().toLowerCase();
+        const exact = (it === q || al === q || ph === q);
+        const sub = !exact && ((it + ' ' + al + ' ' + ph).includes(q));
+        if (!exact && !sub) return null;
         const r = e.getBoundingClientRect();
-        if (r.width < 4 || r.height < 4) continue;
-        if (r.bottom < 0 || r.top > innerHeight) continue;
-        const area = r.width * r.height;
-        if (!best || area < best.a) best = {x: r.x + r.width/2, y: r.y + r.height/2, a: area, tag: e.tagName, t: (e.innerText||e.getAttribute('aria-label')||'').slice(0,60)};
+        if (r.width < 4 || r.height < 4) return null;
+        if (r.bottom < 0 || r.top > innerHeight) return null;
+        return {x: r.x + r.width/2, y: r.y + r.height/2, a: r.width*r.height, ex: exact, tag: e.tagName, t: (e.innerText||e.getAttribute('aria-label')||'').slice(0,60)};
+      };
+      let best = null, bestEx = null;
+      for (const e of els) {
+        const c = cand(e);
+        if (!c) continue;
+        if (c.ex) { if (!bestEx || c.a < bestEx.a) bestEx = c; }
+        else if (!best || c.a < best.a) best = c;
       }
-      return best ? JSON.stringify(best) : 'null';
+      const hit = bestEx || best;
+      return hit ? JSON.stringify(hit) : 'null';
     })()""" % json.dumps(query)
     raw = eval_js(ws, expr)
     if not raw or raw == "null":
