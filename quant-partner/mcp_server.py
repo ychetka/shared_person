@@ -11,20 +11,23 @@ ENV:
   GEMINI_API_KEY - Google AI Studio key (required)
   GEMINI_MODEL   - preferred model (default: gemini-3.5-flash)
 
-system prompt: role files live in prompts/<role>.txt next to this script
-(default role: prompts/strategist.txt, fallback: system_prompt.txt).
-Optional client context is loaded from QUANT_CONTEXT_FILE or
-../../client_context.md relative to this script (kept OUTSIDE the repo).
+system prompt: roles are manifests ../roles/<role>.yaml pointing to
+../prompts/<prompt>.txt, with model chain, temperature, max_tokens and
+context_slots (../context/<slot>.md). Optional client context is loaded
+from QUANT_CONTEXT_FILE or ../../client_context.md relative to this
+script (kept OUTSIDE the repo).
 POST to generativelanguage.googleapis.com goes strictly over IPv4
 (IPv6 routing to Google AI breaks POST sessions with 0 bytes - diagnosed).
 """
 import json, os, socket, sys, urllib.request
 
+import yaml
+
 BASE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(BASE, ".."))
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
-MODEL_MAIN = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
-MODELS = [MODEL_MAIN, "gemini-3.6-flash", "gemini-3.7-flash",
-          "gemini-flash-lite-latest", "gemini-flash-latest"]
+DEFAULT_MODELS = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash",
+                  "gemini-flash-lite-latest", "gemini-flash-latest"]
 TIMEOUT = 240
 
 def log(*a):
@@ -42,33 +45,53 @@ def _read(p):
     except OSError:
         return ""
 
-def system_prompt(role=None):
-    p = ""
-    if role:
-        safe = "".join(c for c in role if c.isalnum() or c in "-_")
-        p = _read(os.path.join(BASE, "prompts", f"{safe}.txt"))
-    if not p:
-        p = _read(os.path.join(BASE, "prompts", "strategist.txt"))
-    if not p:
-        p = _read(os.path.join(BASE, "system_prompt.txt"))
+def load_manifest(role=None):
+    """Return role manifest dict from ../roles/<role>.yaml (default: strategist)."""
+    safe = "".join(c for c in (role or "strategist") if c.isalnum() or c in "-_")
+    path = os.path.join(ROOT, "roles", f"{safe}.yaml")
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+    except OSError:
+        doc = {}
+    doc.setdefault("name", safe)
+    doc.setdefault("prompt", safe)
+    return doc
+
+def system_prompt(manifest):
+    parts = []
+    for slot in manifest.get("context_slots") or []:
+        body = _read(os.path.join(ROOT, "context", f"{slot}.md")) or \
+               _read(os.path.join(ROOT, "context", f"{slot}.txt"))
+        if body:
+            parts.append(f'<context name="{slot}">\n{body}\n</context>')
+    parts.append(_read(os.path.join(ROOT, "prompts",
+                                    f"{manifest['prompt']}.txt")))
+    p = "\n\n".join(x for x in parts if x)
     ctx_file = os.environ.get(
         "QUANT_CONTEXT_FILE",
-        os.path.join(BASE, "..", "..", "client_context.md"))
+        os.path.join(ROOT, "..", "client_context.md"))
     ctx = _read(ctx_file)
-    if ctx:
+    if ctx and "client_context" not in (manifest.get("context_slots") or []):
         p += "\n\n## Client context\n" + ctx
     return p
 
 def gemini(contents, role=None):
+    manifest = load_manifest(role)
     payload = {
         "contents": contents,
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192},
+        "generationConfig": {
+            "temperature": manifest.get("temperature", 0.3),
+            "maxOutputTokens": manifest.get("max_tokens", 8192),
+        },
     }
-    sp = system_prompt(role)
+    sp = system_prompt(manifest)
     if sp:
         payload["systemInstruction"] = {"parts": [{"text": sp}]}
+    models = [os.environ.get("GEMINI_MODEL") or manifest.get("model")]
+    models += manifest.get("fallback_models") or DEFAULT_MODELS
     last_err = "no models"
-    for model in MODELS:
+    for model in models:
         if not model:
             continue
         try:
@@ -103,7 +126,7 @@ TOOLS = [
                 "context": {"type": "string",
                             "description": "Optional: data/stats related to the question"},
                 "role": {"type": "string",
-                         "description": "Optional: role file name from prompts/<role>.txt (default: strategist)"},
+                         "description": "Optional: role manifest name from roles/<role>.yaml (default: strategist)"},
             },
             "required": ["question"],
         },
@@ -128,7 +151,7 @@ TOOLS = [
                     },
                 },
                 "role": {"type": "string",
-                         "description": "Optional: role file name from prompts/<role>.txt (default: strategist)"},
+                         "description": "Optional: role manifest name from roles/<role>.yaml (default: strategist)"},
             },
             "required": ["messages"],
         },

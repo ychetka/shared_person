@@ -1,0 +1,25 @@
+{
+  "name": "llm-gateway",
+  "version": "0.1.0",
+  "description": "Role-manifest LLM gateway: single HTTP entry for all model calls",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts",
+    "test": "tsx test/run.ts"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "express": "^4.21.2",
+    "lodash": "^4.17.21",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/lodash": "^4.17.7",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
