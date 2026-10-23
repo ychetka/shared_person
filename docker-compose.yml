@@ -9,6 +9,7 @@ name: shared-person
 volumes:
   n8n_storage:
   rss_state:
+  edge_data:
 
 services:
   n8n:
@@ -57,6 +58,21 @@ services:
       - CONTEXT_DIR=/app/code/context
     volumes:
       - ./:/app/code:ro
+
+  edge:
+    image: n8n-local:latest
+    container_name: shared-person-edge
+    restart: always
+    network_mode: host
+    user: "0"
+    security_opt:
+      - apparmor=unconfined
+    environment:
+      - XDG_DATA_HOME=/data
+    entrypoint: ["/edge/caddy", "run", "--config", "/edge/Caddyfile", "--adapter", "caddyfile"]
+    volumes:
+      - ./edge:/edge:ro
+      - edge_data:/data
 
   rss-reader:
     image: shared-person/rss-reader:latest

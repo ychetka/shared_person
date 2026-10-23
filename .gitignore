@@ -24,3 +24,5 @@ llm-gateway/dist/
 rss-reader/node_modules/
 rss-reader/dist/
 rss-reader/state/
+edge/caddy
+edge/data/

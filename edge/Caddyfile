@@ -1,0 +1,16 @@
+# shared-person edge - TLS termination for n8n UI + webhooks.
+# Runs inside docker (host netns) so the whole stack stays in containers.
+# ACME HTTP-01 comes in on :80 (Calix -> MikroTik dst-nat -> this host).
+
+{
+	email varenikx@gmail.com
+}
+
+shared-person.opticode.su:8443 {
+	tls {
+		issuer acme {
+			disable_tlsalpn_challenge
+		}
+	}
+	reverse_proxy 127.0.0.1:5780
+}

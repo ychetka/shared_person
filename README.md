@@ -7,8 +7,12 @@ rootless docker daemon - nothing from this project runs bare on the host
 ## Stack layout
 
 - `docker-compose.yml` - the `shared-person` project: n8n (:5780),
-  llm-gateway (:8787), rss-reader (:8788). Start:
+  llm-gateway (:8787), rss-reader (:8788), edge (:8443 + :80 ACME). Start:
   `docker compose --env-file ../ENV up -d`
+- `edge/` - Caddy (static binary) terminating TLS for
+  `shared-person.opticode.su:8443` -> n8n :5780; gets a Let's Encrypt
+  cert via HTTP-01 on :80. Cert material lives in the `edge_data`
+  volume (`XDG_DATA_HOME=/data`).
 - `tools/port_fwd.sh` - bridges host ports into the rootless inner netns
   (shared dockerd runs its own netns; without forwards host cannot reach
   containers). Needs `sudo -n`. Re-run if rootless-docker restarts.
@@ -39,4 +43,13 @@ rootless docker daemon - nothing from this project runs bare on the host
 
 All project secrets/config live in `../ENV` (gitignored):
 `TELEGRAM_BOT_TOKEN` (@shared_person_bot), `OPENROUTER_API_KEY`,
-`GEMINI_API_KEY`, `GITHUB_PAT`.
+`GEMINI_API_KEY`, `GITHUB_PAT`, `N8N_OWNER_EMAIL`, `N8N_OWNER_PASSWORD`.
+
+## Public ingress
+
+`https://shared-person.opticode.su:8443` -> Calix port-forward >
+MikroTik dst-nat > host :8443 > port_fwd > inner `edge` (Caddy) > n8n.
+A-record at reg.ru points `shared-person` at 37.26.135.143. Port 443 is
+VPN - do not use it. `:80` is forwarded for ACME HTTP-01 renewals;
+the MikroTik scheduler script `le-renewal-weekly` briefly disables our
+dst-nat on :80 when the router itself renews its own LE cert.

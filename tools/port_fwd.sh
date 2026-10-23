@@ -12,7 +12,7 @@
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 INNER_PID_FILE="/home/alexandr/projects/trade-ai-analitic/docker-static/inner.pid"
-PORTS="5780 8787 8788"   # n8n UI/webhooks, llm-gateway, rss-reader
+PORTS="5780 8787 8788 8443 80"   # n8n UI, llm-gateway, rss-reader, edge TLS, ACME http-01
 MARK="shared-person port_fwd"
 
 if [ "${1:-}" = "stop" ]; then
