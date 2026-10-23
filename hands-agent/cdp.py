@@ -77,9 +77,11 @@ def dom_rect(url_substr, query):
       return best ? JSON.stringify(best) : 'null';
     })()""" % json.dumps(query)
     raw = eval_js(ws, expr)
-    if not raw:
+    if not raw or raw == "null":
         return None
     el = json.loads(raw)
+    if not isinstance(el, dict):
+        return None
     dpr = off.get("dpr", 1) or 1
     return {"x": round(el["x"] * dpr + off["sx"] + off["ox"]),
             "y": round(el["y"] * dpr + off["sy"] + off["oy"]),
