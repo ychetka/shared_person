@@ -1,8 +1,9 @@
-FROM node:24-alpine
+# Base is the locally-flattened image (rootless docker cannot pull
+# multi-uid layers; n8n-local ships node v26 + npm).
+# Build artifacts are produced on the host: npm install + tsc.
+FROM n8n-local:latest
 WORKDIR /app
-COPY package.json tsconfig.json ./
-RUN npm install
-COPY src ./src
-RUN npm run build
-# roles/, prompts/, context/ are mounted at runtime
-CMD ["node", "dist/server.js"]
+COPY node_modules ./node_modules
+COPY dist ./dist
+# roles/, prompts/, context/ are mounted read-only at runtime
+ENTRYPOINT ["node", "dist/server.js"]

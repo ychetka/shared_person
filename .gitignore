@@ -19,3 +19,8 @@ node_modules/
 # node
 llm-gateway/node_modules/
 llm-gateway/dist/
+
+# compose/build artifacts
+rss-reader/node_modules/
+rss-reader/dist/
+rss-reader/state/

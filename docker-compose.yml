@@ -1,0 +1,76 @@
+# shared-person stack - self-contained, does not touch other projects.
+# Services run on the local rootless docker (single-uid userns):
+# images must be flattened imports (see n8n-local / docs/deploy.md).
+# Build steps (npm install, tsc) run on the HOST - containers only COPY
+# prebuilt artifacts, so no network is needed inside `docker build`.
+
+name: shared-person
+
+volumes:
+  n8n_storage:
+  rss_state:
+
+services:
+  n8n:
+    image: n8n-local:latest
+    container_name: shared-person-n8n
+    restart: always
+    network_mode: host
+    user: "0"
+    security_opt:
+      - apparmor=unconfined
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5780
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
+      - N8N_RUNNERS_ENABLED=true
+      # Default broker port 5679 is taken by the crypto-bot instance.
+      - N8N_RUNNERS_BROKER_PORT=5781
+      - NODE_FUNCTION_ALLOW_BUILTIN=fs
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_SECURE_COOKIE=false
+      # Webhooks published at https://shared-person.opticode.su (edge proxy).
+      - WEBHOOK_URL=https://shared-person.opticode.su:8443/
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      - n8n_storage:/home/node/.n8n
+
+  llm-gateway:
+    image: shared-person/llm-gateway:latest
+    build:
+      context: ./llm-gateway
+    container_name: shared-person-llm-gateway
+    restart: always
+    network_mode: host
+    user: "0"
+    security_opt:
+      - apparmor=unconfined
+    environment:
+      - LLM_GATEWAY_PORT=8787
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ROLES_DIR=/app/code/roles
+      - PROMPTS_DIR=/app/code/prompts
+      - CONTEXT_DIR=/app/code/context
+    volumes:
+      - ./:/app/code:ro
+
+  rss-reader:
+    image: shared-person/rss-reader:latest
+    build:
+      context: ./rss-reader
+    container_name: shared-person-rss-reader
+    restart: always
+    network_mode: host
+    user: "0"
+    security_opt:
+      - apparmor=unconfined
+    environment:
+      - RSS_PORT=8788
+      - LLM_GATEWAY_URL=http://127.0.0.1:8787
+    volumes:
+      - ./rss-reader/feeds.yaml:/app/feeds.yaml:ro
+      - rss_state:/app/state

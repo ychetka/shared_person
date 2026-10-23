@@ -1,0 +1,35 @@
+# Seed list - revised by the source-scout role (run through llm-gateway).
+# weights: 0-1 expected value for the author's positioning.
+feeds:
+  - name: Hacker News (frontpage)
+    url: https://hnrss.org/frontpage
+    tags: [tech, community]
+    weight: 0.7
+  - name: Dev.to - TypeScript
+    url: https://dev.to/feed/tag/typescript
+    tags: [frontend, typescript]
+    weight: 0.6
+  - name: Dev.to - AI
+    url: https://dev.to/feed/tag/ai
+    tags: [ai, agents]
+    weight: 0.6
+  - name: n8n blog
+    url: https://blog.n8n.io/rss/
+    tags: [automation, n8n]
+    weight: 0.9
+  - name: Habr - TypeScript
+    url: https://habr.com/ru/rss/hubs/typescript/articles/?fl=ru
+    tags: [frontend, ru]
+    weight: 0.5
+  - name: Habr - AI
+    url: https://habr.com/ru/rss/hubs/artificial_intelligence/articles/?fl=ru
+    tags: [ai, ru]
+    weight: 0.5
+  - name: React blog
+    url: https://react.dev/rss.xml
+    tags: [frontend, react]
+    weight: 0.8
+  - name: GitHub Blog - engineering
+    url: https://github.blog/engineering/feed/
+    tags: [tech, engineering]
+    weight: 0.6

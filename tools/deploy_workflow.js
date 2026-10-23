@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+// deploy_workflow.js - insert or update an n8n workflow directly in the
+// n8n SQLite DB (n8n REST API needs auth; the sqlite patch path is proven).
+//
+// Run with the n8n container STOPPED:
+//   node tools/deploy_workflow.js workflows/media-trend-scout.json [--update]
+//   node tools/deploy_workflow.js <file.json> --db=/path/database.sqlite
+//
+// Workflow file format:
+//   { "name": "...", "active": true,
+//     "nodes": [...], "connections": {...},
+//     "settings": {...} (optional),
+//     "triggers": [ {"node": "Webhook X", "path": "my-hook"} ]  (optional)
+//   }
+//
+// Activation pointers (n8n 2.x): workflow_entity.activeVersionId,
+// workflow_published_version.publishedVersionId, plus for triggers:
+// webhook_entity rows and workflow_publication_trigger_status.
+// Credentials: node credentials in the JSON reference credential names;
+// shared_workflow row is created for the owner project automatically.
+
+const { DatabaseSync } = require('node:sqlite');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const arg = (k) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').split('=')[1];
+const file = process.argv.find((a) => a.endsWith('.json'));
+const UPDATE = process.argv.includes('--update');
+const DB = arg('db') || path.join(
+  process.env.HOME || '',
+  'projects/trade-ai-analitic/docker-data/volumes/shared-person_n8n_storage/_data/.n8n/database.sqlite');
+
+if (!file) {
+  console.error('usage: node tools/deploy_workflow.js <workflow.json> [--update] [--db=path]');
+  process.exit(1);
+}
+const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+const { name, nodes, connections } = spec;
+const settings = spec.settings ?? { executionOrder: 'v1' };
+const triggers = spec.triggers ?? [];
+const active = spec.active === false ? 0 : 1;
+
+const now = new Date().toISOString().replace('T', ' ').slice(0, 23);
+const VER_ID = crypto.randomUUID();
+const nodesJson = JSON.stringify(nodes);
+const connJson = JSON.stringify(connections);
+
+const db = new DatabaseSync(DB);
+db.exec('BEGIN');
+try {
+  if (UPDATE) {
+    const wf = db.prepare('SELECT id FROM workflow_entity WHERE name = ?').get(name);
+    if (!wf) { console.error(`workflow "${name}" not found - run without --update first`); process.exit(1); }
+    db.prepare(`INSERT INTO workflow_history
+      (versionId,workflowId,authors,createdAt,updatedAt,nodes,connections,name,autosaved)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(VER_ID, wf.id, 'deploy_workflow.js --update', now, now, nodesJson, connJson, name, 0);
+    db.prepare(`UPDATE workflow_entity SET nodes=?,connections=?,versionId=?,activeVersionId=?,updatedAt=? WHERE id=?`)
+      .run(nodesJson, connJson, VER_ID, VER_ID, now, wf.id);
+    db.prepare(`UPDATE workflow_published_version SET publishedVersionId=?,updatedAt=? WHERE workflowId=?`)
+      .run(VER_ID, now, wf.id);
+    db.prepare(`UPDATE workflow_publication_trigger_status SET versionId=?,updatedAt=? WHERE workflowId=?`)
+      .run(VER_ID, now, wf.id);
+    console.log('updated workflow', wf.id, 'version', VER_ID);
+  } else {
+    const WF_ID = crypto.randomUUID().slice(0, 16);
+    // cyclic FK entity<->history: entity first with NULL, then history, then back-update
+    db.prepare(`INSERT INTO workflow_entity
+      (id,name,active,nodes,connections,settings,versionId,triggerCount,createdAt,updatedAt,isArchived,versionCounter,activeVersionId)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)`)
+      .run(WF_ID, name, active, nodesJson, connJson,
+        JSON.stringify(settings), VER_ID, triggers.length, now, now, 0, 1);
+    db.prepare(`INSERT INTO workflow_history
+      (versionId,workflowId,authors,createdAt,updatedAt,nodes,connections,name,autosaved)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(VER_ID, WF_ID, 'deploy_workflow.js', now, now, nodesJson, connJson, name, 0);
+    db.prepare(`UPDATE workflow_entity SET activeVersionId=? WHERE id=?`).run(VER_ID, WF_ID);
+    db.prepare(`INSERT INTO workflow_published_version
+      (workflowId,publishedVersionId,createdAt,updatedAt) VALUES (?,?,?,?)`)
+      .run(WF_ID, VER_ID, now, now);
+
+    // owner binding - required, else EntityNotFoundError on publish
+    const proj = db.prepare(
+      `SELECT id FROM project WHERE type='personal' LIMIT 1`).get();
+    if (proj) {
+      db.prepare(`INSERT INTO shared_workflow
+        (createdAt,updatedAt,role,workflowId,projectId) VALUES (?,?,?,?,?)`)
+        .run(now, now, 'workflow:owner', WF_ID, proj.id);
+    }
+
+    // trigger registration
+    for (const t of triggers) {
+      const node = nodes.find((n) => n.name === t.node);
+      if (t.path) {
+        const webhookId = node?.webhookId || node?.parameters?.webhookId || crypto.randomUUID();
+        const variant = `${WF_ID}/${encodeURIComponent(t.node)}/${t.path}`;
+        for (const p of [t.path, variant]) {
+          db.prepare(`INSERT OR REPLACE INTO webhook_entity
+            (webhookPath,method,node,webhookId,workflowId,pathLength,createdAt,updatedAt)
+            VALUES (?,?,?,?,?,?,?,?)`)
+            .run(p, t.method || 'POST', t.node, webhookId, WF_ID, t.path.length, now, now);
+        }
+      }
+      db.prepare(`INSERT OR REPLACE INTO workflow_publication_trigger_status
+        (workflowId,nodeName,nodeType,versionId,status,createdAt,updatedAt)
+        VALUES (?,?,?,?,?,?,?)`)
+        .run(WF_ID, t.node, t.path ? 'persisted' : 'in-memory', VER_ID, 'activated', now, now);
+    }
+    console.log('inserted workflow', WF_ID, 'version', VER_ID, 'triggers', triggers.length);
+  }
+  db.exec('COMMIT');
+} catch (e) {
+  db.exec('ROLLBACK');
+  throw e;
+} finally {
+  db.close();
+}
+console.log('done:', name);
