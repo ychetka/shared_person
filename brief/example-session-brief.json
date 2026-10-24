@@ -1,0 +1,30 @@
+{
+  "source_type": "session",
+  "topic": "Rootless n8n trading pipeline on a sudo-less office box",
+  "facts": [
+    "Host had no root/sudo - rootless Docker 29.8.1 assembled from static binaries inside a single-uid user namespace (unshare -Ur)",
+    "Outbound NAT via slirp4netns; inbound forwarding via self-written port_fwd.py since --bridge=none",
+    "n8n 2.41.3, Node 24.21.0 via nvm, localtunnel 2.0.2 for the TradingView webhook",
+    "Order math fully deterministic in a JS Code node: LIMIT=(POC+OB)/2, SL=OB-offset, QTY=floor(risk/(limit-stop)*100)/100 - the LLM never computes numbers",
+    "Fixed risk per setup: 100 USDT, limit-only entries inside the stop pool",
+    "OpenRouter free tier: 50 requests/day, responses 15-120 s, retry up to 3-4 min under rate limit",
+    "LLM fallback chain of 3 free models after meta-llama/llama-3-8b-instruct:free returned 404 'No endpoints found'",
+    "Bybit account-ratio API polled at period=5min for live long/short sentiment"
+  ],
+  "arc": {
+    "plan": "TradingView Smart Money alert -> ready-made order verdict on the phone",
+    "attempt": "LLM in the loop for the audit line on top of the n8n pipeline",
+    "failure": "Pinned model deleted from OpenRouter (404); TradingView JSON template broke twice on unescaped quotes and unsupported placeholders",
+    "fix": "3-model fallback cascade + deterministic JS for all math, LLM reduced to one audit line with onError fallback",
+    "outcome": "Pipeline live on office PC; LLM hallucinations in numbers excluded by construction"
+  },
+  "media": [],
+  "platform_fit": ["linkedin", "vk"],
+  "retro": false,
+  "forbidden_claims": [
+    "Any profit/win-rate figures - none were measured",
+    "Public tunnel URL, chat_id, tokens, home paths",
+    "Employer name or internal hostnames"
+  ],
+  "author_notes": "Lead with the no-sudo constraint - it is the most relatable pain. Keep the 'math taken away from the LLM' decision central; that is the engineering takeaway."
+}

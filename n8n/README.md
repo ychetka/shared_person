@@ -60,6 +60,14 @@ chat_id is not resolved yet. VK group top-posts are a planned extension
 feedback?, draft_id?, image?}`. `platform`: linkedin | facebook | vk |
 all.
 
+Brief gate (source > brief > draft, see `../brief/README.md`):
+`context` is expected to carry the serialized content brief or raw
+source material. If `context` is missing, shorter than 200 chars, or
+contains fewer than 2 digit-bearing tokens (versions, counts,
+percents), generation is skipped, `stage: 'brief-gate'` is logged, and
+the resolved Telegram chat gets "no material in brief". This applies to
+rewrite requests too (their context is the previous draft).
+
 Passes (all LLM calls go through llm-gateway `POST :8787/run`):
 
 1. `extract-facts` (Gemini Flash) - raw context > strict JSON facts
