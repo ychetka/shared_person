@@ -1,7 +1,11 @@
 name: writer-vk
 description: Pass-2 writer - VK RU dev-log post from extracted facts
 backend: openrouter
-model: anthropic/claude-sonnet-4.5
+model: google/gemini-2.5-flash
+fallback_models:
+  - nvidia/nemotron-3-ultra-550b-a55b:free
+  - nvidia/nemotron-3-super-120b-a12b:free
+  - google/gemma-4-31b-it:free
 temperature: 0.7
 max_tokens: 4096
 prompt: writer-vk
