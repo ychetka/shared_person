@@ -1,0 +1,103 @@
+{
+  "name": "sp-trend-scout",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "days", "daysInterval": 1, "triggerAtHour": 9, "triggerAtMinute": 0 }
+          ]
+        }
+      },
+      "id": "ts-sched",
+      "name": "Daily 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8788/curate?since=24h",
+        "sendBody": false,
+        "options": { "timeout": 180000 }
+      },
+      "id": "ts-curate",
+      "name": "Curate Feed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require('fs');\nconst STATE = '/home/node/.n8n/state';\nfs.mkdirSync(STATE, { recursive: true });\nconst SEEN = STATE + '/trend_seen.json';\nlet seen = {};\ntry { seen = JSON.parse(fs.readFileSync(SEEN, 'utf8')); } catch (e) {}\nconst now = Date.now();\nfor (const k of Object.keys(seen)) {\n  if (now - seen[k] > 7 * 86400e3) delete seen[k];\n}\nlet chatId = null;\ntry { chatId = JSON.parse(fs.readFileSync(STATE + '/tg.json', 'utf8')).chat_id; } catch (e) {}\n\nconst items = ($input.first().json.items || []);\nconst fresh = items.filter(i => i.id && !seen[i.id]);\nconst top = fresh.slice(0, 8);\nconst lines = top.map((i, n) =>\n  (n + 1) + '. [' + (typeof i.score === 'number' ? i.score.toFixed(2) : '-') + '] ' + i.title +\n  '\\n' + (i.source || '') + ' - ' + (i.url || ''));\nconst text = lines.length\n  ? 'Trend digest ' + new Date().toISOString().slice(0, 10) + ' (' + fresh.length + ' new)\\n\\n' + lines.join('\\n\\n')\n  : '';\nfor (const i of fresh) seen[i.id] = now;\nfs.writeFileSync(SEEN, JSON.stringify(seen));\nreturn [{ json: { text: text, chat_id: chatId, count: fresh.length } }];"
+      },
+      "id": "ts-format",
+      "name": "Format Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.text }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.chat_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ts-if",
+      "name": "Has News",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [720, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chat_id, text: $json.text, disable_web_page_preview: true }) }}",
+        "options": {}
+      },
+      "id": "ts-send",
+      "name": "Send Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 0]
+    }
+  ],
+  "connections": {
+    "Daily 09:00": {
+      "main": [[{ "node": "Curate Feed", "type": "main", "index": 0 }]]
+    },
+    "Curate Feed": {
+      "main": [[{ "node": "Format Digest", "type": "main", "index": 0 }]]
+    },
+    "Format Digest": {
+      "main": [[{ "node": "Has News", "type": "main", "index": 0 }]]
+    },
+    "Has News": {
+      "main": [[{ "node": "Send Digest", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "triggers": [{ "node": "Daily 09:00" }]
+}

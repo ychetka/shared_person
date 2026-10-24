@@ -1,5 +1,8 @@
 # n8n-workflows
 
+NOTE: the content-pipeline workflows moved to `../n8n/workflows/` -
+see `../n8n/README.md`. This directory is kept for the deploy docs below.
+
 Exported workflow JSON specs live in `workflows/`. Deploy them into the
 project n8n instance (`shared-person-n8n`, data volume
 `shared-person_n8n_storage`) with the offline SQLite deployer:

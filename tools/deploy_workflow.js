@@ -89,6 +89,19 @@ try {
         .run(now, now, 'workflow:owner', WF_ID, proj.id);
     }
 
+    // schema-adaptive insert: keep only columns the table actually has
+    // (n8n versions differ: webhook_entity may lack createdAt/updatedAt,
+    // trigger status uses nodeId+triggerKind vs nodeName+nodeType)
+    const colsOf = (table) =>
+      new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    const ins = (table, row) => {
+      const cols = colsOf(table);
+      const keys = Object.keys(row).filter((k) => cols.has(k));
+      db.prepare(`INSERT OR REPLACE INTO ${table} (${keys.join(',')})
+        VALUES (${keys.map(() => '?').join(',')})`)
+        .run(...keys.map((k) => row[k]));
+    };
+
     // trigger registration
     for (const t of triggers) {
       const node = nodes.find((n) => n.name === t.node);
@@ -96,16 +109,23 @@ try {
         const webhookId = node?.webhookId || node?.parameters?.webhookId || crypto.randomUUID();
         const variant = `${WF_ID}/${encodeURIComponent(t.node)}/${t.path}`;
         for (const p of [t.path, variant]) {
-          db.prepare(`INSERT OR REPLACE INTO webhook_entity
-            (webhookPath,method,node,webhookId,workflowId,pathLength,createdAt,updatedAt)
-            VALUES (?,?,?,?,?,?,?,?)`)
-            .run(p, t.method || 'POST', t.node, webhookId, WF_ID, t.path.length, now, now);
+          ins('webhook_entity', {
+            webhookPath: p, method: t.method || 'POST', node: t.node,
+            webhookId, workflowId: WF_ID, pathLength: t.path.length,
+            createdAt: now, updatedAt: now,
+          });
         }
       }
-      db.prepare(`INSERT OR REPLACE INTO workflow_publication_trigger_status
-        (workflowId,nodeName,nodeType,versionId,status,createdAt,updatedAt)
-        VALUES (?,?,?,?,?,?,?)`)
-        .run(WF_ID, t.node, t.path ? 'persisted' : 'in-memory', VER_ID, 'activated', now, now);
+      ins('workflow_publication_trigger_status', {
+        workflowId: WF_ID,
+        nodeId: node?.id || t.node,
+        nodeName: t.node,
+        nodeType: t.path ? 'persisted' : 'in-memory',
+        triggerKind: t.path ? 'persisted' : 'in-memory',
+        versionId: VER_ID,
+        status: 'activated',
+        createdAt: now, updatedAt: now,
+      });
     }
     console.log('inserted workflow', WF_ID, 'version', VER_ID, 'triggers', triggers.length);
   }

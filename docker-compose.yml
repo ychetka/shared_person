@@ -30,14 +30,24 @@ services:
       # Default broker port 5679 is taken by the crypto-bot instance.
       - N8N_RUNNERS_BROKER_PORT=5781
       - NODE_FUNCTION_ALLOW_BUILTIN=fs
+      # Code nodes read secrets via $env (TG token, platform API keys)
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - N8N_DIAGNOSTICS_ENABLED=false
       - N8N_SECURE_COOKIE=false
       # Webhooks published at https://shared-person.opticode.su (edge proxy).
       - WEBHOOK_URL=https://shared-person.opticode.su:8443/
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # platform tokens for the publish workflow (optional - drivers
+      # fall back to the hands-agent queue when a token is absent)
+      - VK_ACCESS_TOKEN=${VK_ACCESS_TOKEN:-}
+      - VK_USER_ID=${VK_USER_ID:-}
+      - LINKEDIN_ACCESS_TOKEN=${LINKEDIN_ACCESS_TOKEN:-}
+      - LINKEDIN_PERSON_URN=${LINKEDIN_PERSON_URN:-}
     volumes:
       - n8n_storage:/home/node/.n8n
+      # hands-agent task queue (n8n drops publish tasks into inbox/)
+      - ./hands-agent/queue:/home/node/hands-queue
 
   llm-gateway:
     image: shared-person/llm-gateway:latest

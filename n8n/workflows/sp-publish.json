@@ -1,0 +1,38 @@
+{
+  "name": "sp-publish",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 2 }
+          ]
+        }
+      },
+      "id": "pub-sched",
+      "name": "Every 2 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require('fs');\nconst ENV = (n) => (typeof $env !== 'undefined' && $env[n]) || '';\nconst Q = '/home/node/.n8n/queue/publish';\nconst HANDS = '/home/node/hands-queue/inbox';\nconst LOGD = '/home/node/.n8n/logs';\nfor (const d of [Q, Q + '/done', Q + '/failed', LOGD, HANDS]) {\n  try { fs.mkdirSync(d, { recursive: true }); } catch (e) {}\n}\nconst token = ENV('TELEGRAM_BOT_TOKEN');\nlet chatId = null;\ntry { chatId = JSON.parse(fs.readFileSync('/home/node/.n8n/state/tg.json', 'utf8')).chat_id; } catch (e) {}\nconst tg = (m, b) => this.helpers.httpRequest({\n  method: 'POST', url: 'https://api.telegram.org/bot' + token + '/' + m, body: b, json: true\n});\nconst http = (o) => this.helpers.httpRequest(o);\nconst log = (r) => fs.appendFileSync(LOGD + '/publish.jsonl',\n  JSON.stringify({ ts: new Date().toISOString(), ...r }) + '\\n');\n\nconst RECIPE = {\n  facebook: 'facebook_post',\n  linkedin: 'linkedin_post',\n  instagram: 'instagram_post',\n  tiktok: 'tiktok_post'\n};\n\nasync function publishTask(t) {\n  const p = String(t.platform || '').toLowerCase();\n  // VK personal wall via official API when the standalone token exists\n  if (p === 'vk' && ENV('VK_ACCESS_TOKEN')) {\n    const r = await http({\n      method: 'GET', json: true,\n      url: 'https://api.vk.com/method/wall.post?v=5.199&access_token=' +\n        encodeURIComponent(ENV('VK_ACCESS_TOKEN')) +\n        '&message=' + encodeURIComponent(t.text)\n    });\n    if (r && r.error) throw new Error('vk: ' + JSON.stringify(r.error).slice(0, 200));\n    return 'vk api wall.post';\n  }\n  // LinkedIn Community Management API when the token exists, else hands-agent\n  if (p === 'linkedin' && ENV('LINKEDIN_ACCESS_TOKEN') && ENV('LINKEDIN_PERSON_URN')) {\n    await http({\n      method: 'POST', url: 'https://api.linkedin.com/rest/posts',\n      headers: {\n        'Authorization': 'Bearer ' + ENV('LINKEDIN_ACCESS_TOKEN'),\n        'X-Restli-Protocol-Version': '2.0.0'\n      },\n      body: {\n        author: ENV('LINKEDIN_PERSON_URN'), commentary: t.text, visibility: 'PUBLIC',\n        distribution: { feedDistribution: 'MAIN_FEED', targetEntities: [], thirdPartyDistributionChannels: [] },\n        lifecycleState: 'PUBLISHED', isReshareDisabledByAuthor: false\n      },\n      json: true\n    });\n    return 'linkedin api';\n  }\n  // hands-agent driver: FB, IG, TikTok, LinkedIn fallback\n  const recipe = RECIPE[p];\n  if (!recipe) throw new Error('no driver for platform ' + p);\n  fs.writeFileSync(HANDS + '/' + t.id + '.json', JSON.stringify({\n    recipe: recipe,\n    params: { text: t.text, image: t.image || '', image_path: t.image || '' }\n  }, null, 2));\n  return 'hands-agent queue (' + recipe + ')';\n}\n\nconst out = [];\nconst files = fs.existsSync(Q) ? fs.readdirSync(Q).filter(f => f.endsWith('.json')) : [];\nfor (const f of files) {\n  const file = Q + '/' + f;\n  let t;\n  try {\n    t = JSON.parse(fs.readFileSync(file, 'utf8'));\n  } catch (e) {\n    fs.renameSync(file, Q + '/failed/' + f);\n    log({ file: f, error: 'bad json' });\n    continue;\n  }\n  try {\n    const via = await publishTask(t);\n    fs.renameSync(file, Q + '/done/' + f);\n    log({ id: t.id, platform: t.platform, via: via, status: 'queued' });\n    out.push(t.id + ' ' + t.platform + ' -> ' + via);\n  } catch (e) {\n    fs.renameSync(file, Q + '/failed/' + f);\n    log({ id: t.id, platform: t.platform, status: 'failed', error: String(e).slice(0, 300) });\n    out.push(t.id + ' ' + t.platform + ' FAILED: ' + String(e).slice(0, 150));\n  }\n}\nif (out.length && chatId && token) {\n  try { await tg('sendMessage', { chat_id: chatId, text: 'Publish queue:\\n' + out.join('\\n') }); } catch (e) {}\n}\nreturn [{ json: { processed: out.length, results: out } }];"
+      },
+      "id": "pub-code",
+      "name": "Publish Tick",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0]
+    }
+  ],
+  "connections": {
+    "Every 2 min": {
+      "main": [[{ "node": "Publish Tick", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "triggers": [{ "node": "Every 2 min" }]
+}
