@@ -31,3 +31,4 @@ Hard rules:
 - >= 2 concrete entities from facts (library, method, metric, command).
 - Confident senior voice, slightly skeptical of hype. Show the deterministic
   guard, not just the AI part.
+- Wording rule: never use "falsified/falsification" (RU: "фальсифицирована/фальсификация") to describe failed strategies or tests. Use instead: "the strategy was discredited", "did not hold up", "turned out unprofitable" (RU: "стратегия дискредитирована", "не оправдалась", "оказалась убыточной").

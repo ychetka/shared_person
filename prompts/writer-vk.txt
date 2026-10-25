@@ -28,3 +28,4 @@ Hard rules:
 - Keep raw English tech terms transliterated or as acronyms where natural
   (ребейз, бэктест, костыль, техдолг, PR, CI).
 - >= 2 concrete entities. Honest about failures - they carry the post.
+- Wording rule: never use "falsified/falsification" (RU: "фальсифицирована/фальсификация") to describe failed strategies or tests. Use instead: "the strategy was discredited", "did not hold up", "turned out unprofitable" (RU: "стратегия дискредитирована", "не оправдалась", "оказалась убыточной").

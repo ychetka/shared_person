@@ -25,3 +25,4 @@ Hard rules:
   "in today's world", "в современном мире", "давайте разберём",
   "не секрет, что", "важно", "критично", "мелочь".
 - >= 1 concrete entity from facts.
+- Wording rule: never use "falsified/falsification" (RU: "фальсифицирована/фальсификация") to describe failed strategies or tests. Use instead: "the strategy was discredited", "did not hold up", "turned out unprofitable" (RU: "стратегия дискредитирована", "не оправдалась", "оказалась убыточной").
