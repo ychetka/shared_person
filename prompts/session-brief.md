@@ -22,7 +22,8 @@ lie. Verify everything.
 2. In `{{REPO_PATH}}` read, if present: `AGENTS.md`, `TASKS.md`,
    `README*`, `docs/`. Run `git log --oneline -30` (more if the arc
    needs it) and skim `git show` of the commits that matter. Check
-   GitHub issues if the repo has them.
+   GitHub issues/PRs if the repo has them (`git remote -v` gives the
+   public URL; `gh issue list` or the GitHub API lists tasks).
 3. **Verify every fact against the code.** Named libraries must appear
    in manifests/imports. Versions must match package files or actual
    binary versions mentioned in the history. Numbers (ports, limits,
@@ -32,12 +33,22 @@ lie. Verify everything.
 4. Collect the arc: plan > attempt > failure > fix > outcome. Failures
    and falsified approaches are the core of the story - do not sanitize
    them.
-5. If the post could use images, list real local paths in `media[]`
-   (e.g. under `materials/photos/`). Paths must exist - check with ls.
-6. Fill `forbidden_claims[]` with anything that plausibly could sneak
+5. Fill `links[]`: the public repo URL (type `repo`) plus task/issue/PR
+   references the session actually worked on (type `issue`/`pr`) and
+   relevant docs (type `doc`). Only links you verified exist - never
+   guess URLs.
+6. Propose `scope`: one or two sentences bounding the post - what it
+   covers and what it deliberately leaves out (e.g. strategy internals,
+   P&L). Fill `accents[]` with 1-5 emphasis points the writer must
+   foreground.
+7. Collect available media: screenshots, diagrams, terminal captures,
+   log excerpts produced during the session (e.g. under
+   `materials/photos/` or the repo). List real local paths in `media[]` -
+   check each with ls. Do not list files that do not exist.
+8. Fill `forbidden_claims[]` with anything that plausibly could sneak
    into a draft but is not confirmed: profit figures, metrics nobody
    measured, employer/internal details.
-7. Sanitize: no tokens, API keys, chat_ids, public IPs, home-directory
+9. Sanitize: no tokens, API keys, chat_ids, public IPs, home-directory
    paths or employer data anywhere in the output.
 
 ## Output
@@ -47,6 +58,10 @@ validate against `code/brief/schema.json`:
 
 - `source_type`: `"session"`
 - `topic`: one line, concrete
+- `links[]`: `{type, url, label}` - repo URL plus verified issue/PR/doc
+  references
+- `scope`: proposed bounds of the post
+- `accents[]`: 1-5 emphasis points
 - `facts[]`: each string carries a number, version, or named
   library/method. Target 5-12 facts. No generalities
   ("improved performance" is not a fact; "build time dropped from 40s

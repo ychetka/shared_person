@@ -14,18 +14,24 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "webhookId": "8f2a1c4d-3b6e-4f1a-9c2d-7e5a8b0f1d2c",
-      "position": [0, -160]
+      "position": [
+        0,
+        -160
+      ]
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const fs = require('fs');\nconst ENV = (n) => (typeof $env !== 'undefined' && $env[n]) || '';\nconst STATE = '/home/node/.n8n/state';\nconst DRAFTS = STATE + '/drafts';\nfs.mkdirSync(DRAFTS, { recursive: true });\nconst token = ENV('TELEGRAM_BOT_TOKEN');\nconst tg = (method, body) => this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://api.telegram.org/bot' + token + '/' + method,\n  body: body,\n  json: true\n});\n\nlet chatId = null;\ntry { chatId = JSON.parse(fs.readFileSync(STATE + '/tg.json', 'utf8')).chat_id; } catch (e) {}\nif (!chatId) {\n  return [{ json: { ok: false, error: 'chat_id unknown - send /start to @shared_person_bot, then run workflow sp-tg-setup' } }];\n}\n\nconst out = [];\nfor (const item of $input.all()) {\n  const b = item.json.body || item.json;\n  const id = b.draft_id || 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);\n  const draft = {\n    id: id,\n    platform: b.platform || 'unknown',\n    topic: b.topic || '',\n    text: String(b.text || ''),\n    image: b.image || b.image_path || '',\n    status: 'pending',\n    created_at: new Date().toISOString()\n  };\n  const msg = '[DRAFT ' + id + ' | ' + draft.platform + ']\\n\\n' + draft.text.slice(0, 3800);\n  const r = await tg('sendMessage', {\n    chat_id: chatId,\n    text: msg,\n    disable_web_page_preview: true,\n    reply_markup: {\n      inline_keyboard: [[\n        { text: 'Approve', callback_data: 'ap:' + id },\n        { text: 'Edit', callback_data: 'ed:' + id },\n        { text: 'Reject', callback_data: 'rj:' + id }\n      ]]\n    }\n  });\n  if (r && r.ok) draft.message_id = r.result.message_id;\n  fs.writeFileSync(DRAFTS + '/' + id + '.json', JSON.stringify(draft, null, 2));\n  out.push({ json: { ok: true, draft_id: id, tg_ok: !!(r && r.ok) } });\n}\nreturn out;"
+        "jsCode": "const fs = require('fs');\nconst ENV = (n) => (typeof $env !== 'undefined' && $env[n]) || '';\nconst STATE = '/home/node/.n8n/state';\nconst DRAFTS = STATE + '/drafts';\nfs.mkdirSync(DRAFTS, { recursive: true });\nconst token = ENV('TELEGRAM_BOT_TOKEN');\nconst tg = (method, body) => this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://api.telegram.org/bot' + token + '/' + method,\n  body: body,\n  json: true\n});\n\nlet chatId = null;\ntry { chatId = JSON.parse(fs.readFileSync(STATE + '/tg.json', 'utf8')).chat_id; } catch (e) {}\nif (!chatId) {\n  return [{ json: { ok: false, error: 'chat_id unknown - send /start to @shared_person_bot, then run workflow sp-tg-setup' } }];\n}\n\nconst out = [];\nfor (const item of $input.all()) {\n  const b = item.json.body || item.json;\n  const id = b.draft_id || 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);\n  const warnings = Array.isArray(b.warnings) ? b.warnings.map(String)\n    : (b.warnings ? [String(b.warnings)] : []);\n  const draft = {\n    id: id,\n    platform: b.platform || 'unknown',\n    topic: b.topic || '',\n    text: String(b.text || ''),\n    image: b.image || b.image_path || '',\n    scope: String(b.scope || ''),\n    warnings: warnings,\n    status: 'pending',\n    created_at: new Date().toISOString()\n  };\n  let msg = '[DRAFT ' + id + ' | ' + draft.platform + ']';\n  if (draft.scope) msg += '\\nScope: ' + draft.scope.slice(0, 300);\n  msg += '\\n\\n' + draft.text.slice(0, 3400);\n  if (draft.warnings.length) {\n    msg += '\\n\\n[WARNINGS - verifier]\\n' +\n      draft.warnings.map((w) => '- ' + w).join('\\n').slice(0, 700);\n  }\n  const r = await tg('sendMessage', {\n    chat_id: chatId,\n    text: msg,\n    disable_web_page_preview: true,\n    reply_markup: {\n      inline_keyboard: [[\n        { text: 'Approve', callback_data: 'ap:' + id },\n        { text: 'Edit', callback_data: 'ed:' + id },\n        { text: 'Reject', callback_data: 'rj:' + id }\n      ]]\n    }\n  });\n  if (r && r.ok) draft.message_id = r.result.message_id;\n  fs.writeFileSync(DRAFTS + '/' + id + '.json', JSON.stringify(draft, null, 2));\n  out.push({ json: { ok: true, draft_id: id, tg_ok: !!(r && r.ok) } });\n}\nreturn out;"
       },
       "id": "tgm-draft-code",
       "name": "Handle Draft In",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [240, -160]
+      "position": [
+        240,
+        -160
+      ]
     },
     {
       "parameters": {
@@ -37,7 +43,10 @@
       "name": "Respond Draft",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.3,
-      "position": [480, -160]
+      "position": [
+        480,
+        -160
+      ]
     },
     {
       "parameters": {
@@ -51,7 +60,10 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "webhookId": "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
-      "position": [0, 120]
+      "position": [
+        0,
+        120
+      ]
     },
     {
       "parameters": {
@@ -62,7 +74,10 @@
       "name": "Handle TG Update",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [240, 120]
+      "position": [
+        240,
+        120
+      ]
     },
     {
       "parameters": {
@@ -74,26 +89,71 @@
       "name": "Respond Update",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.3,
-      "position": [480, 120]
+      "position": [
+        480,
+        120
+      ]
     }
   ],
   "connections": {
     "Draft In": {
-      "main": [[{ "node": "Handle Draft In", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Handle Draft In",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Handle Draft In": {
-      "main": [[{ "node": "Respond Draft", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "TG Update": {
-      "main": [[{ "node": "Handle TG Update", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Handle TG Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Handle TG Update": {
-      "main": [[{ "node": "Respond Update", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1"
+  },
   "triggers": [
-    { "node": "Draft In", "path": "moderation-draft", "method": "POST" },
-    { "node": "TG Update", "path": "tg-moderation", "method": "POST" }
+    {
+      "node": "Draft In",
+      "path": "moderation-draft",
+      "method": "POST"
+    },
+    {
+      "node": "TG Update",
+      "path": "tg-moderation",
+      "method": "POST"
+    }
   ]
 }

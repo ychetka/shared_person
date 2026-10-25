@@ -38,8 +38,11 @@ incoming update handled by sp-tg-moderation instead.
 ### sp-tg-moderation (webhooks)
 
 - `POST /webhook/moderation-draft` `{platform, text, image?, topic?,
-  draft_id?}` - saves a draft, sends it to the Telegram chat with inline
-  buttons Approve / Edit / Reject (`callback_data` = `ap|ed|rj:<id>`).
+  draft_id?, scope?, warnings?}` - saves a draft, sends it to the
+  Telegram chat with inline buttons Approve / Edit / Reject
+  (`callback_data` = `ap|ed|rj:<id>`). `scope` is rendered above the
+  text; `warnings[]` (verifier flags) are appended as a block under the
+  text and stored in the draft meta.
 - `POST /webhook/tg-moderation` - Telegram webhook target:
   - Approve > writes `queue/publish/<id>.json`, marks the TG message
   - Reject > marks draft rejected, logs to `moderation.jsonl`
@@ -57,8 +60,11 @@ chat_id is not resolved yet. VK group top-posts are a planned extension
 ### sp-content-gen (webhook)
 
 `POST /webhook/content-gen` `{topic, platform, context?, mode?,
-feedback?, draft_id?, image?}`. `platform`: linkedin | facebook | vk |
-all.
+feedback?, draft_id?, image?, scope?, accents?, links?}`. `platform`:
+linkedin | facebook | vk | all. `scope` (string), `accents[]` and
+`links[]` bound the writers; when `context` carries a serialized brief
+per `../brief/schema.json`, these fields are picked up from it
+automatically - explicit payload fields win.
 
 Brief gate (source > brief > draft, see `../brief/README.md`):
 `context` is expected to carry the serialized content brief or raw
@@ -71,14 +77,31 @@ rewrite requests too (their context is the previous draft).
 Passes (all LLM calls go through llm-gateway `POST :8787/run`):
 
 1. `extract-facts` (Gemini Flash) - raw context > strict JSON facts
-2. `writer-linkedin` / `writer-fb` / `writer-vk` (Claude Sonnet) - one
-   run per platform
-3. anti-slop filter (banned EN/RU phrases, emoji bullets, >=2 fact
-   entities) - on violations one rewrite pass with feedback
+2. `writer-linkedin` / `writer-fb` / `writer-vk` (Gemini Flash) - one
+   run per platform; the input brief carries scope/accents/links so the
+   writer stays inside the article bounds
+3. anti-slop filter (banned EN/RU phrases incl. "важно/критично/мелочь",
+   emoji bullets, >=2 fact entities) - on violations one rewrite pass
+   with feedback
 4. humanizer - deterministic cleanup: em/en dash > `-`, zero-width
    chars, smart quotes, ellipsis char, non-breaking space
+5. verifier pass (`critic` role) - checks the draft against brief
+   facts, scope and links. Invented claims or scope violations trigger
+   one rewrite attempt; remaining issues are attached to the draft as
+   `warnings[]` and shown in the moderation message. A verifier outage
+   marks the draft "not fact-checked" instead of blocking it.
 
-Each draft is POSTed to `/webhook/moderation-draft` for moderation.
+Each draft is POSTed to `/webhook/moderation-draft` for moderation
+with `scope` and `warnings` fields.
+
+TODO media stage: after the verifier, generate 1-2 image candidates
+(Gemini image model, e.g. gemini-3.1-flash-image) and attach them to
+the moderation message. Blocked on llm-gateway - it only has text
+backends (openrouter chat/completions, gemini generateContent); needs
+an image backend (gemini `:predict`/`generateContent` with
+responseModalities) plus a role manifest and a way to ship the binary
+to Telegram (sendPhoto). Until then the `image` field on
+moderation-draft accepts a pre-made local path/URL only.
 
 ### sp-publish (schedule, every 2 min)
 

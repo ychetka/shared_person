@@ -1,6 +1,23 @@
 {
   "source_type": "session",
   "topic": "Rootless n8n trading pipeline on a sudo-less office box",
+  "links": [
+    {
+      "type": "repo",
+      "url": "https://github.com/ychetka/ai_trading",
+      "label": "ai_trading - public repo of the trading pipeline"
+    },
+    {
+      "type": "issue",
+      "url": "https://github.com/ychetka/ai_trading/issues/9",
+      "label": "issue #9 - 5m z-score mean reversion backtest (falsified)"
+    }
+  ],
+  "scope": "How the pipeline was deployed on a locked-down office host (rootless Docker, port forwarding, webhook tunnel) and how order math was made deterministic. Not covering: trading performance, P&L, strategy internals.",
+  "accents": [
+    "no-sudo constraint shaped every tooling choice",
+    "LLM is an auditor, not a calculator - all numbers come from deterministic JS"
+  ],
   "facts": [
     "Host had no root/sudo - rootless Docker 29.8.1 assembled from static binaries inside a single-uid user namespace (unshare -Ur)",
     "Outbound NAT via slirp4netns; inbound forwarding via self-written port_fwd.py since --bridge=none",

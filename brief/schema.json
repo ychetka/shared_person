@@ -23,6 +23,47 @@
       "minLength": 5,
       "description": "One-line subject of the future post."
     },
+    "links": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "url", "label"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["repo", "issue", "pr", "doc"],
+            "description": "Link kind: repo = project repository, issue = task/bug reference, pr = pull request, doc = documentation or spec."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public URL. Must be verifiable - the extractor only lists links it actually saw."
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Short human label, e.g. 'ai_trading repo' or 'issue #9 mean reversion backtest'."
+          }
+        }
+      },
+      "description": "Verifiable public links the writer may reference (never invent URLs - only these may appear in drafts)."
+    },
+    "scope": {
+      "type": "string",
+      "default": "",
+      "description": "Bounds of the article: what this post covers and, implicitly, what it does NOT cover. The writer must stay inside it."
+    },
+    "accents": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string",
+        "minLength": 3
+      },
+      "description": "Emphasis points: 1-5 angles/details the writer must foreground (e.g. 'the no-sudo constraint', 'deterministic math over LLM')."
+    },
     "facts": {
       "type": "array",
       "minItems": 1,

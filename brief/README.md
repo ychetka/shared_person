@@ -25,12 +25,19 @@ issues) - the session extractor reads them as the arc source.
 
 - `source_type` - enum, see table.
 - `topic` - one-line subject.
+- `links[]` - `{type: repo|issue|pr|doc, url, label}`. Verifiable public
+  links only - the writer may reference exactly these and must never
+  invent URLs.
+- `scope` - bounds of the article: what the post covers and, implicitly,
+  what stays out. The writer must stay inside it.
+- `accents[]` - 1-5 emphasis points the writer must foreground.
 - `facts[]` - verifiable statements, each carrying a number, version,
   named library/method or a measurable claim. The workflow gate counts
   digit-bearing tokens, so facts without them do not pass.
 - `arc` - `{plan, attempt, failure, fix, outcome}`. Honest failures are
   the most valuable part.
-- `media[]` - local paths to usable images; must exist at pipeline time.
+- `media[]` - local paths to usable images (screenshots, diagrams, logs
+  excerpts); must exist at pipeline time.
 - `platform_fit[]` - linkedin | facebook | vk | instagram |
   youtube-shorts | tiktok.
 - `retro` - archival content flag; retro posts are marked as such in the
@@ -42,9 +49,12 @@ issues) - the session extractor reads them as the arc source.
 ## Passing a brief to the pipeline
 
 `POST /webhook/content-gen` accepts `context` - put the serialized
-brief JSON there. The gate requires `context` >= 200 chars and >= 2
-digit-bearing tokens, otherwise it answers "no material in brief" in
-Telegram and skips generation.
+brief JSON there (the workflow parses it and picks up `links`, `scope`
+and `accents` automatically). `scope` and `accents[]` may also be passed
+as top-level payload fields - explicit fields win over the serialized
+brief. The gate requires `context` >= 200 chars and >= 2 digit-bearing
+tokens, otherwise it answers "no material in brief" in Telegram and
+skips generation.
 
 ## Example
 
