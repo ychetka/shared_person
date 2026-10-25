@@ -1,7 +1,12 @@
 name: extract-facts
 description: Pass-1 fact extractor - raw context into strict JSON {stack, problem, metrics, arc, pitfalls, quotes}
-backend: openrouter
-model: google/gemini-2.5-flash
+backend: gemini
+model: gemini-3.5-flash
+fallback_models:
+  - gemini-3.6-flash
+  - gemini-3.7-flash
+  - gemini-flash-latest
+  - gemini-flash-lite-latest
 temperature: 0.1
 max_tokens: 4096
 prompt: extract-facts

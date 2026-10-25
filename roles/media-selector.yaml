@@ -1,0 +1,14 @@
+name: media-selector
+description: Picks 0-2 candidate media files that match the accents of a finished draft (archive photos, screenshots)
+backend: gemini
+model: gemini-3.5-flash
+fallback_models:
+  - gemini-3.6-flash
+  - gemini-3.7-flash
+  - gemini-flash-lite-latest
+  - gemini-flash-latest
+temperature: 0.2
+max_tokens: 1024
+prompt: media-selector
+output:
+  type: json

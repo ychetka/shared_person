@@ -29,6 +29,10 @@ services:
       - N8N_RUNNERS_ENABLED=true
       # Default broker port 5679 is taken by the crypto-bot instance.
       - N8N_RUNNERS_BROKER_PORT=5781
+      # Code-node task budget: the content-gen chain (extract > write >
+      # slop > critic > media-selector) can take ~10 min when models run
+      # through fallback cascades; the default 300s kills it mid-flight.
+      - N8N_RUNNERS_TASK_TIMEOUT=900
       - NODE_FUNCTION_ALLOW_BUILTIN=fs
       # Code nodes read secrets via $env (TG token, platform API keys)
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
@@ -48,6 +52,9 @@ services:
       - n8n_storage:/home/node/.n8n
       # hands-agent task queue (n8n drops publish tasks into inbox/)
       - ./hands-agent/queue:/home/node/hands-queue
+      # media candidates for moderation sendPhoto (brief media[] paths
+      # resolve here: <host>/materials/... -> /home/node/materials/...)
+      - ../materials:/home/node/materials:ro
 
   llm-gateway:
     image: shared-person/llm-gateway:latest

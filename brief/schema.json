@@ -87,9 +87,33 @@
     },
     "media": {
       "type": "array",
-      "items": { "type": "string" },
       "default": [],
-      "description": "Local paths to images/screenshots usable in the post (e.g. materials/photos/...). Paths must exist on the machine running the pipeline."
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 3,
+            "description": "Local path to an image/screenshot usable in the post (e.g. materials/photos/...)."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 3,
+                "description": "Local path to the media file."
+              },
+              "desc": {
+                "type": "string",
+                "description": "Short factual caption of what the file shows - the media-selector matches drafts against this, so keep it concrete and honest."
+              }
+            }
+          }
+        ]
+      },
+      "description": "Media candidates for the post. Strings are bare paths; objects carry path + desc so the media-selector can match the draft's accents. Paths must exist on the machine running the pipeline (or under the materials mount inside the n8n container). Empty = post goes out text-only."
     },
     "platform_fit": {
       "type": "array",
