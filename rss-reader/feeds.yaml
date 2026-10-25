@@ -38,16 +38,18 @@ feeds:
     url: https://news.ycombinator.com/showrss
     tags: [tooling, ai, projects]
     weight: 0.8
-  - name: Habr - Algo Trading
-    url: https://habr.com/ru/rss/hub/algo_trading/all/?fl=ru
-    tags: [algo-trading, ru, fintech]
-    weight: 0.75
+  # Habr retired the algo_trading hub (404) - crypto hub is the
+  # closest live source for trading/market content
+  - name: Habr - Crypto/Trading
+    url: https://habr.com/ru/rss/hubs/crypto/?fl=ru
+    tags: [algo-trading, crypto, ru, fintech]
+    weight: 0.7
   - name: Habr - AI
-    url: https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru
+    url: https://habr.com/ru/rss/hubs/artificial_intelligence/?fl=ru
     tags: [ai, agents, ru]
     weight: 0.75
   - name: Habr - Webdev
-    url: https://habr.com/ru/rss/hub/webdev/all/?fl=ru
+    url: https://habr.com/ru/rss/hubs/webdev/?fl=ru
     tags: [frontend, react, typescript, ru]
     weight: 0.7
   - name: Overreacted (Dan Abramov)

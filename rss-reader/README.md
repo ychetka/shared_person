@@ -48,8 +48,40 @@ disk takes effect immediately.
     (state in `STATE_DIR`)
 - `POST /curate {items?}` - scores items through the LLM gateway in
   25-item chunks; with no body it collects a digest first.
-  Response: `{items: [...score, angle, reason], curated: true}`.
+  Response: `{items: [...score, angle, reason, hype, hype_parts,
+  metrics], curated: true}`, ordered by `hype` desc.
 - `GET /feeds`, `PUT /feeds {feeds: [...]}`
+
+## Hype score
+
+`/curate` enriches items with engagement metrics and a `hype` score
+(0-100) - how likely an item is worth a commentary post:
+
+```
+hype = 40 * theme + 30 * llm + 10 * weight + 20 * engagement
+```
+
+- `theme` - pillar keyword fit (AI agents / LLM / MCP, automation / n8n,
+  React / TS frontend, algo-trading, DevOps-lite) matched on
+  title+summary: 0/1/2/3+ groups -> 0 / 0.6 / 0.85 / 1.0. When no group
+  matches the text but the feed tags do, `theme = 0.3`.
+- `llm` - curator `score / 10`; 0 when the gateway is off or failed.
+- `weight` - source weight from `feeds.yaml`.
+- `engagement` - log-normalized metrics when fetchable, else 0:
+  `0.5*ln1p(comments)/ln1p(150) + 0.3*ln1p(views)/ln1p(50000)
+   + 0.2*ln1p(votes)/ln1p(100)`.
+
+Engagement sources (`src/metrics.ts`):
+
+- habr.com articles - the embedded `statistics` JSON block on the
+  article page (`commentsCount`, `votesCount`, `score`, `reach`=views)
+- news.ycombinator.com - Algolia HN API (`points`, `num_comments`),
+  item id taken from the RSS `<comments>` link
+
+Metrics are cached in `STATE_DIR/metrics.json` for 48h (keyed by item
+id) so repeat `/curate` runs do not re-fetch article pages. Fetches
+run 4-way concurrent with a 10s timeout; a failed fetch caches an
+empty result for the TTL.
 
 ## Docker
 

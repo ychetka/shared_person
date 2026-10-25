@@ -17,11 +17,16 @@ not the nested `.n8n/` that holds `database.sqlite`):
 - `state/tg.json` - resolved Telegram chat_id
 - `state/drafts/<id>.json` - moderation drafts
 - `state/trend_seen.json` - trend-scout dedupe (7 days)
+- `state/digest.json` - last digest items keyed by date + index,
+  resolved by the `post N` reply (3 days kept)
 - `queue/publish/{,done,failed}` - approved posts waiting for drivers
 - `logs/{moderation,content-gen,publish}.jsonl` - audit trail
 
 The hands-agent queue is bind-mounted at `/home/node/hands-queue`
-(host: `../hands-agent/queue/`).
+(host: `../hands-agent/queue/`). The project `materials/` directory is
+bind-mounted read-only at `/home/node/materials` (host:
+`../../materials/`) - media candidates from briefs resolve there for
+the moderation `sendPhoto` step.
 
 ## Workflows
 
@@ -38,33 +43,62 @@ incoming update handled by sp-tg-moderation instead.
 ### sp-tg-moderation (webhooks)
 
 - `POST /webhook/moderation-draft` `{platform, text, image?, topic?,
-  draft_id?, scope?, warnings?}` - saves a draft, sends it to the
-  Telegram chat with inline buttons Approve / Edit / Reject
-  (`callback_data` = `ap|ed|rj:<id>`). `scope` is rendered above the
-  text; `warnings[]` (verifier flags) are appended as a block under the
-  text and stored in the draft meta.
+  draft_id?, scope?, warnings?, media?, caption_note?}` - saves a draft,
+  sends it to the Telegram chat with inline buttons Approve / Edit /
+  Reject (`callback_data` = `ap|ed|rj:<id>`). `scope` is rendered above
+  the text; `warnings[]` (verifier flags) are appended as a block under
+  the text and stored in the draft meta.
+  - `media[]` - selected media paths (from the media-selector pass).
+    Each path is resolved inside the container: literal path, anything
+    under `materials/` maps to the read-only `/home/node/materials`
+    mount, bare filenames are looked up in `materials/photos/`.
+    Resolvable files go to the chat via `sendPhoto` (multipart upload
+    built in the Code node, before the text message). Files that fail
+    resolution or upload are listed in the message text instead, and
+    the draft meta keeps `media`, `caption_note` and `media_sent`.
+  - On Approve the `media[]` list is carried into the publish queue
+    file so platform drivers can attach the same files.
 - `POST /webhook/tg-moderation` - Telegram webhook target:
   - Approve > writes `queue/publish/<id>.json`, marks the TG message
   - Reject > marks draft rejected, logs to `moderation.jsonl`
   - Edit > stores a pending-edit marker; the next plain-text message in
     the chat is forwarded to `/webhook/content-gen` as a rewrite request
     (mode `rewrite`, with feedback + previous draft)
+  - `post N` (plain text) > resolves item N from `state/digest.json`
+    (newest stored day first), builds a `source_type: "hype"` brief
+    (facts = source/published/metrics/angle/summary, links, scope,
+    accents) and calls `/webhook/content-gen` with `platform: all`.
+    Drafts come back through the normal moderation flow. Unknown N or
+    missing digest gets a "no digest item" reply. `post N` is matched
+    before the pending-edit state - an exact command never becomes
+    edit feedback.
 
 ### sp-trend-scout (schedule, daily 09:00)
 
 `POST rss-reader:8788/curate?since=24h` > dedupe vs `trend_seen.json` >
-top-8 digest message to Telegram. Skips silently when nothing new or
+top-8 digest message to Telegram. Items arrive pre-scored: the
+rss-reader attaches engagement metrics (Habr article stats, HN points)
+and a `hype` 0-100 score - see `../rss-reader/README.md` for the
+formula - and orders by hype desc. Each digest line shows
+`[hype NN | fit S.S]`, a metrics line when available
+(`views | comments | votes`), and the curator `angle`. Item #1 is
+marked `> POST CANDIDATE`; the footer says
+`Reply: post N - to generate hype-commentary draft on item N`.
+The top-8 items are cached to `state/digest.json` so the reply path in
+sp-tg-moderation can resolve them. Skips silently when nothing new or
 chat_id is not resolved yet. VK group top-posts are a planned extension
 (iteration 2, needs the VK token).
 
 ### sp-content-gen (webhook)
 
 `POST /webhook/content-gen` `{topic, platform, context?, mode?,
-feedback?, draft_id?, image?, scope?, accents?, links?}`. `platform`:
-linkedin | facebook | vk | all. `scope` (string), `accents[]` and
-`links[]` bound the writers; when `context` carries a serialized brief
-per `../brief/schema.json`, these fields are picked up from it
-automatically - explicit payload fields win.
+feedback?, draft_id?, image?, scope?, accents?, links?, media?}`.
+`platform`: linkedin | facebook | vk | all. `scope` (string),
+`accents[]` and `links[]` bound the writers; when `context` carries a
+serialized brief per `../brief/schema.json`, these fields are picked up
+from it automatically - explicit payload fields win. `media[]` lists
+candidate files (paths or `{path, desc}` objects); the same merge rule
+applies when a serialized brief carries `media[]`.
 
 Brief gate (source > brief > draft, see `../brief/README.md`):
 `context` is expected to carry the serialized content brief or raw
@@ -90,18 +124,23 @@ Passes (all LLM calls go through llm-gateway `POST :8787/run`):
    one rewrite attempt; remaining issues are attached to the draft as
    `warnings[]` and shown in the moderation message. A verifier outage
    marks the draft "not fact-checked" instead of blocking it.
+6. media selection (`media-selector` role) - runs only when candidates
+   exist (payload `media[]` or brief `media[]`). The selector gets the
+   finished draft text + accents + `{path, desc}` candidates and picks
+   0-2 files matching the draft's accents; an empty selection is valid.
+   Selected paths plus `caption_note` are attached to the draft meta
+   and forwarded to moderation, which delivers them via `sendPhoto`.
 
 Each draft is POSTed to `/webhook/moderation-draft` for moderation
-with `scope` and `warnings` fields.
+with `scope`, `warnings`, `media` and `caption_note` fields.
 
-TODO media stage: after the verifier, generate 1-2 image candidates
-(Gemini image model, e.g. gemini-3.1-flash-image) and attach them to
-the moderation message. Blocked on llm-gateway - it only has text
-backends (openrouter chat/completions, gemini generateContent); needs
-an image backend (gemini `:predict`/`generateContent` with
-responseModalities) plus a role manifest and a way to ship the binary
-to Telegram (sendPhoto). Until then the `image` field on
-moderation-draft accepts a pre-made local path/URL only.
+TODO generated media: image-gen candidates (Gemini image model, e.g.
+gemini-3.1-flash-image) are still blocked on llm-gateway - it only has
+text backends (openrouter chat/completions, gemini generateContent);
+needs an image backend (gemini `:predict`/`generateContent` with
+responseModalities). Until then media comes from the brief/payload
+candidate list only, and the legacy `image` field on moderation-draft
+still accepts a pre-made local path/URL.
 
 ### sp-publish (schedule, every 2 min)
 

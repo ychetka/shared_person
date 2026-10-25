@@ -3,6 +3,8 @@ import _ from "lodash";
 import { config } from "./config.js";
 import { fetchFeed, loadFeeds, saveFeeds, type Feed, type Item } from "./feeds.js";
 import { filterUnseen, markSeen } from "./store.js";
+import { attachEngagement } from "./metrics.js";
+import { hypeScore } from "./hype.js";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -42,6 +44,17 @@ app.get("/digest", async (req, res) => {
   }
 });
 
+// Attach engagement metrics + hype score, order by hype desc.
+async function finish(items: Item[], curated: boolean) {
+  await attachEngagement(items);
+  for (const i of items) {
+    const h = hypeScore(i);
+    i.hype = h.hype;
+    i.hype_parts = h.parts;
+  }
+  return { items: _.orderBy(items, ["hype", "score"], ["desc", "desc"]), curated };
+}
+
 // POST /curate {items?: Item[]} - LLM scoring via llm-gateway; no body = digest first
 app.post("/curate", async (req, res) => {
   try {
@@ -50,7 +63,7 @@ app.post("/curate", async (req, res) => {
       const since = parseSince(String(req.query.since ?? "24h"));
       items = await collect(since);
     }
-    if (!config.llmGatewayUrl) return res.json({ items, curated: false });
+    if (!config.llmGatewayUrl) return res.json(await finish(items, false));
     // chunk sequentially to keep LLM output within max_tokens and
     // stay inside provider rate limits (~25 items per call)
     const scoredLists: Partial<Item>[][] = [];
@@ -76,7 +89,7 @@ app.post("/curate", async (req, res) => {
     }
     const byId = _.keyBy(scoredLists.flat(), "id");
     const scored = items.map((i) => ({ ...i, ...byId[i.id] }));
-    res.json({ items: _.orderBy(scored, ["score"], ["desc"]), curated: true });
+    res.json(await finish(scored, true));
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }

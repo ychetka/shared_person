@@ -20,9 +20,14 @@ export interface Item {
   url: string;
   published: string; // ISO
   tags: string[];
-  score?: number;
+  weight?: number; // feed weight from feeds.yaml
+  comments?: string; // discussion URL when the feed provides one (e.g. HN)
+  metrics?: import("./metrics.js").Engagement;
+  score?: number;   // LLM curator score 0-10
   angle?: string | null;
   reason?: string;
+  hype?: number;    // 0-100, see hype.ts for the formula
+  hype_parts?: { theme: number; llm: number; weight: number; engagement: number };
 }
 
 const parser = new XMLParser({
@@ -64,7 +69,7 @@ function findLink(link: unknown): string {
 
 // --- RSS 2.0 / Atom / RDF parsing ---
 
-function parseRss(doc: Record<string, unknown>): { title: string; link: string; date: string; summary: string }[] {
+function parseRss(doc: Record<string, unknown>): { title: string; link: string; date: string; summary: string; comments: string }[] {
   const channel = doc?.rss ? (doc.rss as Record<string, unknown>).channel : doc?.["rdf:RDF"];
   const items = ((channel as Record<string, unknown>)?.item ?? []) as unknown[];
   return _.castArray(items).map((it) => {
@@ -74,6 +79,7 @@ function parseRss(doc: Record<string, unknown>): { title: string; link: string; 
       link: text(i.link),
       date: text(i.pubDate ?? i["dc:date"] ?? i.published),
       summary: text(i.description ?? i["content:encoded"]),
+      comments: text(i.comments), // HN exposes the thread URL here
     };
   });
 }
@@ -89,7 +95,9 @@ function parseAtom(doc: Record<string, unknown>): { title: string; link: string;
   }));
 }
 
-export function parseFeed(xml: string): ReturnType<typeof parseRss> {
+export function parseFeed(
+  xml: string,
+): { title: string; link: string; date: string; summary: string; comments?: string }[] {
   const doc = parser.parse(xml) as Record<string, unknown>;
   if (doc.rss || doc["rdf:RDF"]) return parseRss(doc);
   if (doc.feed) return parseAtom(doc);
@@ -120,5 +128,7 @@ export async function fetchFeed(feed: Feed): Promise<Item[]> {
     url: p.link.trim(),
     published: new Date(p.date).toISOString(),
     tags: feed.tags,
+    weight: feed.weight,
+    comments: p.comments || undefined,
   })).filter((i) => i.title && i.url);
 }
