@@ -38,6 +38,11 @@ issues) - the session extractor reads them as the arc source.
   the most valuable part.
 - `media[]` - local paths to usable images (screenshots, diagrams, logs
   excerpts); must exist at pipeline time.
+- `viz_data[]` - structured datasets for GENERATED charts (session
+  posts): `{id, kind: stats|series|distribution|topology, title?, unit?,
+  data, source?}`. Session drafts skip archive-photo selection - the
+  `viz-spec` role picks 0-2 datasets and `tools/render_viz.py` draws
+  them. Every number must come from the source material verbatim.
 - `platform_fit[]` - linkedin | facebook | vk | instagram |
   youtube-shorts | tiktok.
 - `retro` - archival content flag; retro posts are marked as such in the

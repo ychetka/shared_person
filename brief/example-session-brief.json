@@ -36,6 +36,46 @@
     "outcome": "Pipeline live on office PC; LLM hallucinations in numbers excluded by construction"
   },
   "media": [],
+  "viz_data": [
+    {
+      "id": "pipeline-topology",
+      "kind": "topology",
+      "title": "Alert-to-verdict pipeline",
+      "data": {
+        "nodes": [
+          {"id": "tv", "label": "TradingView alert"},
+          {"id": "caddy", "label": "Caddy :8443"},
+          {"id": "n8n", "label": "n8n webhook"},
+          {"id": "calc", "label": "Trade Calc (JS)"},
+          {"id": "llm", "label": "OpenRouter LLM"},
+          {"id": "tg", "label": "Telegram"}
+        ],
+        "edges": [
+          {"from": "tv", "to": "caddy", "label": "HTTPS"},
+          {"from": "caddy", "to": "n8n"},
+          {"from": "n8n", "to": "calc"},
+          {"from": "calc", "to": "llm", "label": "audit line only"},
+          {"from": "llm", "to": "tg"},
+          {"from": "calc", "to": "tg", "label": "onError fallback"}
+        ]
+      },
+      "source": "session history - final v4 workflow topology"
+    },
+    {
+      "id": "openrouter-limits",
+      "kind": "stats",
+      "title": "OpenRouter free tier",
+      "data": {
+        "items": [
+          {"label": "requests/day", "value": 50},
+          {"label": "response latency, s (min)", "value": 15},
+          {"label": "response latency, s (max)", "value": 120},
+          {"label": "fallback models", "value": 3}
+        ]
+      },
+      "source": "session history - free tier limits and fallback chain"
+    }
+  ],
   "platform_fit": ["linkedin", "vk"],
   "retro": false,
   "forbidden_claims": [

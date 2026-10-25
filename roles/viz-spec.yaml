@@ -1,0 +1,40 @@
+name: viz-spec
+description: Picks 0-2 generated chart specs (bar/line/pipeline/stat-cards) that support the accents of a finished session draft
+backend: gemini
+model: gemini-3.5-flash
+fallback_models:
+  - gemini-3.6-flash
+  - gemini-3.7-flash
+  - gemini-flash-lite-latest
+  - gemini-flash-latest
+temperature: 0.2
+max_tokens: 1024
+prompt: viz-spec
+output:
+  type: json
+  schema:
+    type: object
+    additionalProperties: false
+    required: ["charts"]
+    properties:
+      charts:
+        type: array
+        maxItems: 2
+        items:
+          type: object
+          additionalProperties: false
+          required: ["type", "viz_id", "title", "caption"]
+          properties:
+            type:
+              type: string
+              enum: ["bar", "line", "pipeline", "stat-cards"]
+            viz_id:
+              type: string
+            title:
+              type: string
+            caption:
+              type: string
+            options:
+              type: object
+      note:
+        type: string

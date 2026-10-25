@@ -45,10 +45,38 @@ lie. Verify everything.
    log excerpts produced during the session (e.g. under
    `materials/photos/` or the repo). List real local paths in `media[]` -
    check each with ls. Do not list files that do not exist.
-8. Fill `forbidden_claims[]` with anything that plausibly could sneak
+8. Fill `viz_data[]` - the structured datasets a chart renderer can
+   draw from. Session posts get GENERATED visualizations, not archive
+   photos, so this field is where real numbers become media. For every
+   measured quantity in the session (backtest stats, latency figures,
+   request counts, per-asset results, component topology) emit one
+   `viz_data` entry:
+
+   - `id`: stable slug (`backtest-totals`, `pipeline-topology`)
+   - `kind`:
+     - `stats` - headline numbers as label/value pairs:
+       `data: {"items": [{"label": "trades", "value": 2593}]}`
+     - `series` - values over a category/time axis, one or more named
+       series: `data: {"x": ["BTC", "ETH"], "series": [{"name":
+       "avgR", "data": [-0.89, -1.02]}]}`
+     - `distribution` - repeated measurements: `data: {"values":
+       [...]}` or pre-binned `{"bins": [...], "counts": [...]}`
+     - `topology` - pipeline/architecture: `data: {"nodes": [{"id",
+       "label"}], "edges": [{"from", "to", "label"?}]}`
+   - `unit` when it applies (`"R"`, `"ms"`, `"%"`)
+   - `source`: where each number was verified (issue id, commit, log
+     file, transcript line)
+
+   Rules: every number in `viz_data` must appear in the session/repo
+   verbatim - no derived estimates unless the arithmetic is trivial
+   and noted in `source`. If the session produced nothing measurable
+   and no topology worth diagramming, leave `viz_data` empty - the
+   viz-spec pass can still decline to chart, but it cannot invent
+   data you did not provide.
+9. Fill `forbidden_claims[]` with anything that plausibly could sneak
    into a draft but is not confirmed: profit figures, metrics nobody
    measured, employer/internal details.
-9. Sanitize: no tokens, API keys, chat_ids, public IPs, home-directory
+10. Sanitize: no tokens, API keys, chat_ids, public IPs, home-directory
    paths or employer data anywhere in the output.
 
 ## Output
@@ -67,7 +95,7 @@ validate against `code/brief/schema.json`:
   ("improved performance" is not a fact; "build time dropped from 40s
   to 9s" is).
 - `arc`: as above; omit fields that genuinely do not apply
-- `media[]`, `platform_fit[]`, `retro: false`
+- `media[]`, `viz_data[]`, `platform_fit[]`, `retro: false`
 - `forbidden_claims[]`, `author_notes`
 
 If the session is too thin for a post (no arc, <3 verifiable facts),

@@ -115,6 +115,43 @@
       },
       "description": "Media candidates for the post. Strings are bare paths; objects carry path + desc so the media-selector can match the draft's accents. Paths must exist on the machine running the pipeline (or under the materials mount inside the n8n container). Empty = post goes out text-only."
     },
+    "viz_data": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "data"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable slug referenced by chart specs downstream, e.g. 'backtest-totals' or 'pipeline-topology'."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["stats", "series", "distribution", "topology"],
+            "description": "stats = label/value pairs for stat-cards or bars; series = x-axis values + named y series for bar/line; distribution = raw values or {bins, counts} for a histogram; topology = {nodes, edges} for a pipeline diagram."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short dataset name the chart may reuse as its title."
+          },
+          "unit": {
+            "type": "string",
+            "description": "Measurement unit when one applies, e.g. 'R', 'ms', 'requests/day', '%'."
+          },
+          "data": {
+            "description": "Structured payload, shape depends on kind: stats -> {items: [{label, value}]}; series -> {x: [...], series: [{name, data: [...]}]}; distribution -> {values: [...]} or {bins: [...], counts: [...]}; topology -> {nodes: [{id, label}], edges: [{from, to, label?}]}. Every number must come from the source material - never estimated."
+          },
+          "source": {
+            "type": "string",
+            "description": "Where the numbers were verified: issue id, commit, log file, session transcript line."
+          }
+        }
+      },
+      "description": "Structured datasets extracted from the source for GENERATED charts (see prompts/viz-spec.txt and tools/render_viz.py). Session posts use these instead of archive photos: the numbers are rendered into charts by the pipeline, so they must be real measurements, not prose claims. Empty = the post goes text-only or without generated media."
+    },
     "platform_fit": {
       "type": "array",
       "minItems": 1,

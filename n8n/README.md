@@ -92,13 +92,15 @@ chat_id is not resolved yet. VK group top-posts are a planned extension
 ### sp-content-gen (webhook)
 
 `POST /webhook/content-gen` `{topic, platform, context?, mode?,
-feedback?, draft_id?, image?, scope?, accents?, links?, media?}`.
+feedback?, draft_id?, image?, scope?, accents?, links?, media?,
+source_type?, viz_data?}`.
 `platform`: linkedin | facebook | vk | all. `scope` (string),
 `accents[]` and `links[]` bound the writers; when `context` carries a
 serialized brief per `../brief/schema.json`, these fields are picked up
 from it automatically - explicit payload fields win. `media[]` lists
 candidate files (paths or `{path, desc}` objects); the same merge rule
-applies when a serialized brief carries `media[]`.
+applies when a serialized brief carries `media[]`. `source_type` and
+`viz_data[]` likewise come from the payload or the serialized brief.
 
 Brief gate (source > brief > draft, see `../brief/README.md`):
 `context` is expected to carry the serialized content brief or raw
@@ -124,23 +126,42 @@ Passes (all LLM calls go through llm-gateway `POST :8787/run`):
    one rewrite attempt; remaining issues are attached to the draft as
    `warnings[]` and shown in the moderation message. A verifier outage
    marks the draft "not fact-checked" instead of blocking it.
-6. media selection (`media-selector` role) - runs only when candidates
-   exist (payload `media[]` or brief `media[]`). The selector gets the
-   finished draft text + accents + `{path, desc}` candidates and picks
-   0-2 files matching the draft's accents; an empty selection is valid.
-   Selected paths plus `caption_note` are attached to the draft meta
-   and forwarded to moderation, which delivers them via `sendPhoto`.
+6. media - two paths depending on the source:
+   - session posts (`source_type: session` or any `viz_data[]`
+     present): GENERATED charts. The `viz-spec` role gets the draft
+     text + accents + `viz_data[]` and picks 0-2 chart specs
+     (`bar|line|pipeline|stat-cards`, each referencing a dataset id).
+     The workflow then POSTs `{draft_id, specs, viz_data}` to the
+     host render daemon (`VIZ_RENDERER_URL`, default
+     `http://10.0.2.2:8791/render` - `tools/render_viz.py --serve`;
+     10.0.2.2 is the slirp gateway to the real host in rootless docker),
+     which draws PNGs into `materials/viz/<draft_id>_*.png` and returns
+     paths. Render/spec failures degrade to text-only. Each produced
+     draft gets a stable id here (payload `draft_id` or generated,
+     role-suffixed on multi-platform runs) so PNG names map 1:1 to
+     moderation drafts.
+   - other posts (retro/archive): the `media-selector` role runs only
+     when candidates exist (payload `media[]` or brief `media[]`). It
+     gets the finished draft text + accents + `{path, desc}` candidates
+     and picks 0-2 files matching the draft's accents; an empty
+     selection is valid.
+
+   Selected/generated paths plus `caption_note` are attached to the
+   draft meta and forwarded to moderation, which delivers them via
+   `sendPhoto`.
 
 Each draft is POSTed to `/webhook/moderation-draft` for moderation
 with `scope`, `warnings`, `media` and `caption_note` fields.
 
-TODO generated media: image-gen candidates (Gemini image model, e.g.
+Generated media status: chart visualizations from `viz_data` are live
+(matplotlib, see `../tools/README.md`). AI image-gen candidates
+(Gemini image model, e.g.
 gemini-3.1-flash-image) are still blocked on llm-gateway - it only has
 text backends (openrouter chat/completions, gemini generateContent);
 needs an image backend (gemini `:predict`/`generateContent` with
-responseModalities). Until then media comes from the brief/payload
-candidate list only, and the legacy `image` field on moderation-draft
-still accepts a pre-made local path/URL.
+responseModalities). Until then non-chart media comes from the
+brief/payload candidate list only, and the legacy `image` field on
+moderation-draft still accepts a pre-made local path/URL.
 
 ### sp-publish (schedule, every 2 min)
 

@@ -16,6 +16,9 @@ rootless docker daemon - nothing from this project runs bare on the host
 - `tools/port_fwd.sh` - bridges host ports into the rootless inner netns
   (shared dockerd runs its own netns; without forwards host cannot reach
   containers). Needs `sudo -n`. Re-run if rootless-docker restarts.
+- `tools/render_viz.py` - host-side chart renderer for session posts
+  (matplotlib, dark PNGs into `../materials/viz/`). Runs as an HTTP
+  daemon on 127.0.0.1:8791 - see `tools/README.md`.
 - `tools/deploy_workflow.js` - deploys `n8n-workflows/workflows/*.json`
   into the n8n SQLite DB (n8n REST needs auth). Run with n8n stopped:
   `docker stop shared-person-n8n && node tools/deploy_workflow.js <file> [--update]`
@@ -30,7 +33,8 @@ rootless docker daemon - nothing from this project runs bare on the host
   `GET/PUT /feeds`, `POST /curate` (scores items through llm-gateway role
   `feed-curator`). Generic - reusable outside this project.
 - `roles/` - LLM role manifests (yaml: prompt, model, temperature,
-  output_schema, max_tokens, context_slots).
+  output_schema, max_tokens, context_slots). `viz-spec` picks generated
+  charts for session drafts.
 - `prompts/` - prompt texts referenced by manifests.
 - `context/` - private context slots (symlinks to project-root docs,
   never committed).
