@@ -41,7 +41,6 @@ services:
       # Webhooks published at https://shared-person.opticode.su (edge proxy).
       - WEBHOOK_URL=https://shared-person.opticode.su:8443/
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       # platform tokens for the publish workflow (optional - drivers
       # fall back to the hands-agent queue when a token is absent)
       - VK_ACCESS_TOKEN=${VK_ACCESS_TOKEN:-}
@@ -68,7 +67,6 @@ services:
       - apparmor=unconfined
     environment:
       - LLM_GATEWAY_PORT=8787
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - ROLES_DIR=/app/code/roles
       - PROMPTS_DIR=/app/code/prompts

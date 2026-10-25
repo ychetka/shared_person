@@ -6,7 +6,7 @@ import { config } from "./config.js";
 export interface RoleManifest {
   name: string;
   description?: string;
-  backend: "openrouter" | "gemini";
+  backend: "gemini";
   model: string;
   fallback_models?: string[]; // tried in order when primary fails
   temperature?: number;

@@ -10,8 +10,8 @@ output contract can be tuned per role without touching code.
 ```yaml
 name: extract-facts            # role id, used in POST /run {"role": "..."}
 description: what the role does
-backend: openrouter            # openrouter | gemini (direct Google API)
-model: google/gemini-2.5-flash # provider-specific model id
+backend: gemini                # direct Google generativelanguage API
+model: gemini-3.5-flash        # Gemini model id (no models/ prefix)
 temperature: 0.2
 max_tokens: 4096
 prompt: extract-facts          # file ../prompts/extract-facts.txt

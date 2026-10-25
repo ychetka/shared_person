@@ -27,7 +27,7 @@ rootless docker daemon - nothing from this project runs bare on the host
 
 - `llm-gateway/` - AI harness. `POST /run {role, input}` resolves a role
   manifest from `roles/`, renders context slots from `context/`, calls the
-  configured backend (OpenRouter or direct Gemini), validates output.
+  configured backend (direct Gemini API), validates output.
   `GET /roles`, `GET /health`.
 - `rss-reader/` - standalone RSS/Atom digest microservice: `GET /digest`,
   `GET/PUT /feeds`, `POST /curate` (scores items through llm-gateway role
@@ -46,8 +46,8 @@ rootless docker daemon - nothing from this project runs bare on the host
 ## Env
 
 All project secrets/config live in `../ENV` (not part of this repo):
-`TELEGRAM_BOT_TOKEN` (@shared_person_bot), `OPENROUTER_API_KEY`,
-`GEMINI_API_KEY`, `GITHUB_PAT`, `N8N_OWNER_EMAIL`, `N8N_OWNER_PASSWORD`,
+`TELEGRAM_BOT_TOKEN` (@shared_person_bot), `GEMINI_API_KEY`,
+`GITHUB_PAT`, `N8N_OWNER_EMAIL`, `N8N_OWNER_PASSWORD`,
 `VK_ACCESS_TOKEN`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`,
 `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN`.
 

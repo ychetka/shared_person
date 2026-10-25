@@ -112,8 +112,8 @@ rewrite requests too (their context is the previous draft).
 
 Passes (all LLM calls go through llm-gateway `POST :8787/run`):
 
-1. `extract-facts` (Gemini Flash) - raw context > strict JSON facts
-2. `writer-linkedin` / `writer-fb` / `writer-vk` (Gemini Flash) - one
+1. `extract-facts` (gemini-3.5-flash) - raw context > strict JSON facts
+2. `writer-linkedin` / `writer-fb` / `writer-vk` (gemini-3.6-flash) - one
    run per platform; the input brief carries scope/accents/links so the
    writer stays inside the article bounds
 3. anti-slop filter (banned EN/RU phrases incl. "важно/критично/мелочь",
@@ -157,7 +157,7 @@ Generated media status: chart visualizations from `viz_data` are live
 (matplotlib, see `../tools/README.md`). AI image-gen candidates
 (Gemini image model, e.g.
 gemini-3.1-flash-image) are still blocked on llm-gateway - it only has
-text backends (openrouter chat/completions, gemini generateContent);
+a text backend (gemini generateContent);
 needs an image backend (gemini `:predict`/`generateContent` with
 responseModalities). Until then non-chart media comes from the
 brief/payload candidate list only, and the legacy `image` field on
@@ -183,7 +183,7 @@ Processed files move to `done/` or `failed/` and are logged to
 All tokens come from container env (`../ENV` via compose
 `--env-file`), read in Code nodes with `$env` - never hardcoded in node
 parameters. Required compose vars: `TELEGRAM_BOT_TOKEN`,
-`OPENROUTER_API_KEY` (llm-gateway), `VK_ACCESS_TOKEN`, `VK_USER_ID`,
+`GEMINI_API_KEY` (llm-gateway), `VK_ACCESS_TOKEN`, `VK_USER_ID`,
 `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN` (last four optional -
 publish falls back to hands-agent when absent). Code nodes need
 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (set in docker-compose.yml).

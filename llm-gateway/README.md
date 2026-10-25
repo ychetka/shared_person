@@ -9,14 +9,14 @@ to use - callers just POST a role name plus input.
 ```bash
 npm install
 npm run build
-OPENROUTER_API_KEY=... GEMINI_API_KEY=... npm start   # :8787
+GEMINI_API_KEY=... npm start   # :8787
 ```
 
 ## Config (env)
 
 - `LLM_GATEWAY_PORT` - listen port (default `8787`)
-- `OPENROUTER_API_KEY`, `GEMINI_API_KEY` - backend keys; a role fails
-  if its backend key is missing
+- `GEMINI_API_KEY` - backend key (direct generativelanguage API); a
+  role fails if the key is missing
 - `ROLES_DIR`, `PROMPTS_DIR`, `CONTEXT_DIR` - directory overrides
   (default `../roles`, `../prompts`, `../context`)
 - `REQUEST_TIMEOUT_MS` - upstream call timeout (default `120000`)
@@ -26,8 +26,8 @@ OPENROUTER_API_KEY=... GEMINI_API_KEY=... npm start   # :8787
 ```yaml
 name: extract-facts            # required
 description: ...               # shown in GET /roles
-backend: openrouter | gemini   # required
-model: google/gemini-2.5-flash # required
+backend: gemini                # required (direct Google API)
+model: gemini-3.5-flash        # required
 fallback_models: [m1, m2]      # tried in order when primary fails
 temperature: 0.3
 max_tokens: 4096
