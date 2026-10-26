@@ -17,8 +17,9 @@ not the nested `.n8n/` that holds `database.sqlite`):
 - `state/tg.json` - resolved Telegram chat_id
 - `state/drafts/<id>.json` - moderation drafts
 - `state/trend_seen.json` - trend-scout dedupe (7 days)
-- `state/digest.json` - last digest items keyed by date + index,
-  resolved by the `post N` reply (3 days kept)
+- `state/digest.json` - last digest items keyed by date + index
+  (RSS and VK items share the index space), resolved by the `post N`
+  reply (3 days kept)
 - `queue/publish/{,done,failed}` - approved posts waiting for drivers
 - `logs/{moderation,content-gen,publish}.jsonl` - audit trail
 
@@ -86,8 +87,33 @@ marked `> POST CANDIDATE`; the footer says
 `Reply: post N - to generate hype-commentary draft on item N`.
 The top-8 items are cached to `state/digest.json` so the reply path in
 sp-tg-moderation can resolve them. Skips silently when nothing new or
-chat_id is not resolved yet. VK group top-posts are a planned extension
-(iteration 2, needs the VK token).
+chat_id is not resolved yet.
+
+VK branch (`VK Top Posts` Code node between `Curate Feed` and
+`Format Digest`, needs `VK_ACCESS_TOKEN` + `VK_USER_ID`):
+
+- Community list comes from the live subscription scan:
+  `groups.get` (extended) filtered by a pillar keyword expression
+  (n8n/automation, frontend/programming, algo trading, dev/it).
+  When the scan fails or matches nothing, a fallback list of public
+  walls is used instead (`habr_com`, `webstandards_ru`, `proglib`,
+  `smart_lab` - edit the `FALLBACK` array in the node).
+- Per community (max 8) `wall.get` pulls the last 20 posts; only
+  posts from the last 48h count, pinned posts and ads are skipped.
+- Scoring is engagement only (no rss-reader curator), mirroring the
+  rss-reader log-normalized shape:
+  `0.45*ln1p(comments)/ln1p(300) + 0.35*ln1p(likes)/ln1p(2000) +
+  0.2*ln1p(views)/ln1p(100000)`; `hype` = 100 * engagement.
+  Top 2 posts per community are kept, then capped at 6 VK items total.
+- VK items render as a `VK communities` section under the RSS list.
+  They share the same index space (`post N` resolves them) and the
+  same `digest.json` / `trend_seen.json` state (vk ids look like
+  `vk:-<group_id>_<post_id>`).
+- API failures degrade quietly: a rejected token (error 5) flips
+  `vk_status` to `auth_error`, other failures land in `vk_error` /
+  `vk_errors`, flood control (error 9) gets one delayed retry per
+  call. The RSS digest still goes out; the VK section is replaced by
+  a one-line skip note.
 
 ### sp-content-gen (webhook)
 
