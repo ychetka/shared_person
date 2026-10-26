@@ -56,13 +56,24 @@ try {
       (versionId,workflowId,authors,createdAt,updatedAt,nodes,connections,name,autosaved)
       VALUES (?,?,?,?,?,?,?,?,?)`)
       .run(VER_ID, wf.id, 'deploy_workflow.js --update', now, now, nodesJson, connJson, name, 0);
-    db.prepare(`UPDATE workflow_entity SET nodes=?,connections=?,versionId=?,activeVersionId=?,updatedAt=? WHERE id=?`)
-      .run(nodesJson, connJson, VER_ID, VER_ID, now, wf.id);
-    db.prepare(`UPDATE workflow_published_version SET publishedVersionId=?,updatedAt=? WHERE workflowId=?`)
-      .run(VER_ID, now, wf.id);
-    db.prepare(`UPDATE workflow_publication_trigger_status SET versionId=?,updatedAt=? WHERE workflowId=?`)
-      .run(VER_ID, now, wf.id);
-    console.log('updated workflow', wf.id, 'version', VER_ID);
+    db.prepare(`UPDATE workflow_entity SET nodes=?,connections=?,versionId=?,activeVersionId=?,active=?,updatedAt=? WHERE id=?`)
+      .run(nodesJson, connJson, VER_ID, VER_ID, active, now, wf.id);
+    // published_version row may be missing after a deactivation - upsert
+    db.prepare(`INSERT INTO workflow_published_version
+      (workflowId,publishedVersionId,createdAt,updatedAt) VALUES (?,?,?,?)
+      ON CONFLICT(workflowId) DO UPDATE SET publishedVersionId=excluded.publishedVersionId,updatedAt=excluded.updatedAt`)
+      .run(wf.id, VER_ID, now, now);
+    // trigger status rows are also dropped on deactivation - re-register
+    for (const t of triggers) {
+      const node = nodes.find((n) => n.name === t.node);
+      db.prepare(`INSERT INTO workflow_publication_trigger_status
+        (workflowId,nodeId,versionId,status,createdAt,updatedAt,triggerKind)
+        VALUES (?,?,?,?,?,?,?)
+        ON CONFLICT(workflowId,nodeId) DO UPDATE SET versionId=excluded.versionId,status='activated',updatedAt=excluded.updatedAt`)
+        .run(wf.id, node?.id || t.node, VER_ID, 'activated', now, now,
+          t.path ? 'persisted' : 'in-memory');
+    }
+    console.log('updated workflow', wf.id, 'version', VER_ID, 'active', active);
   } else {
     const WF_ID = crypto.randomUUID().slice(0, 16);
     // cyclic FK entity<->history: entity first with NULL, then history, then back-update

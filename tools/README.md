@@ -76,6 +76,29 @@ diagram from `topology`). Max 2 specs per request.
 ## deploy_workflow.js
 
 SQLite deployer for `n8n/workflows/*.json` - see `n8n/README.md`.
+`--update` also reactivates a deactivated workflow: it upserts
+`workflow_published_version` and `workflow_publication_trigger_status`
+rows and flips `active` from the spec file.
+
+## vk_token_service.py - VK token provider for sp-publish
+
+The VK wall.post driver needs a working access token; the standalone
+token in ENV expires. This daemon serves a fresh web-session token
+extracted from the logged-in VK tab in the operator's Chrome via CDP
+(`VK_CDP_URL`, default `http://127.0.0.1:9223`). The web token carries
+`wall` scope (post/getById/delete verified). On VK error 5 the service
+reloads the tab once and re-extracts.
+
+```bash
+uv run tools/vk_token_service.py --serve --port 8792   # daemon
+uv run tools/vk_token_service.py --once                # print token JSON
+```
+
+Endpoints: `GET /health`, `GET /vk-token` ->
+`{"ok": true, "access_token": "..."}`. Binds host loopback:8792; the n8n
+container reaches it through the slirp gateway as `http://10.0.2.2:8792`
+(same reachability quirk as the viz renderer). Not part of
+docker-compose - relaunch the same way after a reboot.
 
 ## port_fwd.sh / port_fwd.py
 

@@ -44,7 +44,7 @@ incoming update handled by sp-tg-moderation instead.
 ### sp-tg-moderation (webhooks)
 
 - `POST /webhook/moderation-draft` `{platform, text, image?, topic?,
-  draft_id?, scope?, warnings?, media?, caption_note?}` - saves a draft,
+  draft_id?, scope?, warnings?, media?, caption_note?, test?}` - saves a draft,
   sends it to the Telegram chat with inline buttons Approve / Edit /
   Reject (`callback_data` = `ap|ed|rj:<id>`). `scope` is rendered above
   the text; `warnings[]` (verifier flags) are appended as a block under
@@ -60,7 +60,8 @@ incoming update handled by sp-tg-moderation instead.
   - On Approve the `media[]` list is carried into the publish queue
     file so platform drivers can attach the same files.
 - `POST /webhook/tg-moderation` - Telegram webhook target:
-  - Approve > writes `queue/publish/<id>.json`, marks the TG message
+  - Approve > writes `queue/publish/<id>.json` (carries `test: true`
+    through from the draft meta when set), marks the TG message
   - Reject > marks draft rejected, logs to `moderation.jsonl`
   - Edit > stores a pending-edit marker; the next plain-text message in
     the chat is forwarded to `/webhook/content-gen` as a rewrite request
@@ -198,15 +199,33 @@ moderation-draft still accepts a pre-made local path/URL.
 
 ### sp-publish (schedule, every 2 min)
 
-Scans `queue/publish/` and routes per platform:
+Scans `queue/publish/` and routes per platform. Currently VK only
+(issue #1): the `ENABLED` map in the Code node gates execution, every
+other platform's queue file is moved to `queue/publish/skipped/` with a
+`platform not enabled` log line - nothing goes to FB/LI/IG/TikTok.
 
-- `vk` - `wall.post` via VK API when `VK_ACCESS_TOKEN` is set
-- `linkedin` - `/rest/posts` when `LINKEDIN_ACCESS_TOKEN` +
-  `LINKEDIN_PERSON_URN` are set, else hands-agent fallback
-- `facebook` / `instagram` / `tiktok` / `linkedin` fallback - writes
-  `<id>.json` to `/home/node/hands-queue/inbox/` in the hands-agent task
-  format `{"recipe": "<platform>_post", "params": {"text": ...,
-  "image_path": ...}}`
+VK driver flow per queue file `{platform: "vk", text, media[], test?}`:
+
+1. `wall.post` with `owner_id=$VK_USER_ID` and `message=text`.
+   Text-only for now - `media[]` is carried through but not attached
+   (wall photo upload is a follow-up).
+2. Post-publish verification: `wall.getById` on `<owner>_<post_id>`
+   must read the post back; the ledger record gets `verified: true`.
+3. Ledger: one line appended to `state/published.jsonl` with
+   `{ts, id, platform, external_id, status, verified, test, deleted}` -
+   minimal record until the full registry lands (issue #12).
+4. Test posts (`test: true` in the queue file, passed through from the
+   draft meta by moderation): after verification the driver calls
+   `wall.delete` and the ledger status becomes
+   `test-published-deleted`.
+
+VK token handling: the Code node prefers the cached token in
+`state/vk_token.json`, falls back to `VK_ACCESS_TOKEN` env. On VK
+error 5 (expired/rejected) it calls the host refresh service
+`tools/vk_token_service.py` at `VK_TOKEN_REFRESH_URL` (default
+`http://10.0.2.2:8792/vk-token`), persists the fresh token to
+`vk_token.json` and retries once. A persistent error 5 marks
+`state/vk_status.json` as `auth_error` and the file lands in `failed/`.
 
 Processed files move to `done/` or `failed/` and are logged to
 `publish.jsonl`; results are summarized to Telegram.
@@ -218,5 +237,7 @@ All tokens come from container env (`../ENV` via compose
 parameters. Required compose vars: `TELEGRAM_BOT_TOKEN`,
 `GEMINI_API_KEY` (llm-gateway), `VK_ACCESS_TOKEN`, `VK_USER_ID`,
 `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN` (last four optional -
-publish falls back to hands-agent when absent). Code nodes need
+publish falls back to hands-agent when absent). `VK_TOKEN_REFRESH_URL`
+is an optional override for the VK token refresh endpoint (default
+`http://10.0.2.2:8792/vk-token`). Code nodes need
 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (set in docker-compose.yml).
