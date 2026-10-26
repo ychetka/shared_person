@@ -43,6 +43,10 @@ issues) - the session extractor reads them as the arc source.
   data, source?}`. Session drafts skip archive-photo selection - the
   `viz-spec` role picks 0-2 datasets and `tools/render_viz.py` draws
   them. Every number must come from the source material verbatim.
+- `gen_image` - boolean; true = the draft gets a GENERATED image: the
+  `image-gen` role writes text-to-image prompts from the draft accents
+  and llm-gateway `/image` renders them into `materials/img/`. Ignored
+  for session posts with `viz_data` (charts win) and retro posts.
 - `platform_fit[]` - linkedin | facebook | vk | instagram |
   youtube-shorts | tiktok.
 - `retro` - archival content flag; retro posts are marked as such in the

@@ -49,6 +49,7 @@ export interface ImageResult {
 async function callGeminiImage(
   model: string,
   prompt: string,
+  timeoutMs: number,
 ): Promise<ImageResult> {
   if (!config.geminiKey) throw new Error("GEMINI_API_KEY not set");
   const url =
@@ -56,7 +57,7 @@ async function callGeminiImage(
     `:generateContent?key=${config.geminiKey}`;
   const res = await fetch(url, {
     method: "POST",
-    signal: AbortSignal.timeout(config.requestTimeoutMs),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -82,10 +83,24 @@ async function callGeminiImage(
 }
 
 export async function callImage(prompt: string): Promise<ImageResult> {
+  // Per-attempt timeout is requestTimeoutMs, but the fallback loop has
+  // an overall deadline so N models x timeout cannot overshoot the
+  // caller's own HTTP timeout (n8n /image wait is 290s).
+  const deadline = Date.now() + config.imageTotalTimeoutMs;
   let lastErr: unknown = new Error("no image models configured");
   for (const model of config.imageModels) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      lastErr = new Error(
+        `image deadline exceeded (${config.imageTotalTimeoutMs}ms total); ` +
+        `last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+      );
+      break;
+    }
     try {
-      return await callGeminiImage(model, prompt);
+      return await callGeminiImage(
+        model, prompt, Math.min(config.requestTimeoutMs, remaining),
+      );
     } catch (e) {
       lastErr = e;
     }

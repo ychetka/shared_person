@@ -1,5 +1,6 @@
 import express from "express";
 import _ from "lodash";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -73,9 +74,14 @@ app.post("/image", async (req, res) => {
     if (typeof prompt !== "string" || !prompt.trim()) {
       return res.status(400).json({ error: "prompt required" });
     }
-    const safe = String(name || "img")
+    // Unique file per request: an omitted name gets a uuid basename, and
+    // a random suffix is appended AFTER truncation so a long name (e.g.
+    // a draft_id whose _0/_1 suffix would be sliced off) can never
+    // collide with a sibling or an earlier request.
+    const base = String(name ?? crypto.randomUUID())
       .replace(/[^A-Za-z0-9_-]/g, "_")
-      .slice(0, 80) || "img";
+      .slice(0, 60) || "img";
+    const safe = `${base}_${crypto.randomBytes(4).toString("hex")}`;
     const img = await callImage(prompt);
     const ext = img.mime === "image/webp" ? "webp"
       : img.mime === "image/jpeg" ? "jpg" : "png";

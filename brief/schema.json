@@ -152,6 +152,11 @@
       },
       "description": "Structured datasets extracted from the source for GENERATED charts (see prompts/viz-spec.txt and tools/render_viz.py). Session posts use these instead of archive photos: the numbers are rendered into charts by the pipeline, so they must be real measurements, not prose claims. Empty = the post goes text-only or without generated media."
     },
+    "gen_image": {
+      "type": "boolean",
+      "default": false,
+      "description": "true = the post should carry a GENERATED image: the image-gen role writes 1-2 text-to-image prompts from the draft accents and llm-gateway /image renders them into materials/img/. Session posts with viz_data keep generated charts instead; retro/archive and untyped posts keep the media[] selector path."
+    },
     "platform_fit": {
       "type": "array",
       "minItems": 1,
