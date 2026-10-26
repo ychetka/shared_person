@@ -28,5 +28,15 @@ output:
 parse it; when `schema` is present the payload is validated and the call
 fails loudly on mismatch (n8n sees HTTP 422 with validation details).
 
+## Model mapping
+
+Writer roles run on the pro-tier model; extraction, review and selection
+stay on flash. Fallbacks are tried in order when the primary fails.
+
+| Role | Primary | Fallbacks |
+| ---- | ------- | --------- |
+| writer-linkedin / writer-fb / writer-vk | gemini-3.1-pro-preview | gemini-3.6-flash, gemini-3.5-flash |
+| all other roles | gemini-3.5-flash | gemini-3.6-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-flash-lite-latest |
+
 Context slot files live in `../context/` (not committed - they may hold
 private material). A missing slot file resolves to an empty string.
