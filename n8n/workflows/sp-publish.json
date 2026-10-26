@@ -1,6 +1,6 @@
 {
   "name": "sp-publish",
-  "active": true,
+  "active": false,
   "nodes": [
     {
       "parameters": {
