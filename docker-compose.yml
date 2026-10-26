@@ -71,8 +71,13 @@ services:
       - ROLES_DIR=/app/code/roles
       - PROMPTS_DIR=/app/code/prompts
       - CONTEXT_DIR=/app/code/context
+      # POST /image writes generated PNGs here (host materials/img),
+      # n8n moderation sendPhotos them via its read-only mount.
+      - IMAGE_DIR=/app/materials/img
+      - IMAGE_MODELS=${IMAGE_MODELS:-gemini-3.1-flash-image-preview,gemini-2.5-flash-image}
     volumes:
       - ./:/app/code:ro
+      - ../materials/img:/app/materials/img
 
   edge:
     image: n8n-local:latest

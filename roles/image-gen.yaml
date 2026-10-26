@@ -1,0 +1,33 @@
+name: image-gen
+description: Turns a finished draft + its accents into 1-2 image prompts for a Gemini image model (flat dark tech illustration)
+backend: gemini
+model: gemini-3.5-flash
+fallback_models:
+  - gemini-3.6-flash
+  - gemini-3.5-flash-lite
+  - gemini-3.1-flash-lite
+  - gemini-flash-lite-latest
+temperature: 0.4
+max_tokens: 1024
+prompt: image-gen
+output:
+  type: json
+  schema:
+    type: object
+    additionalProperties: false
+    required: ["images"]
+    properties:
+      images:
+        type: array
+        maxItems: 2
+        items:
+          type: object
+          additionalProperties: false
+          required: ["prompt", "caption"]
+          properties:
+            prompt:
+              type: string
+            caption:
+              type: string
+      note:
+        type: string

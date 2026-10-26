@@ -39,6 +39,60 @@ async function callGemini(
   return { text, model: role.model, backend: "gemini" };
 }
 
+export interface ImageResult {
+  base64: string;
+  mime: string;
+  model: string;
+  backend: string;
+}
+
+async function callGeminiImage(
+  model: string,
+  prompt: string,
+): Promise<ImageResult> {
+  if (!config.geminiKey) throw new Error("GEMINI_API_KEY not set");
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}` +
+    `:generateContent?key=${config.geminiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    signal: AbortSignal.timeout(config.requestTimeoutMs),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { responseModalities: ["IMAGE"] },
+    }),
+  });
+  if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = (await res.json()) as {
+    candidates?: {
+      content?: {
+        parts?: { text?: string; inlineData?: { mimeType?: string; data?: string } }[];
+      };
+    }[];
+  };
+  const part = data.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
+  if (!part?.inlineData?.data) throw new Error("gemini image: no inlineData in response");
+  return {
+    base64: part.inlineData.data,
+    mime: part.inlineData.mimeType ?? "image/png",
+    model,
+    backend: "gemini",
+  };
+}
+
+export async function callImage(prompt: string): Promise<ImageResult> {
+  let lastErr: unknown = new Error("no image models configured");
+  for (const model of config.imageModels) {
+    try {
+      return await callGeminiImage(model, prompt);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
 export async function callLlm(
   role: RoleManifest,
   system: string,

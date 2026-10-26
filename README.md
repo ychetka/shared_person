@@ -28,13 +28,16 @@ rootless docker daemon - nothing from this project runs bare on the host
 - `llm-gateway/` - AI harness. `POST /run {role, input}` resolves a role
   manifest from `roles/`, renders context slots from `context/`, calls the
   configured backend (direct Gemini API), validates output.
+  `POST /image {prompt, name?}` renders text-to-image prompts via Gemini
+  image models into `../materials/img/`.
   `GET /roles`, `GET /health`.
 - `rss-reader/` - standalone RSS/Atom digest microservice: `GET /digest`,
   `GET/PUT /feeds`, `POST /curate` (scores items through llm-gateway role
   `feed-curator`). Generic - reusable outside this project.
 - `roles/` - LLM role manifests (yaml: prompt, model, temperature,
   output_schema, max_tokens, context_slots). `viz-spec` picks generated
-  charts for session drafts.
+  charts for session drafts; `image-gen` writes text-to-image prompts
+  for generated media on hype/hot-topic drafts.
 - `prompts/` - prompt texts referenced by manifests.
 - `context/` - private context slots (symlinks to project-root docs,
   never committed).

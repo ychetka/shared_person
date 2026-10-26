@@ -93,7 +93,7 @@ chat_id is not resolved yet. VK group top-posts are a planned extension
 
 `POST /webhook/content-gen` `{topic, platform, context?, mode?,
 feedback?, draft_id?, image?, scope?, accents?, links?, media?,
-source_type?, viz_data?}`.
+source_type?, viz_data?, gen_image?}`.
 `platform`: linkedin | facebook | vk | all. `scope` (string),
 `accents[]` and `links[]` bound the writers; when `context` carries a
 serialized brief per `../brief/schema.json`, these fields are picked up
@@ -126,7 +126,7 @@ Passes (all LLM calls go through llm-gateway `POST :8787/run`):
    one rewrite attempt; remaining issues are attached to the draft as
    `warnings[]` and shown in the moderation message. A verifier outage
    marks the draft "not fact-checked" instead of blocking it.
-6. media - two paths depending on the source:
+6. media - three paths depending on the source:
    - session posts (`source_type: session` or any `viz_data[]`
      present): GENERATED charts. The `viz-spec` role gets the draft
      text + accents + `viz_data[]` and picks 0-2 chart specs
@@ -140,11 +140,20 @@ Passes (all LLM calls go through llm-gateway `POST :8787/run`):
      draft gets a stable id here (payload `draft_id` or generated,
      role-suffixed on multi-platform runs) so PNG names map 1:1 to
      moderation drafts.
-   - other posts (retro/archive): the `media-selector` role runs only
-     when candidates exist (payload `media[]` or brief `media[]`). It
-     gets the finished draft text + accents + `{path, desc}` candidates
-     and picks 0-2 files matching the draft's accents; an empty
-     selection is valid.
+   - generated-image posts (`gen_image: true` in the payload or the
+     serialized brief, OR a non-retro non-session `source_type` like
+     `hype`/`hot-topic`): the `image-gen` role gets the draft text +
+     accents + topic and emits 1-2 text-to-image prompts (flat minimal
+     dark tech illustration, no text in image, no logos). Each prompt
+     is POSTed to llm-gateway `/image`, which renders it via a Gemini
+     image model into `materials/img/<draft_id>_<i>.<ext>` and returns
+     `materials/img/...` paths for sendPhoto. Generation failures
+     degrade to text-only.
+   - other posts (retro/archive, untyped): the `media-selector` role
+     runs only when candidates exist (payload `media[]` or brief
+     `media[]`). It gets the finished draft text + accents +
+     `{path, desc}` candidates and picks 0-2 files matching the
+     draft's accents; an empty selection is valid.
 
    Selected/generated paths plus `caption_note` are attached to the
    draft meta and forwarded to moderation, which delivers them via
@@ -154,13 +163,11 @@ Each draft is POSTed to `/webhook/moderation-draft` for moderation
 with `scope`, `warnings`, `media` and `caption_note` fields.
 
 Generated media status: chart visualizations from `viz_data` are live
-(matplotlib, see `../tools/README.md`). AI image-gen candidates
-(Gemini image model, e.g.
-gemini-3.1-flash-image) are still blocked on llm-gateway - it only has
-a text backend (gemini generateContent);
-needs an image backend (gemini `:predict`/`generateContent` with
-responseModalities). Until then non-chart media comes from the
-brief/payload candidate list only, and the legacy `image` field on
+(matplotlib, see `../tools/README.md`), and AI image-gen is live via
+llm-gateway `POST /image` (Gemini image models, see
+`../llm-gateway/README.md`). The gateway writes files into
+`materials/img/` on the host through a dedicated writable mount; the
+n8n `materials` mount stays read-only. The legacy `image` field on
 moderation-draft still accepts a pre-made local path/URL.
 
 ### sp-publish (schedule, every 2 min)

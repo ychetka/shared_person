@@ -1,9 +1,11 @@
 import express from "express";
 import _ from "lodash";
+import fs from "node:fs";
+import path from "node:path";
 import { createRequire } from "node:module";
 import { config } from "./config.js";
 import { buildSystemPrompt, listRoles, loadRole } from "./manifest.js";
-import { callLlm } from "./backends.js";
+import { callImage, callLlm } from "./backends.js";
 
 const Ajv = createRequire(import.meta.url)("ajv") as typeof import("ajv").default;
 const ajv = new Ajv();
@@ -55,6 +57,41 @@ app.post("/run", async (req, res) => {
       }
     }
     return res.json({ role: manifest.name, model: result.model, backend: result.backend, json: parsed });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return res.status(500).json({ error: msg });
+  }
+});
+
+// POST /image {prompt, name?} - generate a PNG via a Gemini image model
+// and write it to config.imageDir (mounted as materials/img). The
+// returned `path` is materials/img/<name>.png, the same form media[]
+// entries take for the moderation sendPhoto resolution.
+app.post("/image", async (req, res) => {
+  try {
+    const { prompt, name } = req.body ?? {};
+    if (typeof prompt !== "string" || !prompt.trim()) {
+      return res.status(400).json({ error: "prompt required" });
+    }
+    const safe = String(name || "img")
+      .replace(/[^A-Za-z0-9_-]/g, "_")
+      .slice(0, 80) || "img";
+    const img = await callImage(prompt);
+    const ext = img.mime === "image/webp" ? "webp"
+      : img.mime === "image/jpeg" ? "jpg" : "png";
+    const fname = `${safe}.${ext}`;
+    fs.mkdirSync(config.imageDir, { recursive: true });
+    const abs = path.join(config.imageDir, fname);
+    const buf = Buffer.from(img.base64, "base64");
+    fs.writeFileSync(abs, buf);
+    return res.json({
+      ok: true,
+      path: `materials/img/${fname}`,
+      file: abs,
+      model: img.model,
+      backend: img.backend,
+      bytes: buf.length,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return res.status(500).json({ error: msg });
