@@ -136,9 +136,33 @@ const registerTriggers = (wfId, priorWebhookIds = new Map()) => {
       const webhookId = node?.webhookId || node?.parameters?.webhookId ||
         priorWebhookIds.get(t.node) || node?.id || crypto.randomUUID();
       const variant = `${wfId}/${encodeURIComponent(t.node)}/${t.path}`;
+      const whMethod = t.method || 'POST';
       for (const p of [t.path, variant]) {
+        // webhook hijack guard: webhook_entity is keyed on
+        // (webhookPath, method), so INSERT OR REPLACE would silently
+        // re-point a path ANOTHER workflow still owns at this
+        // workflowId - hijacking its callback routing without a
+        // trace. Refuse the overwrite and fail the deploy (ROLLBACK
+        // keeps the DB consistent); the operator must clear the
+        // foreign registration first. The --update path already
+        // deleted THIS workflow's rows above, so a surviving row can
+        // only be foreign - the workflowId check just keeps a
+        // same-id re-register idempotent.
+        const whCols = colsOf('webhook_entity');
+        if (whCols.has('webhookPath') && whCols.has('method') &&
+            whCols.has('workflowId')) {
+          const owner = db.prepare(
+            'SELECT workflowId FROM webhook_entity ' +
+            'WHERE webhookPath=? AND method=?').get(p, whMethod);
+          if (owner && owner.workflowId !== wfId) {
+            throw new Error(`refusing to hijack webhook path "${p}" ` +
+              `(${whMethod}): already registered to workflow ` +
+              `${owner.workflowId} - remove that registration or ` +
+              'deactivate the owning workflow first');
+          }
+        }
         ins('webhook_entity', {
-          webhookPath: p, method: t.method || 'POST', node: t.node,
+          webhookPath: p, method: whMethod, node: t.node,
           webhookId, workflowId: wfId, pathLength: p.length,
           createdAt: now, updatedAt: now,
         });

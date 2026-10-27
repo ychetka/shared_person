@@ -471,8 +471,13 @@ class Handler(BaseHTTPRequestHandler):
             # upstream error strings can echo a live token or the
             # shared secret
             if res.get("error"):
+                # snapshot first: an in-flight get_token() on another
+                # request thread mutates _SECRETS_SEEN via
+                # _remember_secret while this handler thread is outside
+                # _GET_TOKEN_LOCK - unpacking the live set could raise
+                # RuntimeError and kill the connection
                 res["error"] = _scrub(
-                    res["error"], SECRET, *_SECRETS_SEEN)[:300]
+                    res["error"], SECRET, *list(_SECRETS_SEEN))[:300]
             if res.get("ok"):
                 # masked token only - the journal must never hold a
                 # live wall-scope credential
@@ -534,10 +539,12 @@ def main():
         except Exception as e:  # noqa: BLE001 - mirrors the HTTP path
             res = {"ok": False, "error": str(e)}
         # same scrub as do_GET - --once output lands in terminal
-        # scrollback and CI logs
+        # scrollback and CI logs. Snapshot the set like the HTTP path
+        # does (here the run is single-threaded, but the shapes stay
+        # identical so a future shared call site stays safe)
         if res.get("error"):
             res["error"] = _scrub(res["error"], SECRET,
-                                  *_SECRETS_SEEN)[:300]
+                                  *list(_SECRETS_SEEN))[:300]
         if not args.show_token and res.get("access_token"):
             res["access_token"] = _mask(res["access_token"])
         print(json.dumps(res))
