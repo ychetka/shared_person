@@ -76,7 +76,11 @@ diagram from `topology`). Max 2 specs per request.
 ## deploy_workflow.js
 
 SQLite deployer for `n8n/workflows/*.json` - see `n8n/README.md`.
-`--update` also reactivates a deactivated workflow: it upserts
+The target DB defaults to the `shared-person_n8n_storage` docker
+volume mountpoint (resolved via `docker volume inspect`, not a
+hardcoded host path - the volume's `_data` tree can live under an
+unrelated project's docker dir); override with `--db <path>` or
+`--db=<path>`. `--update` also reactivates a deactivated workflow: it upserts
 `workflow_published_version` and re-registers
 `workflow_publication_trigger_status` plus `webhook_entity` rows
 (schema-adaptive `INSERT OR REPLACE`, same helper as the create path),
@@ -92,7 +96,12 @@ extracted from the logged-in VK tab in the operator's Chrome via CDP
 URL hostname (`vk.ru`/`vk.com` and subdomains only) and every matching
 tab is tried until one yields a token - a logged-out first tab does not
 hide a valid session in another one. The web token carries
-`wall` scope (post/getById/delete verified). On VK error 5 the service
+`wall` scope (post/getById/delete verified). The localStorage scan
+prefers the canonical `*:web_token:login:auth` key shape; the generic
+`web_token` fallback is gated on the `<app_id>:` key prefix being
+6287487 (the VK web client app id) - `users.get` accepts any live
+token, so a web_token minted for a different VK app would pass the
+validity check yet fail every `wall.post`. On VK error 5 the service
 reloads the tabs once and re-extracts.
 
 ```bash

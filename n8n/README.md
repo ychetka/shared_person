@@ -22,8 +22,12 @@ not the nested `.n8n/` that holds `database.sqlite`):
   reply (3 days kept)
 - `queue/publish/{,done,failed,skipped,processing}` - approved posts
   waiting for drivers; non-enabled platforms land in `skipped/`;
-  `processing/` holds files claimed by a running tick (a file stuck
-  there after a crash can be moved back to the queue root manually)
+  `processing/` holds files claimed by a running tick. A claim stuck
+  there after a crash is auto-recovered to `failed/` after ~10min
+  with a `maybe_live` ledger note - the `wall.post` may already have
+  landed, so check the VK wall first, then approve the draft again to
+  re-publish. Never move a stuck claim back to the queue root
+  manually: that skips the wall check and can duplicate the post
 - `logs/{moderation,content-gen,publish}.jsonl` - audit trail
 
 The hands-agent queue is bind-mounted at `/home/node/hands-queue`
@@ -74,7 +78,14 @@ incoming update handled by sp-tg-moderation instead.
     file so platform drivers can attach the same files.
 - `POST /webhook/tg-moderation` - Telegram webhook target:
   - Approve > writes `queue/publish/<id>.json` (carries `test: true`
-    through from the draft meta when set), marks the TG message
+    through from the draft meta when set), marks the TG message.
+    When a queue file already exists (root or `processing/`) and its
+    payload differs from the current draft - e.g. an Edit + rewrite
+    regenerated the draft under the same `draft_id` after the first
+    Approve - the queued file's payload is synced to the latest draft
+    in place (atomic dot-tmp + rename) instead of refusing, so the
+    corrected text is what reaches the wall. An identical payload
+    still answers `already queued`
   - Reject > marks draft rejected, logs to `moderation.jsonl`
   - Edit > stores a pending-edit marker; the next plain-text message in
     the chat is forwarded to `/webhook/content-gen` as a rewrite request
@@ -225,8 +236,9 @@ Update reads for its requeue gate, so the two cannot drift. Every
 non-enabled platform's queue file is moved to
 `queue/publish/skipped/` with a
 `platform not enabled` log line - nothing goes to FB/LI/IG/TikTok.
-Enabling a platform requires moving its `skipped/` files back to the
-queue root manually.
+After enabling a platform, re-approve its parked drafts to re-queue
+them - the Approve path drops the stale `skipped/` copy and writes a
+fresh queue file (it refuses while the platform is still disabled).
 
 VK driver flow per queue file `{platform: "vk", text, media[], test?}`:
 

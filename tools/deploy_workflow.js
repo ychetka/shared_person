@@ -5,6 +5,14 @@
 // Run with the n8n container STOPPED:
 //   node tools/deploy_workflow.js workflows/media-trend-scout.json [--update]
 //   node tools/deploy_workflow.js <file.json> --db=/path/database.sqlite
+//   node tools/deploy_workflow.js <file.json> --db /path/database.sqlite
+//
+// Default DB: resolved at runtime via
+// `docker volume inspect shared-person_n8n_storage` - the volume's
+// _data dir can sit under an unrelated project's docker-data tree
+// (rootless docker keeps all volumes in one per-user store), so a
+// hardcoded host path would silently patch the wrong n8n. When docker
+// cannot resolve it, pass --db explicitly.
 //
 // Workflow file format:
 //   { "name": "...", "active": true,
@@ -20,19 +28,55 @@
 // shared_workflow row is created for the owner project automatically.
 
 const { DatabaseSync } = require('node:sqlite');
+const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const arg = (k) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').split('=')[1];
-const file = process.argv.find((a) => a.endsWith('.json'));
-const UPDATE = process.argv.includes('--update');
-const DB = arg('db') || path.join(
-  process.env.HOME || '',
-  'projects/trade-ai-analitic/docker-data/volumes/shared-person_n8n_storage/_data/.n8n/database.sqlite');
+const argv = process.argv.slice(2);
+// supports both `--db=path` and `--db path` forms
+const arg = (k) => {
+  const eq = argv.find((a) => a.startsWith(`--${k}=`));
+  if (eq !== undefined) return eq.slice(k.length + 3);
+  const i = argv.indexOf(`--${k}`);
+  if (i !== -1 && argv[i + 1] && !argv[i + 1].startsWith('--')) {
+    return argv[i + 1];
+  }
+  return '';
+};
+// the workflow file is the first *.json positional - flag arguments
+// (--db=x.json) and the value of `--db <file>.json` must not match it
+const file = argv.find((a, i) =>
+  a.endsWith('.json') && !a.startsWith('--') && argv[i - 1] !== '--db');
+const UPDATE = argv.includes('--update');
+// resolve the n8n DB from the docker volume instead of hardcoding a
+// host path - see the header comment
+const defaultDb = () => {
+  try {
+    const mp = execSync(
+      'docker volume inspect shared-person_n8n_storage --format "{{.Mountpoint}}"',
+      { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    if (mp) return path.join(mp, '.n8n', 'database.sqlite');
+  } catch (e) {}
+  return null;
+};
+const DB = arg('db') || defaultDb();
 
 if (!file) {
-  console.error('usage: node tools/deploy_workflow.js <workflow.json> [--update] [--db=path]');
+  console.error('usage: node tools/deploy_workflow.js <workflow.json> [--update] [--db=path|--db path]');
+  process.exit(1);
+}
+if (!fs.existsSync(file)) {
+  console.error(`workflow file not found: ${file}`);
+  process.exit(1);
+}
+if (!DB) {
+  console.error('could not resolve the n8n DB from docker volume ' +
+    'shared-person_n8n_storage - pass --db <path>/database.sqlite');
+  process.exit(1);
+}
+if (!fs.existsSync(DB)) {
+  console.error(`n8n DB not found: ${DB}`);
   process.exit(1);
 }
 const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -111,6 +155,10 @@ try {
     for (const [col, val] of [
       ['nodes', nodesJson],
       ['connections', connJson],
+      // spec-level settings (executionOrder, timeouts, ...) apply on
+      // --update too - dropping them kept the values from the
+      // original insert, so a spec change looked deployed but was not
+      ['settings', JSON.stringify(settings)],
       ['versionId', VER_ID],
       ['activeVersionId', active ? VER_ID : null],
       ['active', active],
