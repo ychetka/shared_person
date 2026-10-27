@@ -298,9 +298,25 @@ def get_token(budget=TOTAL_BUDGET):
     eval, reload, poll round and vk_check draws from it, so the worst
     case stays under the 60s timeout the n8n caller uses.
 
-    Serialized under _GET_TOKEN_LOCK - see its comment."""
-    with _GET_TOKEN_LOCK:
-        return _get_token(budget)
+    Serialized under _GET_TOKEN_LOCK - see its comment. The lock WAIT
+    draws from the same budget too: a second concurrent caller that
+    cannot enter inside its own deadline fails fast with a retryable
+    'busy' instead of queueing a full run and then burning a second
+    budget - two back-to-back runs would blow the caller's 60s."""
+    deadline = time.time() + budget
+    if not _GET_TOKEN_LOCK.acquire(
+            timeout=max(0.0, deadline - time.time())):
+        _log("token request busy - another get_token() outlasted "
+             "this call's budget")
+        return {"ok": False,
+                "error": "busy - another token request in flight",
+                "retryable": True}
+    try:
+        # the serialized run gets only what the lock wait left of the
+        # global budget - the caller's total wait never exceeds it
+        return _get_token(max(0.0, deadline - time.time()))
+    finally:
+        _GET_TOKEN_LOCK.release()
 
 
 def _get_token(budget):
@@ -342,9 +358,8 @@ def _get_token(budget):
         if code:
             _log(f"vk_check failed after reload: {code}")
             return {"ok": False, "error": f"vk check failed: {code}"}
-    if tok is None:
-        _log("no token before deadline - global budget exhausted")
-        return {"ok": False, "error": err or "no token before deadline"}
+    # every path above either returns early on a falsy tok or proceeds
+    # with a truthy one - tok is always set at this point
     return {"ok": True, "access_token": tok, "source": "cdp",
             "refreshed_tab": refreshed}
 

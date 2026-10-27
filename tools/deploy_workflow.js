@@ -236,7 +236,11 @@ try {
     // activeVersionId pointers only exist for an ACTIVE spec - an
     // inactive create must not register a version that never runs
     if (active) {
-      db.prepare(`UPDATE workflow_entity SET activeVersionId=? WHERE id=?`).run(VER_ID, WF_ID);
+      // same column-existence guard as the update path - a schema
+      // without activeVersionId must not throw mid-transaction
+      if (colsOf('workflow_entity').has('activeVersionId')) {
+        db.prepare(`UPDATE workflow_entity SET activeVersionId=? WHERE id=?`).run(VER_ID, WF_ID);
+      }
       db.prepare(`INSERT INTO workflow_published_version
         (workflowId,publishedVersionId,createdAt,updatedAt) VALUES (?,?,?,?)`)
         .run(WF_ID, VER_ID, now, now);
