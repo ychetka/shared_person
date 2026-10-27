@@ -297,6 +297,10 @@ Update reads for its requeue gate, so the two cannot drift. Every
 non-enabled platform's queue file is moved to
 `queue/publish/skipped/` with a
 `platform not enabled` log line - nothing goes to FB/LI/IG/TikTok.
+Note the `skipped/` gate is env-only: a platform that IS listed in
+`PUBLISH_PLATFORMS` but has no implemented driver passes the gate and
+then fails on `no driver for platform <p>`, landing in `failed/`
+instead (only `vk` ships a driver today).
 After enabling a platform, re-approve its parked drafts to re-queue
 them - the Approve path drops the stale `skipped/` copy and writes a
 fresh queue file (it refuses while the platform is still disabled).

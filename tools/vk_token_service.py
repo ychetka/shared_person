@@ -64,6 +64,7 @@ import argparse
 import hmac
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -370,6 +371,29 @@ def _get_token(budget):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        # ThreadingHTTPServer gives every accepted connection its own
+        # thread, but nothing bounded a STALLED one: a client that
+        # connects and never finishes the request (a hung retry loop,
+        # a half-open socket) sat in rfile.readline() forever, and
+        # enough of those would starve the server. Cap socket
+        # reads/writes at 15s - far above what a loopback client needs
+        # to deliver a one-line GET, and /vk-token's 50s get_token()
+        # budget is upstream work (CDP + VK API), not client socket
+        # I/O, so it is unaffected.
+        self.request.settimeout(15)
+
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (socket.timeout, TimeoutError):
+            # a stalled client hit the 15s read cap - close the
+            # connection quietly. The default socketserver
+            # handle_error would dump a traceback to journald for what
+            # is a routine cleanup event.
+            self.close_connection = True
+
     def _send(self, code, obj):
         body = json.dumps(obj).encode()
         self.send_response(code)

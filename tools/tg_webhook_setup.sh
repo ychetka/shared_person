@@ -39,10 +39,36 @@ WEBHOOK_URL="${TG_WEBHOOK_URL:-https://shared-person.opticode.su:8443/webhook/tg
 API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
 
 echo ">> setWebhook $WEBHOOK_URL (secret_token=<redacted>)"
+# The secret must never reach a child process argv: -d
+# "secret_token=$TG_WEBHOOK_SECRET" (and even --data-urlencode
+# 'k=$SECRET') puts the value in curl's command line, where `ps`
+# exposes it to every local user for the duration of the call.
+# Instead the request body is staged in a mktemp file (0600) and
+# passed as `-d @file` - curl's argv then carries only the path. The
+# body is JSON: Telegram's Bot API accepts application/json for every
+# method, which also removes the form url-encoding question entirely
+# (a '&'/'='/'%' in the secret could corrupt -d form fields; in JSON
+# it is just a string). The JSON is built by python3 reading the
+# secret from its ENVIRONMENT - a here-doc interpolation or jq --arg
+# would put the value back into an argv line.
+BODY_FILE="$(mktemp)"
+chmod 600 "$BODY_FILE"  # mktemp already creates 0600; belt & suspenders
+trap 'rm -f "$BODY_FILE"' EXIT
+TG_WEBHOOK_SECRET="$TG_WEBHOOK_SECRET" WEBHOOK_URL="$WEBHOOK_URL" \
+  python3 - "$BODY_FILE" <<'PYEOF'
+import json, os, sys
+with open(sys.argv[1], "w") as f:
+    json.dump({
+        "url": os.environ["WEBHOOK_URL"],
+        "allowed_updates": ["message", "callback_query"],
+        "secret_token": os.environ["TG_WEBHOOK_SECRET"],
+    }, f)
+PYEOF
 curl -sS -X POST "$API/setWebhook" \
-  -d "url=$WEBHOOK_URL" \
-  -d "secret_token=$TG_WEBHOOK_SECRET" \
-  -d 'allowed_updates=["message","callback_query"]'
+  -H 'Content-Type: application/json' \
+  -d "@$BODY_FILE"
+rm -f "$BODY_FILE"
+trap - EXIT
 echo
 echo ">> getWebhookInfo (secret is never echoed back; check url/last_error)"
 curl -sS "$API/getWebhookInfo"
