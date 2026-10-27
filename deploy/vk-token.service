@@ -26,7 +26,11 @@ EnvironmentFile=-%h/projects/shared_person/ENV
 ExecStart=%h/.local/bin/uv run tools/vk_token_service.py --port 8792
 Restart=always
 RestartSec=5
-# token service - keep it off the network except its loopback port
+# egress is required: vk_check() calls api.vk.com over HTTPS and the
+# extractor reaches the operator Chrome CDP port (default
+# 127.0.0.1:9223) - do NOT add network restrictions to this unit.
+# Only the HTTP listener is loopback-bound (:8792); keep it that way
+# and never expose the port beyond loopback - it serves live tokens.
 NoNewPrivileges=true
 PrivateTmp=true
 

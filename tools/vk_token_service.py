@@ -56,6 +56,7 @@ import argparse
 import hmac
 import json
 import os
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -85,6 +86,15 @@ VK_API = "https://api.vk.com/method/{m}"
 # One get_token() call must never outlast the 60s timeout the n8n
 # vkRefresh() uses - the budget is shared across all tabs and retries.
 TOTAL_BUDGET = 50.0
+
+
+def _log(msg):
+    """stderr line - the systemd unit runs this daemonized, so
+    journald only sees what lands on stderr/stdout. --once keeps
+    stdout clean for the JSON result, so everything goes to stderr."""
+    sys.stderr.write(
+        f"{time.strftime('%Y-%m-%dT%H:%M:%S')} vk_token_service: {msg}\n")
+    sys.stderr.flush()
 
 
 def _remaining(deadline):
@@ -162,20 +172,31 @@ def extract_token(deadline=None, per_tab_timeout=45):
     `deadline` is the shared get_token() deadline: whatever time is
     left is split across the tabs still to try, so N hung tabs cost
     the remaining budget once, not N x per_tab_timeout."""
-    pages = find_vk_pages(deadline)
+    try:
+        pages = find_vk_pages(deadline)
+    except Exception as e:
+        # Chrome closed / CDP port down - same propagation as before,
+        # but leave the cause in the journal, not just the 502 body
+        _log(f"CDP unreachable at {CDP}: {e}")
+        raise
     if not pages:
+        _log("token extract: no vk tab in CDP targets")
         return None, "no vk tab in CDP targets"
     for i, page in enumerate(pages):
         budget = _share(deadline, len(pages) - i, per_tab_timeout)
         if deadline is not None and _remaining(deadline) <= 0:
+            _log("global deadline hit during token extract")
             return None, "global deadline hit during token extract"
         try:
             tok = ws_eval(page["webSocketDebuggerUrl"], TOKEN_EXPR,
                           timeout=budget)
-        except Exception:  # noqa: BLE001 - dead tab, try the next one
+        except Exception as e:  # noqa: BLE001 - dead tab, try the next
+            _log(f"token eval failed on tab "
+                 f"{str(page.get('url', '?'))[:60]}: {e}")
             continue
         if tok:
             return tok, None
+    _log(f"token eval returned nothing on all {len(pages)} vk tabs")
     return None, "token eval returned nothing on all vk tabs"
 
 
@@ -257,22 +278,29 @@ def get_token(budget=TOTAL_BUDGET):
     if tok:
         code = vk_check(tok, deadline=deadline)
         if code == 5:
+            _log("vk_check rejected the token (error 5) - "
+                 "reloading vk tabs for a fresh one")
             tok, err = reload_and_extract(stale=tok, deadline=deadline)
             refreshed = True
             code = (vk_check(tok, deadline=deadline)
                     if tok else "no-token")
         if code:
+            _log(f"vk_check failed: {code}")
             return {"ok": False, "error": f"vk check failed: {code}"}
     else:
         # no token at all - try a tab reload once before giving up
+        _log(f"token extract failed ({err}) - reloading vk tabs once")
         tok, err = reload_and_extract(deadline=deadline)
         refreshed = True
         if not tok:
+            _log(f"no token after tab reload: {err}")
             return {"ok": False, "error": err or "no token"}
         code = vk_check(tok, deadline=deadline)
         if code:
+            _log(f"vk_check failed after reload: {code}")
             return {"ok": False, "error": f"vk check failed: {code}"}
     if tok is None:
+        _log("no token before deadline - global budget exhausted")
         return {"ok": False, "error": err or "no token before deadline"}
     return {"ok": True, "access_token": tok, "source": "cdp",
             "refreshed_tab": refreshed}
@@ -314,6 +342,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True})
         elif path == "/vk-token":
             if not self._authorized():
+                self.log_message(
+                    "/vk-token -> 401 missing/invalid X-Shared-Token")
                 self._send(401, {"ok": False,
                                  "error": "missing or invalid "
                                           "X-Shared-Token header"})
@@ -322,12 +352,26 @@ class Handler(BaseHTTPRequestHandler):
                 res = get_token()
             except Exception as e:  # noqa: BLE001
                 res = {"ok": False, "error": str(e)[:300]}
+            if res.get("ok"):
+                # masked token only - the journal must never hold a
+                # live wall-scope credential
+                self.log_message(
+                    "/vk-token -> ok source=%s refreshed_tab=%s "
+                    "token=%s", res.get("source"),
+                    res.get("refreshed_tab"), _mask(res["access_token"]))
+            else:
+                self.log_message("/vk-token -> failed: %s",
+                                 res.get("error"))
             self._send(200 if res.get("ok") else 502, res)
         else:
             self._send(404, {"ok": False, "error": "not found"})
 
-    def log_message(self, *a):  # quiet
-        pass
+    def log_message(self, fmt, *args):
+        # the unit daemonizes the process - journald picks up stderr,
+        # so route BaseHTTPRequestHandler's request/response lines
+        # (send_response -> log_request -> log_message) there instead
+        # of dropping them
+        _log(f"{self.address_string()} {fmt % args}")
 
 
 def _mask(token):
@@ -356,6 +400,8 @@ def main():
         return
     # ThreadingHTTPServer: a /vk-token reload+poll window must not stall
     # concurrent /health or other /vk-token callers
+    _log(f"serving on 127.0.0.1:{args.port} cdp={CDP} "
+         f"shared_secret={'set' if SECRET else 'MISSING - /vk-token fails closed'}")
     ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
 
 
