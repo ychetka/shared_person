@@ -20,6 +20,13 @@ Description=VK access-token service for shared_person sp-publish (tools/vk_token
 # needs the operator's Chrome on CDP :9223; ordering vs a browser unit
 # is impossible in a user manager, so dependency is restart-driven
 After=default.target
+# cap the Restart=always loop below: without a start limit a broken
+# service (e.g. Chrome never opens :9223, or a bad deploy) restarts
+# every 5s forever. 5 starts inside 5min marks the unit failed until
+# `systemctl --user reset-failed vk-token.service` + start - loud in
+# `systemctl --user status` instead of an infinite silent flap loop.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple

@@ -89,13 +89,20 @@ rewrite `tg.json` and hijack previews.
   - `draft_id` overwrite guard: the webhook is public, so an existing
     `state/drafts/<id>.json` may only be replaced when its moderation
     is already decided AND a rewrite is expected - `status` must be
-    `rejected` (dead draft, id free for reuse) or `rewrite` (set by
+    `rejected` (dead draft, id free for reuse), `rewrite` (set by
     Handle TG Update when an Edit rewrite is dispatched to
-    content-gen, which reuses the same `draft_id`). `pending`,
-    `approved` or any unknown status refuses the write
+    content-gen, which reuses the same `draft_id`), or a delivery
+    status (`delivering` when saved pre-sendMessage, `deliver-failed`
+    when the preview send failed - no Approve button ever reached the
+    operator, so a retry under the same `draft_id` must get through).
+    `pending`, `approved` or any unknown status refuses the write
     (`{ok: false, error: "draft exists ..."}`) - otherwise a caller
     could swap the text under a preview the operator is about to
     Approve (the queue payload snapshots `d.text` at Approve time).
+    `pending` itself is only persisted after the preview `sendMessage`
+    is confirmed (`tg_ok`): a draft born `pending` would wedge the
+    `draft_id` on any delivery failure, since the file blocks
+    overwrite while no moderation buttons exist for it.
     `rewrite` is a bounded window, not a standing permit: the draft
     carries `rewrite_issued_at` from dispatch, and ~15min later the
     window expires - the draft is then treated as `rejected` and the
@@ -145,8 +152,12 @@ rewrite `tg.json` and hijack previews.
     tick claiming OUR file (root > `processing/`): that is the single
     intended publish, not a duplicate.
   - Reject > marks draft rejected, logs to `moderation.jsonl`
-  - Edit > stores a pending-edit marker; the next plain-text message in
-    the chat is forwarded to `/webhook/content-gen` as a rewrite request
+  - Edit > stores a pending-edit marker AND retracts a queued
+    `queue/publish/<id>.json` immediately at button-press time (an
+    already-approved draft would otherwise publish the pre-edit text
+    in the minutes until the feedback text arrives); the next
+    plain-text message in the chat is forwarded to
+    `/webhook/content-gen` as a rewrite request
     (mode `rewrite`, with feedback + previous draft). The draft flips
     to `status: "rewrite"` and stamps `rewrite_issued_at` at dispatch
     so the regenerated version can reclaim the same `draft_id` under
