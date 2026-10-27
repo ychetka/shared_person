@@ -111,6 +111,15 @@ try {
         (workflowId,publishedVersionId,createdAt,updatedAt) VALUES (?,?,?,?)
         ON CONFLICT(workflowId) DO UPDATE SET publishedVersionId=excluded.publishedVersionId,updatedAt=excluded.updatedAt`)
         .run(wf.id, VER_ID, now, now);
+      // clear the previous registration first: INSERT OR REPLACE below
+      // only writes rows for triggers in the new spec - rows left over
+      // from a renamed node or a changed webhook path would stay live
+      // and keep routing to this workflow (ghost webhooks)
+      for (const t of ['workflow_publication_trigger_status', 'webhook_entity']) {
+        if (colsOf(t).size) {
+          db.prepare(`DELETE FROM ${t} WHERE workflowId=?`).run(wf.id);
+        }
+      }
       // trigger status + webhook rows are also dropped on deactivation -
       // re-register (schema-adaptive, same helper as the create path)
       registerTriggers(wf.id);

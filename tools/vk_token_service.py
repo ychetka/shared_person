@@ -30,7 +30,8 @@ single-operator box; do not expose the port beyond loopback.
 
 Flow: find vk.ru/vk.com tabs (hostname match) -> eval localStorage
 web_token on each until one yields a token -> verify with users.get ->
-on VK error 5 reload the tabs once and re-extract.
+on VK error 5 or a failed extraction reload the tabs once and poll
+localStorage for the token (no fixed sleep window).
 
 Run:
   uv run tools/vk_token_service.py --serve            # port 8792
@@ -47,7 +48,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CDP = os.environ.get("VK_CDP_URL", "http://127.0.0.1:9223")
 TOKEN_EXPR = (
@@ -127,6 +128,23 @@ def reload_vk_tab():
         ws_eval(page["webSocketDebuggerUrl"], "location.reload(); 'r'")
 
 
+def reload_and_extract(max_wait=6.0, poll=0.5):
+    """Reload the VK tabs once, then poll localStorage for the token.
+
+    A fixed post-reload sleep stalls this (single event loop) request
+    handler for the whole window even when localStorage is repopulated
+    within a second; polling exits as soon as the token shows up and
+    keeps worst-case get_token() latency well under the 60s timeout
+    the n8n side uses."""
+    reload_vk_tab()
+    deadline = time.time() + max_wait
+    tok, err = extract_token()
+    while not tok and time.time() < deadline:
+        time.sleep(poll)
+        tok, err = extract_token()
+    return tok, err
+
+
 def vk_check(token):
     """users.get sanity check - returns error_code or None."""
     url = VK_API.format(m="users.get", q="", t=urllib.request.quote(token))
@@ -140,33 +158,27 @@ def vk_check(token):
 
 
 def get_token():
-    """Return (result_dict). Reloads the VK tab once on error 5."""
+    """Return (result_dict). Reloads the VK tabs once when the first
+    extraction fails or the token is rejected (VK error 5)."""
     tok, err = extract_token()
     refreshed = False
     if tok:
         code = vk_check(tok)
         if code == 5:
-            reload_vk_tab()
-            time.sleep(8)
-            tok, err = extract_token()
+            tok, err = reload_and_extract()
             refreshed = True
             code = vk_check(tok) if tok else "no-token"
         if code:
             return {"ok": False, "error": f"vk check failed: {code}"}
-    elif not refreshed:
+    else:
         # no token at all - try a tab reload once before giving up
-        reload_vk_tab()
-        time.sleep(8)
-        tok, err2 = extract_token()
+        tok, err = reload_and_extract()
         refreshed = True
-        if tok:
-            code = vk_check(tok)
-            if code:
-                return {"ok": False, "error": f"vk check failed: {code}"}
-        else:
-            return {"ok": False, "error": err2 or err}
-    if not tok:
-        return {"ok": False, "error": err or "no token"}
+        if not tok:
+            return {"ok": False, "error": err or "no token"}
+        code = vk_check(tok)
+        if code:
+            return {"ok": False, "error": f"vk check failed: {code}"}
     return {"ok": True, "access_token": tok, "source": "cdp",
             "refreshed_tab": refreshed}
 
@@ -205,7 +217,9 @@ def main():
     if args.once:
         print(json.dumps(get_token()))
         return
-    HTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
+    # ThreadingHTTPServer: a /vk-token reload+poll window must not stall
+    # concurrent /health or other /vk-token callers
+    ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
 
 
 if __name__ == "__main__":

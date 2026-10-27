@@ -20,8 +20,10 @@ not the nested `.n8n/` that holds `database.sqlite`):
 - `state/digest.json` - last digest items keyed by date + index
   (RSS and VK items share the index space), resolved by the `post N`
   reply (3 days kept)
-- `queue/publish/{,done,failed,skipped}` - approved posts waiting for
-  drivers; non-enabled platforms land in `skipped/`
+- `queue/publish/{,done,failed,skipped,processing}` - approved posts
+  waiting for drivers; non-enabled platforms land in `skipped/`;
+  `processing/` holds files claimed by a running tick (a file stuck
+  there after a crash can be moved back to the queue root manually)
 - `logs/{moderation,content-gen,publish}.jsonl` - audit trail
 
 The hands-agent queue is bind-mounted at `/home/node/hands-queue`
@@ -200,33 +202,50 @@ moderation-draft still accepts a pre-made local path/URL.
 
 ### sp-publish (schedule, every 2 min)
 
-Scans `queue/publish/` and routes per platform. Currently VK only
-(issue #1): the `ENABLED` map in the Code node gates execution, every
-other platform's queue file is moved to `queue/publish/skipped/` with a
+Scans `queue/publish/` and routes per platform. Each file is claimed
+atomically before the first VK call - renamed into
+`queue/publish/processing/` - so an overlapping tick sees the file
+gone and cannot double-publish. Currently VK only (issue #1): the
+`ENABLED` map in the Code node gates execution, every other
+platform's queue file is moved to `queue/publish/skipped/` with a
 `platform not enabled` log line - nothing goes to FB/LI/IG/TikTok.
+Enabling a platform requires moving its `skipped/` files back to the
+queue root manually.
 
 VK driver flow per queue file `{platform: "vk", text, media[], test?}`:
 
 1. `wall.post` with `owner_id=$VK_USER_ID` and `message=text`.
    Text-only for now - `media[]` is carried through but not attached
    (wall photo upload is a follow-up).
-2. Post-publish verification: `wall.getById` on `<owner>_<post_id>`
-   must read the post back; the ledger record gets `verified: true`.
-3. Ledger: a `published` record is appended to `state/published.jsonl`
-   immediately after verification - before any further VK call - so a
-   later failure cannot orphan a live wall post without a recorded
-   `external_id`. Records look like
-   `{ts, id, platform, external_id, status, verified, test, deleted,
-   media_ignored}` - minimal ledger until the full registry lands
-   (issue #12).
+2. Ledger-first: a `post-created` record carrying `external_id` is
+   appended to `state/published.jsonl` immediately after `wall.post`
+   returns - before verification - so a later failure cannot orphan a
+   live wall post without a recorded id.
+3. Post-publish verification: `wall.getById` on `<owner>_<post_id>`
+   must read the post back. A verify failure is appended as a
+   `verify-failed` record and tolerated (the post is live either way);
+   otherwise the `published` record gets `verified: true`. Records
+   look like `{ts, id, platform, external_id, status, verified, test,
+   deleted, media_ignored}` - minimal ledger until the full registry
+   lands (issue #12).
 4. Test posts (`test: true` in the queue file, passed through from the
    draft meta by moderation - the flag is a strict JSON boolean, only
    `true` counts; `"yes"`/`1` are treated as real posts): after the
    `published` record the driver calls `wall.delete` and appends a
    second record - status `test-published-deleted` on success, or
    `test-delete-failed` + `delete_error` when the delete call fails.
-   A delete failure still lands the file in `done/`: the first record
-   already holds the published+verified evidence and the wall post id.
+   A delete failure still lands the file in `done/`: the earlier
+   records already hold the published+verified evidence and the wall
+   post id.
+5. `state/vk_status.json` reflects the full outcome: `ok` only on a
+   fully clean run - `publish_unverified` when wall.getById could not
+   confirm the post, `test_delete_failed` when a test post stayed
+   live, `auth_error` on a persistent VK error 5.
+
+VK API calls send `access_token` in the POST body (form-encoded),
+never in the request URL, and every error string written to
+`publish.jsonl`, the ledger or the Telegram summary is scrubbed of
+`access_token=` values first.
 
 VK token handling: the Code node prefers the cached token in
 `state/vk_token.json`, falls back to `VK_ACCESS_TOKEN` env. On VK
