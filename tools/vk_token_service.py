@@ -544,6 +544,43 @@ class Handler(BaseHTTPRequestHandler):
         _log(f"{self.address_string()} {fmt % args}")
 
 
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer with a bound on concurrent connections.
+
+    The stock server is unbounded thread-per-connection: every
+    accepted socket spawns a worker, so a local process flooding the
+    loopback port (the shared-secret gate only rejects AFTER accept,
+    and the 15s socket cap still leaves a window) could exhaust the
+    process's thread budget. Cap concurrent handlers with a
+    semaphore - extra connections wait at accept() until a slot frees
+    - and mark workers daemon so a wedged handler can never block
+    shutdown."""
+
+    daemon_threads = True
+    max_workers = 8
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._conn_sem = threading.BoundedSemaphore(self.max_workers)
+
+    def process_request(self, request, client_address):
+        # acquire BEFORE spawning the worker: a full semaphore queues
+        # the connection in the accept backlog instead of leaking a
+        # thread per pending socket
+        self._conn_sem.acquire()
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._conn_sem.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._conn_sem.release()
+
+
 def _mask(token):
     """Mask a token for stdout - --once output lands in terminal
     scrollback and CI logs, so the raw credential stays hidden.
@@ -600,11 +637,14 @@ def main():
             res["access_token"] = _mask(res["access_token"])
         print(json.dumps(res))
         return
-    # ThreadingHTTPServer: a /vk-token reload+poll window must not stall
-    # concurrent /health or other /vk-token callers
+    # BoundedThreadingHTTPServer: a /vk-token reload+poll window must
+    # not stall concurrent /health or other /vk-token callers, but the
+    # thread count stays capped so a loopback connection flood cannot
+    # exhaust the process
     _log(f"serving on 127.0.0.1:{args.port} cdp={CDP} "
          f"shared_secret={'set' if SECRET else 'MISSING - /vk-token fails closed'}")
-    ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
+    BoundedThreadingHTTPServer(("127.0.0.1", args.port),
+                               Handler).serve_forever()
 
 
 if __name__ == "__main__":

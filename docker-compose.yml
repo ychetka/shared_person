@@ -70,7 +70,9 @@ services:
       # enabled publish platforms, comma-separated - single source for
       # the ENABLED gates in sp-publish (Publish Tick) and
       # sp-tg-moderation (Handle TG Update); both read $env via
-      # PUBLISH_PLATFORMS so the two cannot drift. Default keeps VK
+      # PUBLISH_PLATFORMS so the two cannot drift. 'all' is valid and
+      # expands to every writer platform (linkedin/facebook/fb/vk),
+      # matching content-gen's MAP.all fan-out. Default keeps VK
       # only; non-enabled platforms land in queue skipped/
       - PUBLISH_PLATFORMS=${PUBLISH_PLATFORMS:-vk}
       # rewrite-overwrite window (ms) - single source for the two
