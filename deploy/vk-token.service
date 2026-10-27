@@ -31,7 +31,12 @@ WorkingDirectory=%h/projects/shared_person/code
 # service then fails closed on 401. Extra overrides (VK_CDP_URL) can
 # be appended to deploy/vk-token.env if ever needed.
 EnvironmentFile=-%h/projects/shared_person/code/deploy/vk-token.env
-ExecStart=%h/.local/bin/uv run tools/vk_token_service.py --port 8792
+# resolve uv through PATH instead of a hardcoded absolute path - the
+# default installer puts it in ~/.local/bin, but ~/.cargo/bin and
+# /usr/local/bin are common too (`which uv`). Extend the list if a
+# host keeps uv somewhere else.
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env uv run tools/vk_token_service.py --port 8792
 Restart=always
 RestartSec=5
 # egress is required: vk_check() calls api.vk.com over HTTPS and the

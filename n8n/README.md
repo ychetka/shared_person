@@ -66,6 +66,13 @@ incoming update handled by sp-tg-moderation instead.
     (`{ok: false, error: "draft exists ..."}`) - otherwise a caller
     could swap the text under a preview the operator is about to
     Approve (the queue payload snapshots `d.text` at Approve time).
+    `rewrite` is a bounded window, not a standing permit: the draft
+    carries `rewrite_issued_at` from dispatch, and ~15min later the
+    write is refused and the draft reverts to `rejected` - so a
+    rewrite that never arrives cannot leave the overwrite path open
+    forever for anyone who knows the `draft_id`. A late legit
+    rewrite's retry then succeeds under `rejected`, so nothing
+    deadlocks.
   - `media[]` - selected media paths (from the media-selector pass).
     Each path is resolved inside the container: literal path, anything
     under `materials/` maps to the read-only `/home/node/materials`
@@ -85,13 +92,24 @@ incoming update handled by sp-tg-moderation instead.
     Approve - the queued file's payload is synced to the latest draft
     in place (atomic dot-tmp + rename) instead of refusing, so the
     corrected text is what reaches the wall. An identical payload
-    still answers `already queued`
+    still answers `already queued`. The sync guards the same race the
+    enqueue path does: the tick-owned dirs are checked right before
+    AND after the rename, and if a competing `<id>.json` copy shows up
+    in `processing/` or a terminal dir (the tick claimed/moved the old
+    file in the gap), the fresh file is retracted instead of becoming
+    a second queue entry - otherwise both payloads would reach the
+    wall. A copy whose payload already matches the fresh write is the
+    tick claiming OUR file (root > `processing/`): that is the single
+    intended publish, not a duplicate.
   - Reject > marks draft rejected, logs to `moderation.jsonl`
   - Edit > stores a pending-edit marker; the next plain-text message in
     the chat is forwarded to `/webhook/content-gen` as a rewrite request
     (mode `rewrite`, with feedback + previous draft). The draft flips
-    to `status: "rewrite"` at dispatch so the regenerated version can
-    reclaim the same `draft_id` under the overwrite guard above.
+    to `status: "rewrite"` and stamps `rewrite_issued_at` at dispatch
+    so the regenerated version can reclaim the same `draft_id` under
+    the (time-bounded) overwrite guard above. If the dispatch call
+    itself fails, the draft reverts to its previous status - the
+    window closes immediately instead of expiring on the clock.
   - `post N` (plain text) > resolves item N from `state/digest.json`
     (newest stored day first), builds a `source_type: "hype"` brief
     (facts = source/published/metrics/angle/summary, links, scope,

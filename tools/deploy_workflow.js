@@ -159,6 +159,10 @@ try {
       // --update too - dropping them kept the values from the
       // original insert, so a spec change looked deployed but was not
       ['settings', JSON.stringify(settings)],
+      // the spec's trigger list can change between deploys - refresh
+      // the count like every other column or it stays stale from the
+      // original insert
+      ['triggerCount', triggers.length],
       ['versionId', VER_ID],
       ['activeVersionId', active ? VER_ID : null],
       ['active', active],

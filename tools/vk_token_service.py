@@ -65,6 +65,7 @@ import hmac
 import json
 import os
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -103,6 +104,13 @@ VK_API = "https://api.vk.com/method/{m}"
 # One get_token() call must never outlast the 60s timeout the n8n
 # vkRefresh() uses - the budget is shared across all tabs and retries.
 TOTAL_BUDGET = 50.0
+# get_token() mutates shared browser state (location.reload on the VK
+# tabs) and polls localStorage - two concurrent /vk-token callers under
+# ThreadingHTTPServer would trigger overlapping reloads and race each
+# other's reads, burning the shared deadline twice. Serialize the whole
+# call: /health still answers on other threads, /vk-token callers just
+# queue up.
+_GET_TOKEN_LOCK = threading.Lock()
 
 
 def _log(msg):
@@ -288,7 +296,14 @@ def get_token(budget=TOTAL_BUDGET):
 
     `budget` is the global deadline for the whole call - every tab
     eval, reload, poll round and vk_check draws from it, so the worst
-    case stays under the 60s timeout the n8n caller uses."""
+    case stays under the 60s timeout the n8n caller uses.
+
+    Serialized under _GET_TOKEN_LOCK - see its comment."""
+    with _GET_TOKEN_LOCK:
+        return _get_token(budget)
+
+
+def _get_token(budget):
     deadline = time.time() + budget
     tok, err = extract_token(deadline=deadline)
     refreshed = False
