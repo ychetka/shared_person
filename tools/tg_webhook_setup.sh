@@ -8,6 +8,18 @@
 # Repeatable: run again after rotating TG_WEBHOOK_SECRET or changing the
 # public webhook URL.
 #
+# URL env contract: WEBHOOK_URL is the canonical name everywhere else
+# (docker-compose.yml -> the n8n container's WEBHOOK_URL env, and the
+# sp-tg-setup workflow's ENV('WEBHOOK_URL')) and carries the public
+# BASE URL of the n8n instance - the moderation hook path
+# (/webhook/tg-moderation) is appended below. TG_WEBHOOK_URL is kept as
+# a compat alias for the legacy FULL webhook URL this script used to
+# read. There is deliberately NO hardcoded fallback anymore: the old
+# default silently registered a baked-in domain, so on a domain change
+# setWebhook still answered ok:true while deliveries went nowhere and
+# the moderation gate failed closed in silence. Neither var set is a
+# loud failure, not a quiet wrong registration.
+#
 # TG_WEBHOOK_SECRET is REQUIRED - the script refuses to run without it
 # (:? guard below), because registering the webhook unsigned would
 # leave every delivery unsigned while the moderation gate fails
@@ -17,11 +29,12 @@
 #
 # Usage:
 #   tools/tg_webhook_setup.sh            # register + show getWebhookInfo
-#   TG_WEBHOOK_URL=https://... tools/tg_webhook_setup.sh
+#   WEBHOOK_URL=https://... tools/tg_webhook_setup.sh
 #
-# Reads TELEGRAM_BOT_TOKEN and TG_WEBHOOK_SECRET from the project ENV
-# (../../ENV relative to this script - the project root) unless already
-# exported.
+# Reads TELEGRAM_BOT_TOKEN, TG_WEBHOOK_SECRET and WEBHOOK_URL from the
+# project ENV (../../ENV relative to this script - the project root)
+# unless already exported. TG_WEBHOOK_URL (full hook URL) is accepted
+# as a compat alias when WEBHOOK_URL is absent.
 
 set -euo pipefail
 
@@ -40,16 +53,37 @@ ENV_FILE="${ENV_FILE:-$(cd "$(dirname "$0")/../.." && pwd)/ENV}"
 if [ -f "$ENV_FILE" ]; then
   : "${TELEGRAM_BOT_TOKEN:=$(env_val TELEGRAM_BOT_TOKEN)}"
   : "${TG_WEBHOOK_SECRET:=$(env_val TG_WEBHOOK_SECRET)}"
+  : "${WEBHOOK_URL:=$(env_val WEBHOOK_URL)}"
   : "${TG_WEBHOOK_URL:=$(env_val TG_WEBHOOK_URL)}"
 fi
 
 : "${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN missing - add it to $ENV_FILE}"
 : "${TG_WEBHOOK_SECRET:?TG_WEBHOOK_SECRET missing - generate one (openssl rand -hex 32) and add it to $ENV_FILE}"
 
-WEBHOOK_URL="${TG_WEBHOOK_URL:-https://shared-person.opticode.su:8443/webhook/tg-moderation}"
+# Resolve the hook URL: WEBHOOK_URL (the canonical base URL, same env
+# the sp-tg-setup workflow reads) wins; the hook path is appended
+# unless the value already ends in it. TG_WEBHOOK_URL is the legacy
+# FULL hook URL and is used verbatim. Neither set = refuse loudly -
+# see the contract note in the header.
+HOOK_PATH='/webhook/tg-moderation'
+if [ -n "${WEBHOOK_URL:-}" ]; then
+  _base="${WEBHOOK_URL%/}"
+  case "$_base" in
+    *"$HOOK_PATH") HOOK_URL="$_base" ;;
+    *)             HOOK_URL="${_base}${HOOK_PATH}" ;;
+  esac
+elif [ -n "${TG_WEBHOOK_URL:-}" ]; then
+  HOOK_URL="${TG_WEBHOOK_URL%/}"
+else
+  echo "!! WEBHOOK_URL is not set - add the public n8n base URL" >&2
+  echo "   (e.g. https://<domain>:<port>/) to $ENV_FILE or export it." >&2
+  echo "   The moderation webhook registers at \$WEBHOOK_URL$HOOK_PATH;" >&2
+  echo "   TG_WEBHOOK_URL (full hook URL) is accepted as a compat alias." >&2
+  exit 1
+fi
 API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
 
-echo ">> setWebhook $WEBHOOK_URL (secret_token=<redacted>)"
+echo ">> setWebhook $HOOK_URL (secret_token=<redacted>)"
 # No secret may ever reach a child process argv: -d
 # "secret_token=$TG_WEBHOOK_SECRET" (and even --data-urlencode
 # 'k=$SECRET') puts the value in curl's command line, where `ps`
@@ -78,7 +112,7 @@ SECRET_FILE="$(mktemp)"
 chmod 600 "$BODY_FILE" "$CFG_FILE" "$SECRET_FILE"  # mktemp already creates 0600; belt & suspenders
 trap 'rm -f "$BODY_FILE" "$CFG_FILE" "$SECRET_FILE"' EXIT
 printf '%s' "$TG_WEBHOOK_SECRET" > "$SECRET_FILE"
-python3 - "$BODY_FILE" "$SECRET_FILE" "$WEBHOOK_URL" <<'PYEOF'
+python3 - "$BODY_FILE" "$SECRET_FILE" "$HOOK_URL" <<'PYEOF'
 import json, sys
 with open(sys.argv[2]) as f:
     secret = f.read()
