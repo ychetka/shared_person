@@ -424,7 +424,16 @@ class Handler(BaseHTTPRequestHandler):
         # exact path match: startswith would also route
         # /vk-token-anything to the token endpoint; urlsplit strips
         # the query string so /health?x keeps working
-        path = urllib.parse.urlsplit(self.path).path
+        try:
+            path = urllib.parse.urlsplit(self.path).path
+        except ValueError:
+            # a malformed request-target (bad IPv6 literal in an
+            # absolute-form URI, stray port text) makes urlsplit raise
+            # ValueError - answer 400 instead of dropping the request
+            # thread on an unhandled exception
+            self._send(400, {"ok": False,
+                             "error": "malformed request target"})
+            return
         if path == "/health":
             self._send(200, {"ok": True})
         elif path == "/vk-token":

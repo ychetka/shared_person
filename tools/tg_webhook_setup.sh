@@ -33,7 +33,16 @@ ENV_FILE="${ENV_FILE:-$(cd "$(dirname "$0")/../.." && pwd)/ENV}"
 # calling environment.
 env_val() {
   # last KEY= assignment wins - same rule as sourcing would apply
-  sed -n -e 's/^export[[:space:]]\{1,\}//' -e "s/^$1=//p" "$ENV_FILE" | tail -n 1
+  local v
+  v="$(sed -n -e 's/^export[[:space:]]\{1,\}//' -e "s/^$1=//p" "$ENV_FILE" | tail -n 1)"
+  # ENV accepts KEY="value" and KEY='value' - strip one matching pair
+  # of surrounding quotes, otherwise the quote chars end up inside the
+  # token/secret/url and every curl call below fails
+  case "$v" in
+    \"*\") v="${v#\"}"; v="${v%\"}" ;;
+    \'*\') v="${v#\'}"; v="${v%\'}" ;;
+  esac
+  printf '%s' "$v"
 }
 if [ -f "$ENV_FILE" ]; then
   : "${TELEGRAM_BOT_TOKEN:=$(env_val TELEGRAM_BOT_TOKEN)}"
