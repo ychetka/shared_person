@@ -18,9 +18,11 @@ http://10.0.2.2:8792/vk-token.
 
 Endpoints:
   GET /health    -> {"ok": true}
-  GET /vk-token  -> {"ok": true, "access_token": "...", "source": "cdp",
-                     "refreshed_tab": bool}
-                  -> {"ok": false, "error": "..."}
+  GET /vk-token  -> 200 {"ok": true, "access_token": "...", "source": "cdp",
+                         "refreshed_tab": bool}
+                  -> 503 {"ok": false, "error": "...", "retryable": true}
+                     for a transient 'busy' (lock contention), 502
+                     {"ok": false, "error": "..."} otherwise
 
 Trust assumption: /vk-token serves a full wall-scope token behind two
 cheap gates - the loopback-only bind (127.0.0.1) and a shared-secret
@@ -532,7 +534,16 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.log_message("/vk-token -> failed: %s",
                                  res.get("error"))
-            self._send(200 if res.get("ok") else 502, res)
+            # 503 (not a flat 502) for retryable results: get_token()
+            # answers {"ok": False, "retryable": True} on lock
+            # contention ('busy - another token request in flight',
+            # e.g. two overlapping publish ticks refreshing on the
+            # same stale cached token). sp-publish's Publish Tick
+            # treats a busy answer as transient and returns the queue
+            # file to the root for the next tick - a momentary overlap
+            # must not permanently fail a publish into failed/.
+            self._send(200 if res.get("ok")
+                       else 503 if res.get("retryable") else 502, res)
         else:
             self._send(404, {"ok": False, "error": "not found"})
 

@@ -105,11 +105,17 @@ rewrite `tg.json` and hijack previews.
     overwrite while no moderation buttons exist for it.
     `rewrite` is a bounded window, not a standing permit: the draft
     carries `rewrite_issued_at` from dispatch, and ~15min later the
-    window expires - the draft is then treated as `rejected` and the
-    arriving write is accepted in the same pass (flagged
-    `rewrite_window_expired` in the response). Refuse-and-retry would
-    silently drop a slow-but-legit rewrite: content-gen does not
-    retry. A corrupt/unreadable draft file is refused outright
+    window expires - the draft is then SEALED to `rewrite-expired`
+    (persisted) and the arriving write is refused
+    (`{ok: false, error: "rewrite window expired ..."}`).
+    `rewrite-expired` is deliberately NOT one of the rewritable
+    statuses - flipping to `rejected` would leave the decided
+    `draft_id` publicly overwritable forever, since `rejected` is
+    itself rewritable. A slow-but-legit rewrite landing after the
+    seal is refused, but the refusal is not silent: the caller
+    (content-gen) surfaces it to the operator, who revives the draft
+    via Reject/Edit on the preview or picks a fresh `draft_id`.
+    A corrupt/unreadable draft file is refused outright
     (`{ok: false, error: "draft file exists but is unreadable"}`) -
     never treated as absent.
   - `media[]` - selected media paths (from the media-selector pass).
@@ -132,10 +138,16 @@ rewrite `tg.json` and hijack previews.
     through from the draft meta when set), marks the TG message. A
     draft whose platform is not in `PUBLISH_PLATFORMS` is refused with
     one uniform answer
-    (`platform "x" is disabled in the publish tick - enable it first,
-    then approve again`) whether the Approve is fresh or a re-approve
+    (`platform "x" is disabled in the publish tick - Reject to close
+    the draft, or enable it first and approve again`) whether the
+    Approve is fresh or a re-approve
     from `skipped/` - 'Queued for publish' would misreport a publish
-    that only parks in `skipped/` on the next tick.
+    that only parks in `skipped/` on the next tick. Before enqueueing,
+    Approve also consults `state/published.jsonl` for the draft id:
+    `done/` records are pruned after 30 days but the ledger is
+    append-only and never pruned, so a late Approve on an old preview
+    still answers `already published` instead of re-queueing a
+    duplicate `wall.post`.
     When a queue file already exists (root or `processing/`) and its
     payload differs from the current draft - e.g. an Edit + rewrite
     regenerated the draft under the same `draft_id` after the first
@@ -166,9 +178,10 @@ rewrite `tg.json` and hijack previews.
     window closes immediately instead of expiring on the clock. The
     same ~15min window bounds Approve too: while it is live Approve is
     refused `rewrite in flight`; once expired (the rewrite never
-    arrived) the draft flips to `rejected`, the preview keyboard is
-    restored, and the operator decides fresh - Approve again publishes
-    the last text, or Edit / Reject.
+    arrived) the draft flips to `rewrite-expired` - a terminal,
+    non-rewritable seal so the public overwrite path closes for good -
+    the preview keyboard is restored, and the operator decides fresh:
+    Approve again publishes the last text, or Edit / Reject.
     `status: "approved"` is only persisted after the queue file is
     confirmed to exist - a hard enqueue failure leaves the draft in
     its previous status instead of stuck `approved` with nothing
@@ -379,6 +392,14 @@ error 5 (expired/rejected) it calls the host refresh service
 `http://10.0.2.2:8792/vk-token`), persists the fresh token to
 `vk_token.json` and retries once. A persistent error 5 marks
 `state/vk_status.json` as `auth_error` and the file lands in `failed/`.
+The service serializes refreshes under a lock and answers HTTP 503
+`{retryable: true}` when another get_token() is still in flight
+(e.g. two overlapping ticks refreshing on the same stale token). That
+answer is transient, not a failure: the tick moves the claimed file
+from `processing/` back to the queue root so the NEXT tick retries it,
+writes a `retry-requeued` note to `publish.jsonl` and reports
+`token_service_busy` in `vk_status.json` - never `token_service_down`
+and never `failed/`.
 
 Processed files move to `done/` or `failed/` and are logged to
 `publish.jsonl` (the logged `status` mirrors the ledger:
