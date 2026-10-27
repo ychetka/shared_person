@@ -111,6 +111,16 @@ const colsOf = (table) =>
 const ins = (table, row) => {
   const cols = colsOf(table);
   const keys = Object.keys(row).filter((k) => cols.has(k));
+  // an empty projection - extreme schema drift where NONE of the
+  // row's keys exist as columns - would emit
+  // 'INSERT OR REPLACE INTO t () VALUES ()', which SQLite rejects
+  // with a cryptic syntax error that rolls the whole deploy back.
+  // A row with no matching columns is a no-op on this schema: skip
+  // it loudly instead of dying mid-transaction.
+  if (!keys.length) {
+    console.warn(`ins(${table}): no row keys match the schema - row skipped`);
+    return;
+  }
   db.prepare(`INSERT OR REPLACE INTO ${table} (${keys.join(',')})
     VALUES (${keys.map(() => '?').join(',')})`)
     .run(...keys.map((k) => row[k]));

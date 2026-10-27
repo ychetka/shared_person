@@ -6,6 +6,8 @@
 # same uid).
 #
 # Semantics match what sourcing a single KEY= line would produce:
+#   - leading whitespace before the key is tolerated - an indented
+#     '  KEY=value' sources fine in bash;
 #   - an optional 'export ' prefix is tolerated;
 #   - the LAST KEY= assignment wins;
 #   - one pair of surrounding quotes (' or ") is stripped - a quoted
@@ -31,6 +33,7 @@ env_val() {
   # the wrong lines or none.
   local v
   v="$(awk -v k="$1" '
+    { sub(/^[[:space:]]+/, "") }
     { sub(/^export[[:space:]]+/, "") }
     index($0, k "=") == 1 { print substr($0, length(k) + 2) }
   ' "$ENV_FILE" | tail -n 1)"
