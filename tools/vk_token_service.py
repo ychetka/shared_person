@@ -34,7 +34,7 @@ on VK error 5 or a failed extraction reload the tabs once and poll
 localStorage for the token (no fixed sleep window).
 
 Run:
-  uv run tools/vk_token_service.py --serve            # port 8792
+  uv run tools/vk_token_service.py                    # serve on :8792
   uv run tools/vk_token_service.py --port 8792        # same, explicit
   uv run tools/vk_token_service.py --once             # print token JSON
 
@@ -55,7 +55,7 @@ TOKEN_EXPR = (
     "JSON.parse(localStorage.getItem('6287487:web_token:login:auth'))"
     ".access_token"
 )
-VK_API = "https://api.vk.com/method/{m}?{q}&v=5.199&access_token={t}"
+VK_API = "https://api.vk.com/method/{m}"
 
 
 def _targets():
@@ -87,7 +87,7 @@ def find_vk_pages():
     ]
 
 
-def ws_eval(ws_url, expr, timeout=30):
+def ws_eval(ws_url, expr, timeout=45):
     import websocket  # websocket-client, resolved by uv
 
     ws = websocket.create_connection(ws_url, timeout=timeout,
@@ -109,13 +109,14 @@ def ws_eval(ws_url, expr, timeout=30):
         ws.close()
 
 
-def extract_token():
+def extract_token(per_tab_timeout=45):
     pages = find_vk_pages()
     if not pages:
         return None, "no vk tab in CDP targets"
     for page in pages:
         try:
-            tok = ws_eval(page["webSocketDebuggerUrl"], TOKEN_EXPR)
+            tok = ws_eval(page["webSocketDebuggerUrl"], TOKEN_EXPR,
+                          timeout=per_tab_timeout)
         except Exception:  # noqa: BLE001 - dead tab, try the next one
             continue
         if tok:
@@ -124,36 +125,56 @@ def extract_token():
 
 
 def reload_vk_tab():
-    for page in find_vk_pages():
-        ws_eval(page["webSocketDebuggerUrl"], "location.reload(); 'r'")
+    pages = find_vk_pages()
+    for page in pages:
+        try:
+            ws_eval(page["webSocketDebuggerUrl"], "location.reload(); 'r'")
+        except Exception:  # noqa: BLE001 - dead tab, reload the rest
+            continue
+    return pages
 
 
-def reload_and_extract(max_wait=6.0, poll=0.5):
+def reload_and_extract(stale=None, max_wait=6.0, poll=0.5):
     """Reload the VK tabs once, then poll localStorage for the token.
 
-    A fixed post-reload sleep stalls this (single event loop) request
-    handler for the whole window even when localStorage is repopulated
-    within a second; polling exits as soon as the token shows up and
-    keeps worst-case get_token() latency well under the 60s timeout
-    the n8n side uses."""
-    reload_vk_tab()
+    `stale` is the token value vk_check just rejected (if any): a poll
+    can race the reload and re-read the pre-reload localStorage value,
+    which is not a win - keep polling until a DIFFERENT token shows up
+    or the budget runs out.
+
+    Each poll round splits the remaining budget across the tabs, so one
+    hung tab cannot stretch a ws_eval() past max_wait. That keeps
+    worst-case get_token() latency under the 60s timeout the n8n side
+    uses: initial extract (up to 45s on a single hung tab) plus this
+    bounded poll window."""
+    pages = reload_vk_tab()
+    n = max(1, len(pages))
     deadline = time.time() + max_wait
-    tok, err = extract_token()
-    while not tok and time.time() < deadline:
+    per_tab = lambda: max(0.5, (deadline - time.time()) / n)  # noqa: E731
+    tok, err = extract_token(per_tab())
+    while (not tok or tok == stale) and time.time() < deadline:
         time.sleep(poll)
-        tok, err = extract_token()
+        tok, err = extract_token(per_tab())
+    if tok == stale:
+        return None, err or "token did not rotate after tab reload"
     return tok, err
 
 
 def vk_check(token):
-    """users.get sanity check - returns error_code or None."""
-    url = VK_API.format(m="users.get", q="", t=urllib.request.quote(token))
+    """users.get sanity check - returns error_code or None.
+
+    The access token travels in the POST body (form-encoded), matching
+    the n8n-side vkCall - never in the request URL, which transport
+    errors and logs can echo back."""
+    body = urllib.parse.urlencode(
+        {"v": "5.199", "access_token": token}).encode()
+    req = urllib.request.Request(VK_API.format(m="users.get"), data=body)
     try:
-        with urllib.request.urlopen(url, timeout=15) as r:
-            body = json.loads(r.read())
+        with urllib.request.urlopen(req, timeout=15) as r:
+            resp = json.loads(r.read())
     except Exception as e:  # noqa: BLE001 - report, do not crash
         return f"http: {e}"
-    err = body.get("error")
+    err = resp.get("error")
     return err.get("error_code") if err else None
 
 
@@ -165,7 +186,7 @@ def get_token():
     if tok:
         code = vk_check(tok)
         if code == 5:
-            tok, err = reload_and_extract()
+            tok, err = reload_and_extract(stale=tok)
             refreshed = True
             code = vk_check(tok) if tok else "no-token"
         if code:
@@ -210,7 +231,6 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--serve", action="store_true")
     ap.add_argument("--port", type=int, default=8792)
     ap.add_argument("--once", action="store_true")
     args = ap.parse_args()

@@ -96,7 +96,7 @@ hide a valid session in another one. The web token carries
 reloads the tabs once and re-extracts.
 
 ```bash
-uv run tools/vk_token_service.py --serve --port 8792   # daemon
+uv run tools/vk_token_service.py --port 8792          # daemon
 uv run tools/vk_token_service.py --once                # print token JSON
 ```
 
