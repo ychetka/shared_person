@@ -242,7 +242,7 @@ def reload_vk_tab(deadline=None, per_tab_timeout=8):
     return pages
 
 
-def reload_and_extract(stale=None, deadline=None, max_wait=6.0,
+def reload_and_extract(stale=None, deadline=None, max_wait=20.0,
                        poll=0.5):
     """Reload the VK tabs once, then poll localStorage for the token.
 
@@ -251,9 +251,14 @@ def reload_and_extract(stale=None, deadline=None, max_wait=6.0,
     which is not a win - keep polling until a DIFFERENT token shows up
     or the budget runs out.
 
-    The poll window is clamped to the shared `deadline` (and each poll
-    round splits it across the tabs), so the reload path can never push
-    get_token() past TOTAL_BUDGET."""
+    `max_wait` is the ceiling for the poll window after
+    location.reload(): a real VK tab reload (web app boot, auth
+    handshake, localStorage write) can legitimately take well over 6s
+    on a loaded machine, and reporting 'token did not rotate' while the
+    fresh token is still in flight fails the publish tick even though
+    the reload worked. The window is clamped to the shared `deadline`
+    (and each poll round splits it across the tabs), so the reload path
+    can never push get_token() past TOTAL_BUDGET."""
     if deadline is not None:
         max_wait = min(max_wait, _remaining(deadline))
     poll_deadline = time.time() + max_wait

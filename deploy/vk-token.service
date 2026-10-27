@@ -2,7 +2,10 @@
 # required dependency of the sp-publish n8n workflow).
 #
 # Install:
-#   grep '^VK_TOKEN_SECRET=' ../ENV > deploy/vk-token.env
+#   # tolerate an optional 'export ' prefix on the ENV line; systemd
+#   # EnvironmentFile does not strip it, so sed removes it here
+#   grep -E '^(export[[:space:]]+)?VK_TOKEN_SECRET=' ../ENV \
+#     | sed 's/^export[[:space:]]*//' > deploy/vk-token.env
 #   chmod 600 deploy/vk-token.env
 #   mkdir -p ~/.config/systemd/user
 #   cp deploy/vk-token.service ~/.config/systemd/user/

@@ -14,7 +14,8 @@ All state files live inside the n8n storage volume under
 `/home/node/.n8n/` (container view; on the host it is the volume root,
 not the nested `.n8n/` that holds `database.sqlite`):
 
-- `state/tg.json` - resolved Telegram chat_id
+- `state/tg.json` - operator Telegram chat_id (written by sp-tg-setup;
+  compat fallback for the pinned `TELEGRAM_CHAT_ID` env)
 - `state/drafts/<id>.json` - moderation drafts
 - `state/trend_seen.json` - trend-scout dedupe (7 days)
 - `state/digest.json` - last digest items keyed by date + index
@@ -41,12 +42,22 @@ the moderation `sendPhoto` step.
 ### sp-tg-setup (manual)
 
 One-time bootstrap. Reads `getUpdates` (works only before a webhook is
-registered), saves the last chat_id, then calls `setWebhook` pointing at
-`/webhook/tg-moderation` on `WEBHOOK_URL`.
+registered), saves the last chat_id to `state/tg.json`, then calls
+`setWebhook` pointing at `/webhook/tg-moderation` on `WEBHOOK_URL` with
+`secret_token=$TG_WEBHOOK_SECRET` when the env is set.
 
 Run it manually after the user sends `/start` to @shared_person_bot.
-If the webhook is already registered, chat_id self-heals from the first
-incoming update handled by sp-tg-moderation instead.
+Repeatable CLI equivalent: `tools/tg_webhook_setup.sh` - registers the
+same URL + `secret_token` and prints `getWebhookInfo`; run it again
+after rotating `TG_WEBHOOK_SECRET`.
+
+Since the authenticity gate landed, `tg-moderation` drops every update
+whose `X-Telegram-Bot-Api-Secret-Token` header does not match
+`TG_WEBHOOK_SECRET` (fail closed - the bot goes quiet when the env is
+missing), and only acts on updates from the pinned operator chat
+(`TELEGRAM_CHAT_ID` env, `state/tg.json` fallback). Updates are never
+used to learn `chat_id` - the old self-heal let any posted message
+rewrite `tg.json` and hijack previews.
 
 ### sp-tg-moderation (webhooks)
 
@@ -68,11 +79,13 @@ incoming update handled by sp-tg-moderation instead.
     Approve (the queue payload snapshots `d.text` at Approve time).
     `rewrite` is a bounded window, not a standing permit: the draft
     carries `rewrite_issued_at` from dispatch, and ~15min later the
-    write is refused and the draft reverts to `rejected` - so a
-    rewrite that never arrives cannot leave the overwrite path open
-    forever for anyone who knows the `draft_id`. A late legit
-    rewrite's retry then succeeds under `rejected`, so nothing
-    deadlocks.
+    window expires - the draft is then treated as `rejected` and the
+    arriving write is accepted in the same pass (flagged
+    `rewrite_window_expired` in the response). Refuse-and-retry would
+    silently drop a slow-but-legit rewrite: content-gen does not
+    retry. A corrupt/unreadable draft file is refused outright
+    (`{ok: false, error: "draft file exists but is unreadable"}`) -
+    never treated as absent.
   - `media[]` - selected media paths (from the media-selector pass).
     Each path is resolved inside the container: literal path, anything
     under `materials/` maps to the read-only `/home/node/materials`
@@ -83,9 +96,20 @@ incoming update handled by sp-tg-moderation instead.
     the draft meta keeps `media`, `caption_note` and `media_sent`.
   - On Approve the `media[]` list is carried into the publish queue
     file so platform drivers can attach the same files.
-- `POST /webhook/tg-moderation` - Telegram webhook target:
+- `POST /webhook/tg-moderation` - Telegram webhook target. Every update
+  must carry `X-Telegram-Bot-Api-Secret-Token` matching
+  `TG_WEBHOOK_SECRET` (registered via `setWebhook`'s `secret_token`,
+  see `tools/tg_webhook_setup.sh`) and come from the pinned operator
+  chat (`TELEGRAM_CHAT_ID` env, `state/tg.json` fallback) - anything
+  else is dropped before it can touch drafts or the publish queue:
   - Approve > writes `queue/publish/<id>.json` (carries `test: true`
-    through from the draft meta when set), marks the TG message.
+    through from the draft meta when set), marks the TG message. A
+    draft whose platform is not in `PUBLISH_PLATFORMS` is refused with
+    one uniform answer
+    (`platform "x" is disabled in the publish tick - enable it first,
+    then approve again`) whether the Approve is fresh or a re-approve
+    from `skipped/` - 'Queued for publish' would misreport a publish
+    that only parks in `skipped/` on the next tick.
     When a queue file already exists (root or `processing/`) and its
     payload differs from the current draft - e.g. an Edit + rewrite
     regenerated the draft under the same `draft_id` after the first
@@ -319,5 +343,9 @@ VK can run on the refresh-service token alone, and non-VK platforms go
 to `skipped/` via the ENABLED gate regardless of env vars).
 `VK_TOKEN_REFRESH_URL`
 is an optional override for the VK token refresh endpoint (default
-`http://10.0.2.2:8792/vk-token`). Code nodes need
+`http://10.0.2.2:8792/vk-token`). `TG_WEBHOOK_SECRET` is REQUIRED for
+moderation to work - it is the `secret_token` Telegram signs webhook
+deliveries with (`tools/tg_webhook_setup.sh` registers it; without it
+the tg-moderation gate fails closed). `TELEGRAM_CHAT_ID` pins the
+operator chat (`state/tg.json` is the fallback). Code nodes need
 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (set in docker-compose.yml).

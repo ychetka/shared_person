@@ -132,8 +132,11 @@ last resort only). Run it under systemd so it survives reboots:
 
 ```bash
 # the unit reads a dedicated env file with ONLY VK_TOKEN_SECRET -
-# generate it from the project ENV (gitignored, never commit it):
-grep '^VK_TOKEN_SECRET=' ../ENV > deploy/vk-token.env
+# generate it from the project ENV (gitignored, never commit it).
+# The grep tolerates an optional 'export ' prefix on the ENV line;
+# systemd EnvironmentFile does not strip it, so sed removes it:
+grep -E '^(export[[:space:]]+)?VK_TOKEN_SECRET=' ../ENV \
+  | sed 's/^export[[:space:]]*//' > deploy/vk-token.env
 chmod 600 deploy/vk-token.env
 mkdir -p ~/.config/systemd/user
 cp deploy/vk-token.service ~/.config/systemd/user/

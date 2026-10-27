@@ -41,6 +41,17 @@ services:
       # Webhooks published at https://shared-person.opticode.su (edge proxy).
       - WEBHOOK_URL=https://shared-person.opticode.su:8443/
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      # Telegram webhook authenticity: setWebhook registers this as
+      # secret_token; Telegram then signs every delivery with the
+      # X-Telegram-Bot-Api-Secret-Token header, which sp-tg-moderation
+      # verifies before touching any update (tools/tg_webhook_setup.sh
+      # re-registers the webhook). Required - the gate fails closed
+      # when unset.
+      - TG_WEBHOOK_SECRET=${TG_WEBHOOK_SECRET:-}
+      # operator chat is pinned config, not learned from updates - a
+      # forged message used to rewrite state/tg.json and hijack every
+      # preview. tg.json (written by sp-tg-setup) stays as fallback.
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       # enabled publish platforms, comma-separated - single source for
       # the ENABLED gates in sp-publish (Publish Tick) and
       # sp-tg-moderation (Handle TG Update); both read $env via

@@ -176,7 +176,13 @@ try {
     // workflow - writing 'activated' rows for an inactive spec leaves
     // registry entries pointing at a version that never runs
     if (active) {
-      // published_version row may be missing after a deactivation - upsert
+      // published_version row may be missing after a deactivation -
+      // upsert. ON CONFLICT(workflowId) is safe here: verified
+      // empirically on the live n8n DB (PRAGMA
+      // index_list(workflow_published_version) ->
+      // sqlite_autoindex_workflow_published_version_1, unique, origin
+      // 'pk') - workflowId IS the primary key, so the conflict target
+      // always resolves to a real unique index on this schema.
       db.prepare(`INSERT INTO workflow_published_version
         (workflowId,publishedVersionId,createdAt,updatedAt) VALUES (?,?,?,?)
         ON CONFLICT(workflowId) DO UPDATE SET publishedVersionId=excluded.publishedVersionId,updatedAt=excluded.updatedAt`)
