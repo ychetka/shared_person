@@ -39,21 +39,27 @@ WEBHOOK_URL="${TG_WEBHOOK_URL:-https://shared-person.opticode.su:8443/webhook/tg
 API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
 
 echo ">> setWebhook $WEBHOOK_URL (secret_token=<redacted>)"
-# The secret must never reach a child process argv: -d
+# No secret may ever reach a child process argv: -d
 # "secret_token=$TG_WEBHOOK_SECRET" (and even --data-urlencode
 # 'k=$SECRET') puts the value in curl's command line, where `ps`
-# exposes it to every local user for the duration of the call.
-# Instead the request body is staged in a mktemp file (0600) and
-# passed as `-d @file` - curl's argv then carries only the path. The
-# body is JSON: Telegram's Bot API accepts application/json for every
-# method, which also removes the form url-encoding question entirely
-# (a '&'/'='/'%' in the secret could corrupt -d form fields; in JSON
-# it is just a string). The JSON is built by python3 reading the
-# secret from its ENVIRONMENT - a here-doc interpolation or jq --arg
-# would put the value back into an argv line.
+# exposes it to every local user for the duration of the call - and
+# the bot token inside the $API URL is a secret of exactly the same
+# rank, so the URL cannot ride argv either.
+# Instead: the request body is staged in a mktemp file (0600) passed
+# as `-d @file`, and the token-carrying URL is staged in a second
+# 0600 file fed to curl via -K (curl's config-file option - argv then
+# shows only paths). printf is a bash builtin, so writing the config
+# spawns no process whose argv could carry the token.
+# The body is JSON: Telegram's Bot API accepts application/json for
+# every method, which also removes the form url-encoding question
+# entirely (a '&'/'='/'%' in the secret could corrupt -d form fields;
+# in JSON it is just a string). The JSON is built by python3 reading
+# the secret from its ENVIRONMENT - a here-doc interpolation or jq
+# --arg would put the value back into an argv line.
 BODY_FILE="$(mktemp)"
-chmod 600 "$BODY_FILE"  # mktemp already creates 0600; belt & suspenders
-trap 'rm -f "$BODY_FILE"' EXIT
+CFG_FILE="$(mktemp)"
+chmod 600 "$BODY_FILE" "$CFG_FILE"  # mktemp already creates 0600; belt & suspenders
+trap 'rm -f "$BODY_FILE" "$CFG_FILE"' EXIT
 TG_WEBHOOK_SECRET="$TG_WEBHOOK_SECRET" WEBHOOK_URL="$WEBHOOK_URL" \
   python3 - "$BODY_FILE" <<'PYEOF'
 import json, os, sys
@@ -64,12 +70,12 @@ with open(sys.argv[1], "w") as f:
         "secret_token": os.environ["TG_WEBHOOK_SECRET"],
     }, f)
 PYEOF
-curl -sS -X POST "$API/setWebhook" \
+printf 'url = "%s/setWebhook"\n' "$API" > "$CFG_FILE"
+curl -sS -K "$CFG_FILE" -X POST \
   -H 'Content-Type: application/json' \
   -d "@$BODY_FILE"
-rm -f "$BODY_FILE"
-trap - EXIT
 echo
 echo ">> getWebhookInfo (secret is never echoed back; check url/last_error)"
-curl -sS "$API/getWebhookInfo"
+printf 'url = "%s/getWebhookInfo"\n' "$API" > "$CFG_FILE"
+curl -sS -K "$CFG_FILE"
 echo

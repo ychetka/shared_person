@@ -152,7 +152,16 @@ rewrite `tg.json` and hijack previews.
     so the regenerated version can reclaim the same `draft_id` under
     the (time-bounded) overwrite guard above. If the dispatch call
     itself fails, the draft reverts to its previous status - the
-    window closes immediately instead of expiring on the clock.
+    window closes immediately instead of expiring on the clock. The
+    same ~15min window bounds Approve too: while it is live Approve is
+    refused `rewrite in flight`; once expired (the rewrite never
+    arrived) the draft flips to `rejected`, the preview keyboard is
+    restored, and the operator decides fresh - Approve again publishes
+    the last text, or Edit / Reject.
+    `status: "approved"` is only persisted after the queue file is
+    confirmed to exist - a hard enqueue failure leaves the draft in
+    its previous status instead of stuck `approved` with nothing
+    behind it.
   - `post N` (plain text) > resolves item N from `state/digest.json`
     (newest stored day first), builds a `source_type: "hype"` brief
     (facts = source/published/metrics/angle/summary, links, scope,

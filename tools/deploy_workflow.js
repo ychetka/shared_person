@@ -108,11 +108,22 @@ const ins = (table, row) => {
 // trigger + webhook registration for one workflow id. Activation drops
 // webhook_entity and workflow_publication_trigger_status rows, so both
 // create and --update paths have to write them again.
-const registerTriggers = (wfId) => {
+// priorWebhookIds: node name -> webhookId the previous registration
+// used (snapshot taken before the --update DELETE below)
+const registerTriggers = (wfId, priorWebhookIds = new Map()) => {
   for (const t of triggers) {
     const node = nodes.find((n) => n.name === t.node);
     if (t.path) {
-      const webhookId = node?.webhookId || node?.parameters?.webhookId || crypto.randomUUID();
+      // webhook_entity.webhookId must not desync from the node the
+      // runtime activates: n8n writes node.webhookId here, so a random
+      // fallback can silently break webhook routing. Resolution order:
+      // the spec's own id first; then the id this workflow already
+      // registered for the node (a --update re-registration keeps the
+      // established id instead of orphaning it); then the spec's
+      // deterministic node id; a fresh UUID only when nothing else
+      // exists - never a silent random desync on re-deploy.
+      const webhookId = node?.webhookId || node?.parameters?.webhookId ||
+        priorWebhookIds.get(t.node) || node?.id || crypto.randomUUID();
       const variant = `${wfId}/${encodeURIComponent(t.node)}/${t.path}`;
       for (const p of [t.path, variant]) {
         ins('webhook_entity', {
@@ -187,6 +198,18 @@ try {
         (workflowId,publishedVersionId,createdAt,updatedAt) VALUES (?,?,?,?)
         ON CONFLICT(workflowId) DO UPDATE SET publishedVersionId=excluded.publishedVersionId,updatedAt=excluded.updatedAt`)
         .run(wf.id, VER_ID, now, now);
+      // snapshot the webhookIds of the current registration BEFORE the
+      // delete below: registerTriggers reuses them for spec nodes that
+      // carry no webhookId of their own, so a re-deploy cannot rotate
+      // an id the runtime already knows
+      const priorWebhookIds = new Map();
+      const whCols = colsOf('webhook_entity');
+      if (whCols.has('workflowId') && whCols.has('node') && whCols.has('webhookId')) {
+        for (const r of db.prepare(
+          'SELECT node, webhookId FROM webhook_entity WHERE workflowId=?').all(wf.id)) {
+          if (r.webhookId) priorWebhookIds.set(r.node, r.webhookId);
+        }
+      }
       // clear the previous registration first: INSERT OR REPLACE below
       // only writes rows for triggers in the new spec - rows left over
       // from a renamed node or a changed webhook path would stay live
@@ -200,7 +223,7 @@ try {
       }
       // trigger status + webhook rows are also dropped on deactivation -
       // re-register (schema-adaptive, same helper as the create path)
-      registerTriggers(wf.id);
+      registerTriggers(wf.id, priorWebhookIds);
     } else {
       // spec deactivates the workflow: clear stale 'activated'
       // registrations left over from a previously active version.

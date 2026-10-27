@@ -463,9 +463,17 @@ class Handler(BaseHTTPRequestHandler):
 
 def _mask(token):
     """Mask a token for stdout - --once output lands in terminal
-    scrollback and CI logs, so the raw credential stays hidden."""
+    scrollback and CI logs, so the raw credential stays hidden.
+    Mask unconditionally: a short/malformed value returned verbatim
+    would echo a live credential to journald. Under 8 chars nothing
+    is shown; up to ~12 only the first 4 (a trailing 4 there would
+    expose nearly the whole value)."""
     t = str(token)
-    return t if len(t) < 12 else t[:6] + "***" + t[-4:]
+    if len(t) < 8:
+        return "***"
+    if len(t) < 12:
+        return t[:4] + "***"
+    return t[:4] + "***" + t[-4:]
 
 
 def _scrub(msg, *secrets):
