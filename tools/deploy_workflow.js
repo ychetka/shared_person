@@ -100,8 +100,26 @@ try {
       (versionId,workflowId,authors,createdAt,updatedAt,nodes,connections,name,autosaved)
       VALUES (?,?,?,?,?,?,?,?,?)`)
       .run(VER_ID, wf.id, 'deploy_workflow.js --update', now, now, nodesJson, connJson, name, 0);
-    db.prepare(`UPDATE workflow_entity SET nodes=?,connections=?,versionId=?,activeVersionId=?,active=?,updatedAt=? WHERE id=?`)
-      .run(nodesJson, connJson, VER_ID, active ? VER_ID : null, active, now, wf.id);
+    // schema-adaptive UPDATE like the rest of the script: n8n 2.x
+    // versions differ on whether workflow_entity still has an `active`
+    // column (2.x leans on activeVersionId) - write only the columns
+    // that exist so a missing one cannot throw mid-transaction and
+    // roll the whole deploy back
+    const wfCols = colsOf('workflow_entity');
+    const sets = [];
+    const vals = [];
+    for (const [col, val] of [
+      ['nodes', nodesJson],
+      ['connections', connJson],
+      ['versionId', VER_ID],
+      ['activeVersionId', active ? VER_ID : null],
+      ['active', active],
+      ['updatedAt', now],
+    ]) {
+      if (wfCols.has(col)) { sets.push(`${col}=?`); vals.push(val); }
+    }
+    db.prepare(`UPDATE workflow_entity SET ${sets.join(',')} WHERE id=?`)
+      .run(...vals, wf.id);
     // published-version and trigger rows only make sense for an ACTIVE
     // workflow - writing 'activated' rows for an inactive spec leaves
     // registry entries pointing at a version that never runs
@@ -148,12 +166,16 @@ try {
     console.log('updated workflow', wf.id, 'version', VER_ID, 'active', active);
   } else {
     const WF_ID = crypto.randomUUID().slice(0, 16);
-    // cyclic FK entity<->history: entity first with NULL, then history, then back-update
-    db.prepare(`INSERT INTO workflow_entity
-      (id,name,active,nodes,connections,settings,versionId,triggerCount,createdAt,updatedAt,isArchived,versionCounter,activeVersionId)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)`)
-      .run(WF_ID, name, active, nodesJson, connJson,
-        JSON.stringify(settings), VER_ID, triggers.length, now, now, 0, 1);
+    // cyclic FK entity<->history: entity first with NULL activeVersionId,
+    // then history, then back-update. Same column-existence guard as the
+    // update path - a schema without `active`/`activeVersionId` must not
+    // throw mid-transaction
+    ins('workflow_entity', {
+      id: WF_ID, name, active, nodes: nodesJson, connections: connJson,
+      settings: JSON.stringify(settings), versionId: VER_ID,
+      triggerCount: triggers.length, createdAt: now, updatedAt: now,
+      isArchived: 0, versionCounter: 1, activeVersionId: null,
+    });
     db.prepare(`INSERT INTO workflow_history
       (versionId,workflowId,authors,createdAt,updatedAt,nodes,connections,name,autosaved)
       VALUES (?,?,?,?,?,?,?,?,?)`)

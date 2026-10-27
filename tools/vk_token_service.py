@@ -63,9 +63,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CDP = os.environ.get("VK_CDP_URL", "http://127.0.0.1:9223")
 SECRET = os.environ.get("VK_TOKEN_SECRET", "")
+# The web-session token lives in localStorage under
+# '<app_id>:web_token:login:auth' - the app_id prefix is user/session
+# specific and VK can rename the key, so do NOT hardcode it: enumerate
+# localStorage keys instead. Prefer keys that still end in the known
+# ':web_token:login:auth' shape, then fall back to any 'web_token' key
+# whose value parses to an object carrying access_token.
 TOKEN_EXPR = (
-    "JSON.parse(localStorage.getItem('6287487:web_token:login:auth'))"
-    ".access_token"
+    "(function(){"
+    "var ks=Object.keys(localStorage);"
+    "var pick=function(pred){"
+    "for(var i=0;i<ks.length;i++){if(!pred(ks[i]))continue;"
+    "try{var v=JSON.parse(localStorage.getItem(ks[i]));"
+    "if(v&&v.access_token)return v.access_token;}catch(e){}}"
+    "return null;};"
+    "return pick(function(k){return /(^|:)web_token:login:auth$/.test(k);})"
+    "||pick(function(k){return k.indexOf('web_token')!==-1;});"
+    "})()"
 )
 VK_API = "https://api.vk.com/method/{m}"
 # One get_token() call must never outlast the 60s timeout the n8n
