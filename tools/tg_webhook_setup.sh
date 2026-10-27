@@ -38,11 +38,19 @@ env_val() {
   v="$(sed -n -e 's/^export[[:space:]]\{1,\}//' -e "s/^$1=//p" "$ENV_FILE" | tail -n 1)"
   # ENV accepts KEY="value" and KEY='value' - strip one matching pair
   # of surrounding quotes, otherwise the quote chars end up inside the
-  # token/secret/url and every curl call below fails
+  # token/secret/url and every curl call below fails. An inline
+  # comment (KEY=value # note) is shell syntax, not part of the value:
+  # for a quoted value everything after the closing quote goes with
+  # the quotes; for a bare value everything from the first ' #' goes
+  # (a '#' mid-word is literal, same as sourcing).
   case "$v" in
-    \"*\") v="${v#\"}"; v="${v%\"}" ;;
-    \'*\') v="${v#\'}"; v="${v%\'}" ;;
+    \"*) v="${v#\"}"; v="${v%%\"*}" ;;
+    \'*) v="${v#\'}"; v="${v%%\'*}" ;;
+    *) v="${v%% #*}" ;;
   esac
+  # whitespace left behind by a stripped comment is not part of the
+  # value either
+  v="${v%"${v##*[![:space:]]}"}"
   printf '%s' "$v"
 }
 if [ -f "$ENV_FILE" ]; then
