@@ -65,6 +65,7 @@ import hmac
 import json
 import os
 import socket
+import ssl
 import sys
 import threading
 import time
@@ -423,11 +424,20 @@ class Handler(BaseHTTPRequestHandler):
     def handle_one_request(self):
         try:
             super().handle_one_request()
-        except (socket.timeout, TimeoutError):
-            # a stalled client hit the 15s read cap - close the
-            # connection quietly. The default socketserver
-            # handle_error would dump a traceback to journald for what
-            # is a routine cleanup event.
+        except (socket.timeout, TimeoutError, ConnectionError,
+                ssl.SSLError):
+            # routine-disconnect outcomes, all ending the same way -
+            # the connection is dead, so close it quietly:
+            # - socket.timeout/TimeoutError: a stalled client hit the
+            #   15s read cap
+            # - ConnectionError (reset/broken pipe/aborted): a loopback
+            #   client died mid-request or closed before the response
+            #   body landed in _send
+            # - ssl.SSLError: TLS noise against a plain-HTTP port, and
+            #   belt-and-braces if a TLS wrapper ever fronts this
+            # The default socketserver handle_error would dump a full
+            # traceback to journald for each of these. Non-disconnect
+            # errors still reach handle_error with their traceback.
             self.close_connection = True
 
     def _send(self, code, obj):

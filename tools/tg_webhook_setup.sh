@@ -20,7 +20,8 @@
 #   TG_WEBHOOK_URL=https://... tools/tg_webhook_setup.sh
 #
 # Reads TELEGRAM_BOT_TOKEN and TG_WEBHOOK_SECRET from the project ENV
-# (../ENV relative to this script) unless already exported.
+# (../../ENV relative to this script - the project root) unless already
+# exported.
 
 set -euo pipefail
 
@@ -89,11 +90,23 @@ with open(sys.argv[1], "w") as f:
     }, f)
 PYEOF
 printf 'url = "%s/setWebhook"\n' "$API" > "$CFG_FILE"
-curl -sS -K "$CFG_FILE" -X POST \
+# -fS: --fail makes HTTP-layer errors exit nonzero (curl otherwise
+# exits 0 on a 4xx/5xx body and set -e stays blind); -S keeps the
+# error message on stderr when -f fires. --fail alone is not enough
+# though: Telegram reports application errors as HTTP 200 with
+# {"ok":false,...}, so the body is checked for ok:true too - a dead
+# bot token or rejected URL must abort the script, not scroll past
+# looking routine.
+RESP="$(curl -fsS -K "$CFG_FILE" -X POST \
   -H 'Content-Type: application/json' \
-  -d "@$BODY_FILE"
+  -d "@$BODY_FILE")"
+echo "$RESP"
+echo "$RESP" | grep -q '"ok" *: *true' || {
+  echo "!! setWebhook reported ok:false - webhook NOT registered" >&2
+  exit 1
+}
 echo
 echo ">> getWebhookInfo (secret is never echoed back; check url/last_error)"
 printf 'url = "%s/getWebhookInfo"\n' "$API" > "$CFG_FILE"
-curl -sS -K "$CFG_FILE"
+curl -fsS -K "$CFG_FILE"
 echo
