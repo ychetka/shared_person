@@ -161,6 +161,15 @@ elsewhere. `Restart=always` covers process death; the unit is a host
 service, not part of docker-compose (it needs the project checkout and
 the operator's Chrome CDP).
 
+Cold-cache boot caveat: `uv run` resolves the script's PEP 723 deps
+against the package index when its cache is cold, so an offline boot
+fails on the resolver, not in the service itself. The unit sets
+`RestartSec=30` so the 5-start `StartLimitBurst` budget spreads over
+~2.5min of retries instead of burning out before the network is up;
+on hosts that boot offline, warm the uv cache once while online
+(`uv run tools/vk_token_service.py --once`) so later starts never
+touch the index, or raise `RestartSec` further.
+
 ## port_fwd.sh / port_fwd.py
 
 Host-to-rootless-netns port bridging - see `../README.md`.

@@ -90,7 +90,10 @@ printf 'url = "%s/setWebhook"\n' "$API" > "$CFG_FILE"
 # {"ok":false,...} anyway, so the body check (not the HTTP status) is
 # what decides. A real transport failure still aborts via the
 # if-guard, and -S keeps curl's error text on stderr.
-if ! RESP="$(curl -sS -K "$CFG_FILE" -X POST \
+# --max-time 30 bounds a hung api.telegram.org connection the same way
+# the workflow Code nodes bound their helpers.httpRequest calls (30s) -
+# an unbounded curl would stall this script forever.
+if ! RESP="$(curl -sS --max-time 30 -K "$CFG_FILE" -X POST \
   -H 'Content-Type: application/json' \
   -d "@$BODY_FILE")"; then
   echo "!! setWebhook request failed (curl transport error)" >&2
@@ -104,7 +107,7 @@ echo "$RESP" | grep -q '"ok" *: *true' || {
 echo
 echo ">> getWebhookInfo (secret is never echoed back; check url/last_error)"
 printf 'url = "%s/getWebhookInfo"\n' "$API" > "$CFG_FILE"
-if ! RESP="$(curl -sS -K "$CFG_FILE")"; then
+if ! RESP="$(curl -sS --max-time 30 -K "$CFG_FILE")"; then
   echo "!! getWebhookInfo request failed (curl transport error)" >&2
   exit 1
 fi

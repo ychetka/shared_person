@@ -49,9 +49,20 @@ EnvironmentFile=-%h/projects/shared_person/code/deploy/vk-token.env
 # /usr/local/bin are common too (`which uv`). Extend the list if a
 # host keeps uv somewhere else.
 Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+# `uv run` needs its package cache warm: on a cold cache it resolves
+# the PEP 723 deps against the package index, so a boot with no
+# network yet makes every start fail on the resolver - and with a
+# short RestartSec all 5 StartLimitBurst starts burn inside the same
+# offline window and the unit flaps to failed before the network is
+# even up. RestartSec=30 spreads the retries: each restart is a fresh
+# chance to catch the index once egress appears, and a still-online
+# cold cache resolves on the first try anyway. If boots are routinely
+# offline, warm the cache once while online (`uv run
+# tools/vk_token_service.py --once` or `uv sync` in this checkout) or
+# raise this further.
 ExecStart=/usr/bin/env uv run tools/vk_token_service.py --port 8792
 Restart=always
-RestartSec=5
+RestartSec=30
 # egress is required: vk_check() calls api.vk.com over HTTPS and the
 # extractor reaches the operator Chrome CDP port (default
 # 127.0.0.1:9223) - do NOT add network restrictions to this unit.
