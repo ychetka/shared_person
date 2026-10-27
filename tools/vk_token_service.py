@@ -119,14 +119,32 @@ _GET_TOKEN_LOCK = threading.Lock()
 # responses and the journal can be _scrub'd against the live values.
 # Bounded - the service is long-running and tokens rotate.
 _SECRETS_SEEN = set()
+# Mutations and snapshots both go through this dedicated lock, NOT
+# _GET_TOKEN_LOCK: the scrub path in do_GET runs on a handler thread
+# while another thread's get_token() holds the big lock for up to
+# TOTAL_BUDGET, and a snapshot that queued on it would stall the error
+# response for the whole run. _remember_secret is only called inside
+# _GET_TOKEN_LOCK anyway, so the small lock adds no contention.
+_SECRETS_LOCK = threading.Lock()
 
 
 def _remember_secret(value):
     if not value:
         return
-    if len(_SECRETS_SEEN) >= 64:
-        _SECRETS_SEEN.clear()
-    _SECRETS_SEEN.add(str(value))
+    with _SECRETS_LOCK:
+        if len(_SECRETS_SEEN) >= 64:
+            _SECRETS_SEEN.clear()
+        _SECRETS_SEEN.add(str(value))
+
+
+def _secrets_snapshot():
+    """Tuple copy of _SECRETS_SEEN under its lock. Iterating the live
+    set (list()/tuple() at the call site) races _remember_secret
+    mutations on the request thread holding _GET_TOKEN_LOCK and can
+    raise RuntimeError 'Set changed size during iteration', killing
+    the handler mid-response."""
+    with _SECRETS_LOCK:
+        return tuple(_SECRETS_SEEN)
 
 
 def _log(msg):
@@ -471,13 +489,13 @@ class Handler(BaseHTTPRequestHandler):
             # upstream error strings can echo a live token or the
             # shared secret
             if res.get("error"):
-                # snapshot first: an in-flight get_token() on another
+                # locked snapshot: an in-flight get_token() on another
                 # request thread mutates _SECRETS_SEEN via
                 # _remember_secret while this handler thread is outside
-                # _GET_TOKEN_LOCK - unpacking the live set could raise
+                # _GET_TOKEN_LOCK - iterating the live set could raise
                 # RuntimeError and kill the connection
                 res["error"] = _scrub(
-                    res["error"], SECRET, *list(_SECRETS_SEEN))[:300]
+                    res["error"], SECRET, *_secrets_snapshot())[:300]
             if res.get("ok"):
                 # masked token only - the journal must never hold a
                 # live wall-scope credential
@@ -539,12 +557,12 @@ def main():
         except Exception as e:  # noqa: BLE001 - mirrors the HTTP path
             res = {"ok": False, "error": str(e)}
         # same scrub as do_GET - --once output lands in terminal
-        # scrollback and CI logs. Snapshot the set like the HTTP path
-        # does (here the run is single-threaded, but the shapes stay
+        # scrollback and CI logs. Locked snapshot like the HTTP path
+        # (here the run is single-threaded, but the shapes stay
         # identical so a future shared call site stays safe)
         if res.get("error"):
             res["error"] = _scrub(res["error"], SECRET,
-                                  *list(_SECRETS_SEEN))[:300]
+                                  *_secrets_snapshot())[:300]
         if not args.show_token and res.get("access_token"):
             res["access_token"] = _mask(res["access_token"])
         print(json.dumps(res))
