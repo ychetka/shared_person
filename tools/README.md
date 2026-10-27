@@ -133,10 +133,13 @@ last resort only). Run it under systemd so it survives reboots:
 ```bash
 # the unit reads a dedicated env file with ONLY VK_TOKEN_SECRET -
 # generate it from the project ENV (gitignored, never commit it).
-# The grep tolerates an optional 'export ' prefix on the ENV line;
-# systemd EnvironmentFile does not strip it, so sed removes it:
-grep -E '^(export[[:space:]]+)?VK_TOKEN_SECRET=' ../ENV \
-  | sed 's/^export[[:space:]]*//' > deploy/vk-token.env
+# Parse ENV through tools/env_val.sh - the same env_val() semantics
+# tg_webhook_setup.sh uses (optional 'export ', last assignment wins,
+# one quote pair stripped, ' # comment' tail removed); a bare
+# grep|sed would leave quote chars and comment tails inside the value
+# systemd exports:
+printf 'VK_TOKEN_SECRET=%s\n' \
+  "$(tools/env_val.sh VK_TOKEN_SECRET)" > deploy/vk-token.env
 chmod 600 deploy/vk-token.env
 mkdir -p ~/.config/systemd/user
 cp deploy/vk-token.service ~/.config/systemd/user/

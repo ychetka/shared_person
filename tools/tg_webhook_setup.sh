@@ -31,28 +31,12 @@ ENV_FILE="${ENV_FILE:-$(cd "$(dirname "$0")/../.." && pwd)/ENV}"
 # spawns (curl, python3), where /proc/<pid>/environ exposes them to
 # other processes of the same uid. Extract only the vars the script
 # actually needs, and only when they are not already set in the
-# calling environment.
-env_val() {
-  # last KEY= assignment wins - same rule as sourcing would apply
-  local v
-  v="$(sed -n -e 's/^export[[:space:]]\{1,\}//' -e "s/^$1=//p" "$ENV_FILE" | tail -n 1)"
-  # ENV accepts KEY="value" and KEY='value' - strip one matching pair
-  # of surrounding quotes, otherwise the quote chars end up inside the
-  # token/secret/url and every curl call below fails. An inline
-  # comment (KEY=value # note) is shell syntax, not part of the value:
-  # for a quoted value everything after the closing quote goes with
-  # the quotes; for a bare value everything from the first ' #' goes
-  # (a '#' mid-word is literal, same as sourcing).
-  case "$v" in
-    \"*) v="${v#\"}"; v="${v%%\"*}" ;;
-    \'*) v="${v#\'}"; v="${v%%\'*}" ;;
-    *) v="${v%% #*}" ;;
-  esac
-  # whitespace left behind by a stripped comment is not part of the
-  # value either
-  v="${v%"${v##*[![:space:]]}"}"
-  printf '%s' "$v"
-}
+# calling environment. env_val() lives in tools/env_val.sh - the
+# single implementation the vk-token.service install snippets point
+# at too, so every ENV reader parses identically (optional 'export ',
+# last assignment wins, one quote pair stripped, ' # comment' tail
+# removed).
+. "$(dirname "$0")/env_val.sh"
 if [ -f "$ENV_FILE" ]; then
   : "${TELEGRAM_BOT_TOKEN:=$(env_val TELEGRAM_BOT_TOKEN)}"
   : "${TG_WEBHOOK_SECRET:=$(env_val TG_WEBHOOK_SECRET)}"
@@ -98,16 +82,20 @@ with open(sys.argv[1], "w") as f:
     }, f)
 PYEOF
 printf 'url = "%s/setWebhook"\n' "$API" > "$CFG_FILE"
-# -fS: --fail makes HTTP-layer errors exit nonzero (curl otherwise
-# exits 0 on a 4xx/5xx body and set -e stays blind); -S keeps the
-# error message on stderr when -f fires. --fail alone is not enough
-# though: Telegram reports application errors as HTTP 200 with
-# {"ok":false,...}, so the body is checked for ok:true too - a dead
-# bot token or rejected URL must abort the script, not scroll past
-# looking routine.
-RESP="$(curl -fsS -K "$CFG_FILE" -X POST \
+# no -f on purpose: --fail suppresses the response body entirely, so
+# on an HTTP-layer error Telegram's own error JSON (or a proxy's
+# error page) would be swallowed and the operator would see only
+# 'curl: (22)'. Capture the body unconditionally, echo it, then check
+# the ok field - Telegram reports application errors as HTTP 200 with
+# {"ok":false,...} anyway, so the body check (not the HTTP status) is
+# what decides. A real transport failure still aborts via the
+# if-guard, and -S keeps curl's error text on stderr.
+if ! RESP="$(curl -sS -K "$CFG_FILE" -X POST \
   -H 'Content-Type: application/json' \
-  -d "@$BODY_FILE")"
+  -d "@$BODY_FILE")"; then
+  echo "!! setWebhook request failed (curl transport error)" >&2
+  exit 1
+fi
 echo "$RESP"
 echo "$RESP" | grep -q '"ok" *: *true' || {
   echo "!! setWebhook reported ok:false - webhook NOT registered" >&2
@@ -116,5 +104,12 @@ echo "$RESP" | grep -q '"ok" *: *true' || {
 echo
 echo ">> getWebhookInfo (secret is never echoed back; check url/last_error)"
 printf 'url = "%s/getWebhookInfo"\n' "$API" > "$CFG_FILE"
-curl -fsS -K "$CFG_FILE"
-echo
+if ! RESP="$(curl -sS -K "$CFG_FILE")"; then
+  echo "!! getWebhookInfo request failed (curl transport error)" >&2
+  exit 1
+fi
+echo "$RESP"
+echo "$RESP" | grep -q '"ok" *: *true' || {
+  echo "!! getWebhookInfo reported ok:false" >&2
+  exit 1
+}
