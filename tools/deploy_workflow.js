@@ -346,7 +346,11 @@ try {
   }
   db.exec('COMMIT');
 } catch (e) {
-  db.exec('ROLLBACK');
+  // ROLLBACK can itself throw - no transaction is open when BEGIN
+  // failed or the driver already rolled the writes back - and a
+  // throwing rollback would mask the real error caught above. The DB
+  // stays consistent either way; rethrow the original failure.
+  try { db.exec('ROLLBACK'); } catch (e2) {}
   throw e;
 } finally {
   db.close();

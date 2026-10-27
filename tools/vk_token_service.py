@@ -21,8 +21,9 @@ Endpoints:
   GET /vk-token  -> 200 {"ok": true, "access_token": "...", "source": "cdp",
                          "refreshed_tab": bool}
                   -> 503 {"ok": false, "error": "...", "retryable": true}
-                     for a transient 'busy' (lock contention), 502
-                     {"ok": false, "error": "..."} otherwise
+                     for transient failures (lock contention, transport
+                     errors, deadline hits, CDP unreachable), 502
+                     {"ok": false, "error": "..."} for real rejections
 
 Trust assumption: /vk-token serves a full wall-scope token behind two
 cheap gates - the loopback-only bind (127.0.0.1) and a shared-secret
@@ -304,7 +305,7 @@ def reload_and_extract(stale=None, deadline=None, max_wait=20.0,
     which is not a win - keep polling until a DIFFERENT token shows up
     or the budget runs out.
 
-    `max_wait` is the ceiling for the poll window after
+    `max_wait` is the ceiling for the poll window AFTER
     location.reload(): a real VK tab reload (web app boot, auth
     handshake, localStorage write) can legitimately take well over 6s
     on a loaded machine, and reporting 'token did not rotate' while the
@@ -312,10 +313,19 @@ def reload_and_extract(stale=None, deadline=None, max_wait=20.0,
     the reload worked. The window is clamped to the shared `deadline`
     (and each poll round splits it across the tabs), so the reload path
     can never push get_token() past TOTAL_BUDGET."""
+    # bound the reload phase itself: by the shared get_token()
+    # deadline when there is one, else by max_wait so an unbounded
+    # call cannot hang on many slow tabs
+    reload_vk_tab(deadline=deadline if deadline is not None
+                  else time.time() + max_wait)
+    # start the poll window only AFTER the reload returns: max_wait is
+    # the ceiling for the post-reload observation window, so a slow
+    # reload (several tabs at up to ~8s each) must not consume it -
+    # the poll would otherwise get almost no time to observe the
+    # rotated token and report a false 'token did not rotate'
     if deadline is not None:
         max_wait = min(max_wait, _remaining(deadline))
     poll_deadline = time.time() + max_wait
-    reload_vk_tab(deadline=poll_deadline)
     if deadline is not None:
         poll_deadline = min(poll_deadline, deadline)
     tok, err = extract_token(deadline=poll_deadline)
@@ -328,12 +338,21 @@ def reload_and_extract(stale=None, deadline=None, max_wait=20.0,
 
 
 def vk_check(token, deadline=None):
-    """users.get sanity check - returns error_code or None.
+    """users.get sanity check - returns error_code, None, or a
+    {'transport': ...} marker.
 
     The access token travels in the POST body (form-encoded), matching
     the n8n-side vkCall - never in the request URL, which transport
     errors and logs can echo back. `deadline` caps the HTTP timeout by
-    the shared get_token() budget."""
+    the shared get_token() budget.
+
+    A transport failure (timeout, reset, DNS blip) is NOT a token
+    rejection: returning a truthy 'http: ...' string used to file it
+    under the same non-retryable 502 as a real VK error code, and the
+    publish tick then parked the queue item in failed/ until a manual
+    re-approve. The dict marker lets _check_result classify it as
+    retryable instead - a momentary api.vk.com outage is transient by
+    definition."""
     timeout = 15 if deadline is None else min(15, max(0.5,
                                                     _remaining(deadline)))
     body = urllib.parse.urlencode(
@@ -343,9 +362,31 @@ def vk_check(token, deadline=None):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             resp = json.loads(r.read())
     except Exception as e:  # noqa: BLE001 - report, do not crash
-        return f"http: {e}"
+        return {"transport": str(e)}
     err = resp.get("error")
     return err.get("error_code") if err else None
+
+
+def _check_result(code, ctx):
+    """Map a vk_check() outcome to a result dict or None.
+
+    None -> None (token accepted). An int error_code is a genuine
+    VK-side rejection -> a non-retryable error. A {'transport': ...}
+    marker is transient -> retryable, so /vk-token answers 503 and the
+    publish tick requeues the file instead of parking it in failed/.
+    `ctx` is a log-line suffix telling apart the pre- and post-reload
+    checks."""
+    if code is None:
+        return None
+    if isinstance(code, dict):
+        _log(f"vk_check transport failure{ctx}: {code['transport']}")
+        return {"ok": False,
+                "error": "vk check transport failure: " +
+                         _scrub(code["transport"],
+                                *_secrets_snapshot())[:200],
+                "retryable": True}
+    _log(f"vk_check failed{ctx}: {code}")
+    return {"ok": False, "error": f"vk check failed: {code}"}
 
 
 def get_token(budget=TOTAL_BUDGET):
@@ -379,7 +420,17 @@ def get_token(budget=TOTAL_BUDGET):
 
 def _get_token(budget):
     deadline = time.time() + budget
-    tok, err = extract_token(deadline=deadline)
+    try:
+        tok, err = extract_token(deadline=deadline)
+    except Exception as e:  # noqa: BLE001 - CDP unreachable etc
+        # a dead Chrome/CDP port is transient (the browser restarts,
+        # the tab comes back), not a token rejection - retryable so
+        # the publish tick requeues instead of filing under failed/
+        _log(f"token extract raised: {e}")
+        return {"ok": False,
+                "error": "token extract failed: " +
+                         _scrub(e, *_secrets_snapshot())[:200],
+                "retryable": True}
     _remember_secret(tok)
     refreshed = False
     if tok:
@@ -388,7 +439,16 @@ def _get_token(budget):
             _log("vk_check rejected the token (error 5) - "
                  "reloading vk tabs for a fresh one")
             stale = tok
-            tok, err = reload_and_extract(stale=stale, deadline=deadline)
+            try:
+                tok, err = reload_and_extract(stale=stale,
+                                              deadline=deadline)
+            except Exception as e:  # noqa: BLE001 - CDP died mid-reload
+                _log(f"token reload raised: {e}")
+                return {"ok": False,
+                        "error": "token reload failed: " +
+                                 _scrub(e, stale,
+                                        *_secrets_snapshot())[:200],
+                        "retryable": True}
             _remember_secret(tok)
             refreshed = True
             if not tok:
@@ -398,27 +458,41 @@ def _get_token(budget):
                 # 'vk check failed: no-token' that makes a
                 # token-service outage look like a VK-side rejection.
                 # Scrub first: exception text may echo the stale token.
+                # retryable: a deadline hit or a slow reload is
+                # transient - the tick requeues for the next run.
                 reason = _scrub(err, stale) if err else \
                     "no token after tab reload"
                 _log(f"no token after tab reload: {reason}")
-                return {"ok": False, "error": reason}
+                return {"ok": False, "error": reason,
+                        "retryable": True}
             code = vk_check(tok, deadline=deadline)
-        if code:
-            _log(f"vk_check failed: {code}")
-            return {"ok": False, "error": f"vk check failed: {code}"}
+        bad = _check_result(code, "")
+        if bad:
+            return bad
     else:
         # no token at all - try a tab reload once before giving up
         _log(f"token extract failed ({err}) - reloading vk tabs once")
-        tok, err = reload_and_extract(deadline=deadline)
+        try:
+            tok, err = reload_and_extract(deadline=deadline)
+        except Exception as e:  # noqa: BLE001 - CDP died mid-reload
+            _log(f"token reload raised: {e}")
+            return {"ok": False,
+                    "error": "token reload failed: " +
+                             _scrub(e, *_secrets_snapshot())[:200],
+                    "retryable": True}
         _remember_secret(tok)
         refreshed = True
         if not tok:
+            # every extraction path failed - deadline hit, no VK tab,
+            # token did not rotate. All are environmental/transient,
+            # not a token rejection: retryable so the tick requeues.
             _log(f"no token after tab reload: {err}")
-            return {"ok": False, "error": err or "no token"}
-        code = vk_check(tok, deadline=deadline)
-        if code:
-            _log(f"vk_check failed after reload: {code}")
-            return {"ok": False, "error": f"vk check failed: {code}"}
+            return {"ok": False, "error": err or "no token",
+                    "retryable": True}
+        bad = _check_result(vk_check(tok, deadline=deadline),
+                            " after reload")
+        if bad:
+            return bad
     # every path above either returns early on a falsy tok or proceeds
     # with a truthy one - tok is always set at this point
     return {"ok": True, "access_token": tok, "source": "cdp",
