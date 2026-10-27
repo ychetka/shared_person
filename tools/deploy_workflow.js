@@ -146,11 +146,22 @@ const registerTriggers = (wfId, priorWebhookIds = new Map()) => {
   }
 };
 
+// resolve the UPDATE target BEFORE BEGIN: a process.exit() inside the
+// transaction would bypass the catch's ROLLBACK (exit does not unwind
+// try/finally), leaving a dangling write transaction until the
+// process dies - and on WAL that still holds the write lock
+let wf = null;
+if (UPDATE) {
+  wf = db.prepare('SELECT id FROM workflow_entity WHERE name = ?').get(name);
+  if (!wf) {
+    console.error(`workflow "${name}" not found - run without --update first`);
+    process.exit(1);
+  }
+}
+
 db.exec('BEGIN');
 try {
   if (UPDATE) {
-    const wf = db.prepare('SELECT id FROM workflow_entity WHERE name = ?').get(name);
-    if (!wf) { console.error(`workflow "${name}" not found - run without --update first`); process.exit(1); }
     db.prepare(`INSERT INTO workflow_history
       (versionId,workflowId,authors,createdAt,updatedAt,nodes,connections,name,autosaved)
       VALUES (?,?,?,?,?,?,?,?,?)`)

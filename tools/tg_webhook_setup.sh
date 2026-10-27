@@ -25,11 +25,20 @@
 set -euo pipefail
 
 ENV_FILE="${ENV_FILE:-$(cd "$(dirname "$0")/../.." && pwd)/ENV}"
+# Never `set -a; . "$ENV_FILE"`: sourcing exports every project secret
+# (~16 vars) into the environment of each child process this script
+# spawns (curl, python3), where /proc/<pid>/environ exposes them to
+# other processes of the same uid. Extract only the vars the script
+# actually needs, and only when they are not already set in the
+# calling environment.
+env_val() {
+  # last KEY= assignment wins - same rule as sourcing would apply
+  sed -n -e 's/^export[[:space:]]\{1,\}//' -e "s/^$1=//p" "$ENV_FILE" | tail -n 1
+}
 if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$ENV_FILE"
-  set +a
+  : "${TELEGRAM_BOT_TOKEN:=$(env_val TELEGRAM_BOT_TOKEN)}"
+  : "${TG_WEBHOOK_SECRET:=$(env_val TG_WEBHOOK_SECRET)}"
+  : "${TG_WEBHOOK_URL:=$(env_val TG_WEBHOOK_URL)}"
 fi
 
 : "${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN missing - add it to $ENV_FILE}"

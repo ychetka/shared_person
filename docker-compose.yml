@@ -64,6 +64,13 @@ services:
       # PUBLISH_PLATFORMS so the two cannot drift. Default keeps VK
       # only; non-enabled platforms land in queue skipped/
       - PUBLISH_PLATFORMS=${PUBLISH_PLATFORMS:-vk}
+      # rewrite-overwrite window (ms) - single source for the two
+      # REWRITE_WINDOW_MS readers in sp-tg-moderation: Prepare Draft
+      # (how long a 'rewrite' draft may be overwritten through the
+      # public webhook) and Handle TG Update (how long Approve
+      # refuses while a rewrite is in flight). Both Code nodes fall
+      # back to 900000 (15min) when this is unset/empty.
+      - REWRITE_WINDOW_MS=${REWRITE_WINDOW_MS:-}
       # platform tokens for the publish workflow (optional - VK can run
       # on the refresh-service token; non-VK platforms go to skipped/)
       - VK_ACCESS_TOKEN=${VK_ACCESS_TOKEN:-}
