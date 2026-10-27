@@ -126,6 +126,32 @@ const ins = (table, row) => {
     .run(...keys.map((k) => row[k]));
 };
 
+// schema-adaptive upsert twin of ins(): where a row may already exist
+// (the published-version pointer survives a deactivation), ON CONFLICT
+// ... DO UPDATE must touch only the pointer columns - ins()'s
+// INSERT OR REPLACE would rewrite the whole row and reset every column
+// this schema carries that the row does not name. updateCols lists the
+// columns a conflict may overwrite; anything else keeps its value.
+const upsert = (table, row, conflictCol, updateCols) => {
+  const cols = colsOf(table);
+  const keys = Object.keys(row).filter((k) => cols.has(k));
+  const upd = updateCols.filter((k) => keys.includes(k));
+  // without the conflict column the ON CONFLICT target cannot resolve,
+  // and with nothing to update the upsert degenerates to a plain
+  // insert - both are silent no-ops worth warning about, same as
+  // ins()'s empty-projection guard
+  if (!keys.includes(conflictCol) || !upd.length) {
+    console.warn(`upsert(${table}): schema lacks the conflict/update ` +
+      'columns - row skipped');
+    return;
+  }
+  db.prepare(`INSERT INTO ${table} (${keys.join(',')})
+    VALUES (${keys.map(() => '?').join(',')})
+    ON CONFLICT(${conflictCol}) DO UPDATE SET
+    ${upd.map((k) => `${k}=excluded.${k}`).join(',')}`)
+    .run(...keys.map((k) => row[k]));
+};
+
 // trigger + webhook registration for one workflow id. Activation drops
 // webhook_entity and workflow_publication_trigger_status rows, so both
 // create and --update paths have to write them again.
@@ -249,11 +275,15 @@ try {
       // index_list(workflow_published_version) ->
       // sqlite_autoindex_workflow_published_version_1, unique, origin
       // 'pk') - workflowId IS the primary key, so the conflict target
-      // always resolves to a real unique index on this schema.
-      db.prepare(`INSERT INTO workflow_published_version
-        (workflowId,publishedVersionId,createdAt,updatedAt) VALUES (?,?,?,?)
-        ON CONFLICT(workflowId) DO UPDATE SET publishedVersionId=excluded.publishedVersionId,updatedAt=excluded.updatedAt`)
-        .run(wf.id, VER_ID, now, now);
+      // always resolves to a real unique index on this schema. The
+      // upsert() helper keeps this column-filtered like every other
+      // write in the script - a schema that drops/renames one of the
+      // four pointer columns skips loudly instead of throwing
+      // mid-transaction.
+      upsert('workflow_published_version',
+        { workflowId: wf.id, publishedVersionId: VER_ID,
+          createdAt: now, updatedAt: now },
+        'workflowId', ['publishedVersionId', 'updatedAt']);
       // snapshot the webhookIds of the current registration BEFORE the
       // delete below: registerTriggers reuses them for spec nodes that
       // carry no webhookId of their own, so a re-deploy cannot rotate
@@ -326,9 +356,13 @@ try {
       if (colsOf('workflow_entity').has('activeVersionId')) {
         db.prepare(`UPDATE workflow_entity SET activeVersionId=? WHERE id=?`).run(VER_ID, WF_ID);
       }
-      db.prepare(`INSERT INTO workflow_published_version
-        (workflowId,publishedVersionId,createdAt,updatedAt) VALUES (?,?,?,?)`)
-        .run(WF_ID, VER_ID, now, now);
+      // schema-adaptive ins() like every other write - a fresh
+      // workflow has no row to conflict with, so the plain
+      // INSERT OR REPLACE form is enough
+      ins('workflow_published_version', {
+        workflowId: WF_ID, publishedVersionId: VER_ID,
+        createdAt: now, updatedAt: now,
+      });
     }
 
     // owner binding - required, else EntityNotFoundError on publish

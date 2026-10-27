@@ -585,7 +585,16 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 res = get_token()
             except Exception as e:  # noqa: BLE001
-                res = {"ok": False, "error": str(e)}
+                # an unclassified exception is never a classified VK
+                # rejection - every deliberate non-retryable answer is
+                # built in _check_result, so whatever escapes here is
+                # an unexpected/environmental failure. A flat
+                # non-retryable 502 would make the publish tick park
+                # the queue file in failed/ permanently over a
+                # transient edge; retryable answers 503 and the file
+                # comes back next tick
+                res = {"ok": False, "error": str(e),
+                       "retryable": True}
             # scrub every error surface before the journal or the HTTP
             # body sees it: exception text (the catch-all above) and
             # upstream error strings can echo a live token or the
