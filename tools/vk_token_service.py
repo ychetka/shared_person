@@ -112,6 +112,21 @@ TOTAL_BUDGET = 50.0
 # call: /health still answers on other threads, /vk-token callers just
 # queue up.
 _GET_TOKEN_LOCK = threading.Lock()
+# Tokens extracted during a get_token() run can surface inside
+# exception text (websocket/urllib errors quote args and response
+# bodies), but the do_GET catch-all sits above the locals that hold
+# them. Every run registers the tokens it touched here so error
+# responses and the journal can be _scrub'd against the live values.
+# Bounded - the service is long-running and tokens rotate.
+_SECRETS_SEEN = set()
+
+
+def _remember_secret(value):
+    if not value:
+        return
+    if len(_SECRETS_SEEN) >= 64:
+        _SECRETS_SEEN.clear()
+    _SECRETS_SEEN.add(str(value))
 
 
 def _log(msg):
@@ -328,6 +343,7 @@ def get_token(budget=TOTAL_BUDGET):
 def _get_token(budget):
     deadline = time.time() + budget
     tok, err = extract_token(deadline=deadline)
+    _remember_secret(tok)
     refreshed = False
     if tok:
         code = vk_check(tok, deadline=deadline)
@@ -336,6 +352,7 @@ def _get_token(budget):
                  "reloading vk tabs for a fresh one")
             stale = tok
             tok, err = reload_and_extract(stale=stale, deadline=deadline)
+            _remember_secret(tok)
             refreshed = True
             if not tok:
                 # reload path produced nothing - surface the real
@@ -356,6 +373,7 @@ def _get_token(budget):
         # no token at all - try a tab reload once before giving up
         _log(f"token extract failed ({err}) - reloading vk tabs once")
         tok, err = reload_and_extract(deadline=deadline)
+        _remember_secret(tok)
         refreshed = True
         if not tok:
             _log(f"no token after tab reload: {err}")
@@ -447,7 +465,14 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 res = get_token()
             except Exception as e:  # noqa: BLE001
-                res = {"ok": False, "error": str(e)[:300]}
+                res = {"ok": False, "error": str(e)}
+            # scrub every error surface before the journal or the HTTP
+            # body sees it: exception text (the catch-all above) and
+            # upstream error strings can echo a live token or the
+            # shared secret
+            if res.get("error"):
+                res["error"] = _scrub(
+                    res["error"], SECRET, *_SECRETS_SEEN)[:300]
             if res.get("ok"):
                 # masked token only - the journal must never hold a
                 # live wall-scope credential
@@ -507,7 +532,12 @@ def main():
         try:
             res = get_token()
         except Exception as e:  # noqa: BLE001 - mirrors the HTTP path
-            res = {"ok": False, "error": str(e)[:300]}
+            res = {"ok": False, "error": str(e)}
+        # same scrub as do_GET - --once output lands in terminal
+        # scrollback and CI logs
+        if res.get("error"):
+            res["error"] = _scrub(res["error"], SECRET,
+                                  *_SECRETS_SEEN)[:300]
         if not args.show_token and res.get("access_token"):
             res["access_token"] = _mask(res["access_token"])
         print(json.dumps(res))

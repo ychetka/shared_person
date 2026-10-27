@@ -58,6 +58,15 @@ services:
       # workflow sends it on its internal draft dispatch. Required for
       # draft delivery - generate with `openssl rand -hex 32`.
       - DRAFT_WEBHOOK_SECRET=${DRAFT_WEBHOOK_SECRET:-}
+      # content-gen webhook shared secret: this endpoint is public via
+      # the edge proxy too, and a forged POST makes the workflow itself
+      # dispatch attacker text to moderation-draft with the valid
+      # DRAFT_WEBHOOK_SECRET - a live Approve button in the operator
+      # chat plus free LLM spend. Requires an X-Content-Gen-Secret
+      # header matching this (fails closed when unset); the internal
+      # callers in sp-tg-moderation (post N, edit rewrite) send it.
+      # Required for generation - generate with `openssl rand -hex 32`.
+      - CONTENT_GEN_WEBHOOK_SECRET=${CONTENT_GEN_WEBHOOK_SECRET:-}
       # enabled publish platforms, comma-separated - single source for
       # the ENABLED gates in sp-publish (Publish Tick) and
       # sp-tg-moderation (Handle TG Update); both read $env via

@@ -60,7 +60,13 @@ const defaultDb = () => {
   } catch (e) {}
   return null;
 };
-const DB = arg('db') || defaultDb();
+// `--db` present but valueless (`--db` alone, or `--db` followed by
+// another flag) made arg('db') return '' and the run silently fell
+// back to the docker-volume DB - a typo'd invocation would then patch
+// a DB the operator never asked for. The flag's presence means
+// intent: a missing/empty value is a hard error.
+const dbFlagGiven = argv.some((a) => a === '--db' || a.startsWith('--db='));
+const DB = dbFlagGiven ? arg('db') : defaultDb();
 
 if (!file) {
   console.error('usage: node tools/deploy_workflow.js <workflow.json> [--update] [--db=path|--db path]');
@@ -68,6 +74,11 @@ if (!file) {
 }
 if (!fs.existsSync(file)) {
   console.error(`workflow file not found: ${file}`);
+  process.exit(1);
+}
+if (dbFlagGiven && !DB) {
+  console.error('--db requires a path value: ' +
+    '--db=<path>/database.sqlite or --db <path>');
   process.exit(1);
 }
 if (!DB) {

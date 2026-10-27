@@ -225,6 +225,18 @@ candidate files (paths or `{path, desc}` objects); the same merge rule
 applies when a serialized brief carries `media[]`. `source_type` and
 `viz_data[]` likewise come from the payload or the serialized brief.
 
+Shared-secret gate: the endpoint is reachable through the public edge
+proxy, so every call must carry an `X-Content-Gen-Secret` header
+matching `CONTENT_GEN_WEBHOOK_SECRET` (constant-time compare, fails
+closed when the env is unset - a refused call answers
+`{ok:false, stage:'auth'}` and is rejected before the brief gate or
+any LLM call). Without it a forged POST would make the workflow
+itself dispatch attacker text to `moderation-draft` carrying the
+valid `DRAFT_WEBHOOK_SECRET` - a live Approve button in the operator
+chat plus free LLM spend. The internal callers (the `post N` digest
+dispatch and the Edit rewrite path in sp-tg-moderation's Handle TG
+Update) send the header.
+
 Brief gate (source > brief > draft, see `../brief/README.md`):
 `context` is expected to carry the serialized content brief or raw
 source material. If `context` is missing, shorter than 200 chars, or
@@ -382,6 +394,10 @@ the tg-moderation gate fails closed). `DRAFT_WEBHOOK_SECRET` is
 REQUIRED for draft delivery - it gates `POST /webhook/moderation-draft`
 (`X-Shared-Token`/`X-TG-Draft-Secret` header; fails closed when unset)
 and sp-content-gen sends it on the internal dispatch.
+`CONTENT_GEN_WEBHOOK_SECRET` is REQUIRED for content generation - it
+gates `POST /webhook/content-gen` (`X-Content-Gen-Secret` header; fails
+closed when unset) and the internal callers in sp-tg-moderation's
+Handle TG Update (`post N`, Edit rewrite) send it.
 `TELEGRAM_CHAT_ID` pins the
 operator chat (`state/tg.json` is the fallback). Code nodes need
 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (set in docker-compose.yml).
