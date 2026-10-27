@@ -73,7 +73,7 @@ const registerTriggers = (wfId) => {
       for (const p of [t.path, variant]) {
         ins('webhook_entity', {
           webhookPath: p, method: t.method || 'POST', node: t.node,
-          webhookId, workflowId: wfId, pathLength: t.path.length,
+          webhookId, workflowId: wfId, pathLength: p.length,
           createdAt: now, updatedAt: now,
         });
       }

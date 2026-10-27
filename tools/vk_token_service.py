@@ -33,10 +33,17 @@ web_token on each until one yields a token -> verify with users.get ->
 on VK error 5 or a failed extraction reload the tabs once and poll
 localStorage for the token (no fixed sleep window).
 
+Latency contract: get_token() enforces a GLOBAL deadline (TOTAL_BUDGET,
+50s) shared across every tab eval, reload, poll and vk_check call, so
+the worst case stays under the 60s timeout the n8n caller uses even
+when several VK tabs hang at once. Each ws_eval() gets only its share
+of the remaining budget and each recv() is capped by it.
+
 Run:
   uv run tools/vk_token_service.py                    # serve on :8792
   uv run tools/vk_token_service.py --port 8792        # same, explicit
-  uv run tools/vk_token_service.py --once             # print token JSON
+  uv run tools/vk_token_service.py --once             # print masked result
+  uv run tools/vk_token_service.py --once --show-token  # raw token JSON
 
 Env overrides: VK_CDP_URL (default http://127.0.0.1:9223).
 """
@@ -56,10 +63,27 @@ TOKEN_EXPR = (
     ".access_token"
 )
 VK_API = "https://api.vk.com/method/{m}"
+# One get_token() call must never outlast the 60s timeout the n8n
+# vkRefresh() uses - the budget is shared across all tabs and retries.
+TOTAL_BUDGET = 50.0
 
 
-def _targets():
-    with urllib.request.urlopen(f"{CDP}/json/list", timeout=10) as r:
+def _remaining(deadline):
+    """Seconds left on the shared deadline (0 when it has passed)."""
+    return max(0.0, deadline - time.time()) if deadline else 0.0
+
+
+def _share(deadline, n_left, cap):
+    """Split what is left across the n_left calls still to run."""
+    if deadline is None:
+        return cap
+    return min(cap, max(0.5, _remaining(deadline) / max(1, n_left)))
+
+
+def _targets(deadline=None):
+    timeout = 10 if deadline is None else min(10, max(0.5,
+                                                    _remaining(deadline)))
+    with urllib.request.urlopen(f"{CDP}/json/list", timeout=timeout) as r:
         return json.loads(r.read())
 
 
@@ -78,11 +102,11 @@ def _is_vk_url(url):
     )
 
 
-def find_vk_pages():
+def find_vk_pages(deadline=None):
     """All open VK tabs - a logged-out first tab must not hide a valid
     session in another one."""
     return [
-        t for t in _targets()
+        t for t in _targets(deadline)
         if t.get("type") == "page" and _is_vk_url(t.get("url", ""))
     ]
 
@@ -98,6 +122,10 @@ def ws_eval(ws_url, expr, timeout=45):
                                        "returnByValue": True}}))
         deadline = time.time() + timeout
         while time.time() < deadline:
+            # recv() can block for the full socket timeout - pin it to
+            # what this call still owns so a hung tab eats only its
+            # share of the global budget
+            ws.settimeout(max(0.5, deadline - time.time()))
             msg = json.loads(ws.recv())
             if msg.get("id") == 1:
                 res = msg.get("result", {})
@@ -109,14 +137,22 @@ def ws_eval(ws_url, expr, timeout=45):
         ws.close()
 
 
-def extract_token(per_tab_timeout=45):
-    pages = find_vk_pages()
+def extract_token(deadline=None, per_tab_timeout=45):
+    """Eval localStorage on each VK tab until a token shows up.
+
+    `deadline` is the shared get_token() deadline: whatever time is
+    left is split across the tabs still to try, so N hung tabs cost
+    the remaining budget once, not N x per_tab_timeout."""
+    pages = find_vk_pages(deadline)
     if not pages:
         return None, "no vk tab in CDP targets"
-    for page in pages:
+    for i, page in enumerate(pages):
+        budget = _share(deadline, len(pages) - i, per_tab_timeout)
+        if deadline is not None and _remaining(deadline) <= 0:
+            return None, "global deadline hit during token extract"
         try:
             tok = ws_eval(page["webSocketDebuggerUrl"], TOKEN_EXPR,
-                          timeout=per_tab_timeout)
+                          timeout=budget)
         except Exception:  # noqa: BLE001 - dead tab, try the next one
             continue
         if tok:
@@ -124,17 +160,25 @@ def extract_token(per_tab_timeout=45):
     return None, "token eval returned nothing on all vk tabs"
 
 
-def reload_vk_tab():
-    pages = find_vk_pages()
-    for page in pages:
+def reload_vk_tab(deadline=None, per_tab_timeout=8):
+    """location.reload() every VK tab. Reload is best-effort and gets a
+    short share of the shared deadline - a hung tab must not consume
+    the whole budget before the poll loop even starts."""
+    pages = find_vk_pages(deadline)
+    for i, page in enumerate(pages):
+        if deadline is not None and _remaining(deadline) <= 0:
+            break
         try:
-            ws_eval(page["webSocketDebuggerUrl"], "location.reload(); 'r'")
+            ws_eval(page["webSocketDebuggerUrl"], "location.reload(); 'r'",
+                    timeout=_share(deadline, len(pages) - i,
+                                   per_tab_timeout))
         except Exception:  # noqa: BLE001 - dead tab, reload the rest
             continue
     return pages
 
 
-def reload_and_extract(stale=None, max_wait=6.0, poll=0.5):
+def reload_and_extract(stale=None, deadline=None, max_wait=6.0,
+                       poll=0.5):
     """Reload the VK tabs once, then poll localStorage for the token.
 
     `stale` is the token value vk_check just rejected (if any): a poll
@@ -142,35 +186,38 @@ def reload_and_extract(stale=None, max_wait=6.0, poll=0.5):
     which is not a win - keep polling until a DIFFERENT token shows up
     or the budget runs out.
 
-    Each poll round splits the remaining budget across the tabs, so one
-    hung tab cannot stretch a ws_eval() past max_wait. That keeps
-    worst-case get_token() latency under the 60s timeout the n8n side
-    uses: initial extract (up to 45s on a single hung tab) plus this
-    bounded poll window."""
-    pages = reload_vk_tab()
-    n = max(1, len(pages))
-    deadline = time.time() + max_wait
-    per_tab = lambda: max(0.5, (deadline - time.time()) / n)  # noqa: E731
-    tok, err = extract_token(per_tab())
-    while (not tok or tok == stale) and time.time() < deadline:
-        time.sleep(poll)
-        tok, err = extract_token(per_tab())
+    The poll window is clamped to the shared `deadline` (and each poll
+    round splits it across the tabs), so the reload path can never push
+    get_token() past TOTAL_BUDGET."""
+    if deadline is not None:
+        max_wait = min(max_wait, _remaining(deadline))
+    poll_deadline = time.time() + max_wait
+    pages = reload_vk_tab(deadline=poll_deadline)
+    if deadline is not None:
+        poll_deadline = min(poll_deadline, deadline)
+    tok, err = extract_token(deadline=poll_deadline)
+    while (not tok or tok == stale) and time.time() < poll_deadline:
+        time.sleep(min(poll, max(0.05, poll_deadline - time.time())))
+        tok, err = extract_token(deadline=poll_deadline)
     if tok == stale:
         return None, err or "token did not rotate after tab reload"
     return tok, err
 
 
-def vk_check(token):
+def vk_check(token, deadline=None):
     """users.get sanity check - returns error_code or None.
 
     The access token travels in the POST body (form-encoded), matching
     the n8n-side vkCall - never in the request URL, which transport
-    errors and logs can echo back."""
+    errors and logs can echo back. `deadline` caps the HTTP timeout by
+    the shared get_token() budget."""
+    timeout = 15 if deadline is None else min(15, max(0.5,
+                                                    _remaining(deadline)))
     body = urllib.parse.urlencode(
         {"v": "5.199", "access_token": token}).encode()
     req = urllib.request.Request(VK_API.format(m="users.get"), data=body)
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             resp = json.loads(r.read())
     except Exception as e:  # noqa: BLE001 - report, do not crash
         return f"http: {e}"
@@ -178,28 +225,36 @@ def vk_check(token):
     return err.get("error_code") if err else None
 
 
-def get_token():
+def get_token(budget=TOTAL_BUDGET):
     """Return (result_dict). Reloads the VK tabs once when the first
-    extraction fails or the token is rejected (VK error 5)."""
-    tok, err = extract_token()
+    extraction fails or the token is rejected (VK error 5).
+
+    `budget` is the global deadline for the whole call - every tab
+    eval, reload, poll round and vk_check draws from it, so the worst
+    case stays under the 60s timeout the n8n caller uses."""
+    deadline = time.time() + budget
+    tok, err = extract_token(deadline=deadline)
     refreshed = False
     if tok:
-        code = vk_check(tok)
+        code = vk_check(tok, deadline=deadline)
         if code == 5:
-            tok, err = reload_and_extract(stale=tok)
+            tok, err = reload_and_extract(stale=tok, deadline=deadline)
             refreshed = True
-            code = vk_check(tok) if tok else "no-token"
+            code = (vk_check(tok, deadline=deadline)
+                    if tok else "no-token")
         if code:
             return {"ok": False, "error": f"vk check failed: {code}"}
     else:
         # no token at all - try a tab reload once before giving up
-        tok, err = reload_and_extract()
+        tok, err = reload_and_extract(deadline=deadline)
         refreshed = True
         if not tok:
             return {"ok": False, "error": err or "no token"}
-        code = vk_check(tok)
+        code = vk_check(tok, deadline=deadline)
         if code:
             return {"ok": False, "error": f"vk check failed: {code}"}
+    if tok is None:
+        return {"ok": False, "error": err or "no token before deadline"}
     return {"ok": True, "access_token": tok, "source": "cdp",
             "refreshed_tab": refreshed}
 
@@ -229,13 +284,26 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def _mask(token):
+    """Mask a token for stdout - --once output lands in terminal
+    scrollback and CI logs, so the raw credential stays hidden."""
+    t = str(token)
+    return t if len(t) < 12 else t[:6] + "***" + t[-4:]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8792)
     ap.add_argument("--once", action="store_true")
+    ap.add_argument("--show-token", action="store_true",
+                    help="print the raw access_token with --once "
+                         "(default: masked)")
     args = ap.parse_args()
     if args.once:
-        print(json.dumps(get_token()))
+        res = get_token()
+        if not args.show_token and res.get("access_token"):
+            res["access_token"] = _mask(res["access_token"])
+        print(json.dumps(res))
         return
     # ThreadingHTTPServer: a /vk-token reload+poll window must not stall
     # concurrent /health or other /vk-token callers
