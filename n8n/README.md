@@ -20,7 +20,8 @@ not the nested `.n8n/` that holds `database.sqlite`):
 - `state/digest.json` - last digest items keyed by date + index
   (RSS and VK items share the index space), resolved by the `post N`
   reply (3 days kept)
-- `queue/publish/{,done,failed}` - approved posts waiting for drivers
+- `queue/publish/{,done,failed,skipped}` - approved posts waiting for
+  drivers; non-enabled platforms land in `skipped/`
 - `logs/{moderation,content-gen,publish}.jsonl` - audit trail
 
 The hands-agent queue is bind-mounted at `/home/node/hands-queue`
@@ -211,13 +212,21 @@ VK driver flow per queue file `{platform: "vk", text, media[], test?}`:
    (wall photo upload is a follow-up).
 2. Post-publish verification: `wall.getById` on `<owner>_<post_id>`
    must read the post back; the ledger record gets `verified: true`.
-3. Ledger: one line appended to `state/published.jsonl` with
-   `{ts, id, platform, external_id, status, verified, test, deleted}` -
-   minimal record until the full registry lands (issue #12).
+3. Ledger: a `published` record is appended to `state/published.jsonl`
+   immediately after verification - before any further VK call - so a
+   later failure cannot orphan a live wall post without a recorded
+   `external_id`. Records look like
+   `{ts, id, platform, external_id, status, verified, test, deleted,
+   media_ignored}` - minimal ledger until the full registry lands
+   (issue #12).
 4. Test posts (`test: true` in the queue file, passed through from the
-   draft meta by moderation): after verification the driver calls
-   `wall.delete` and the ledger status becomes
-   `test-published-deleted`.
+   draft meta by moderation - the flag is a strict JSON boolean, only
+   `true` counts; `"yes"`/`1` are treated as real posts): after the
+   `published` record the driver calls `wall.delete` and appends a
+   second record - status `test-published-deleted` on success, or
+   `test-delete-failed` + `delete_error` when the delete call fails.
+   A delete failure still lands the file in `done/`: the first record
+   already holds the published+verified evidence and the wall post id.
 
 VK token handling: the Code node prefers the cached token in
 `state/vk_token.json`, falls back to `VK_ACCESS_TOKEN` env. On VK
@@ -228,7 +237,9 @@ error 5 (expired/rejected) it calls the host refresh service
 `state/vk_status.json` as `auth_error` and the file lands in `failed/`.
 
 Processed files move to `done/` or `failed/` and are logged to
-`publish.jsonl`; results are summarized to Telegram.
+`publish.jsonl` (the logged `status` mirrors the ledger:
+`published` / `test-published-deleted` / `test-delete-failed`, not a
+flat `published` for test drafts); results are summarized to Telegram.
 
 ## Secrets
 
@@ -237,7 +248,9 @@ All tokens come from container env (`../ENV` via compose
 parameters. Required compose vars: `TELEGRAM_BOT_TOKEN`,
 `GEMINI_API_KEY` (llm-gateway), `VK_ACCESS_TOKEN`, `VK_USER_ID`,
 `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN` (last four optional -
-publish falls back to hands-agent when absent). `VK_TOKEN_REFRESH_URL`
+VK can run on the refresh-service token alone, and non-VK platforms go
+to `skipped/` via the ENABLED gate regardless of env vars).
+`VK_TOKEN_REFRESH_URL`
 is an optional override for the VK token refresh endpoint (default
 `http://10.0.2.2:8792/vk-token`). Code nodes need
 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (set in docker-compose.yml).

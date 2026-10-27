@@ -22,8 +22,15 @@ Endpoints:
                      "refreshed_tab": bool}
                   -> {"ok": false, "error": "..."}
 
-Flow: find a vk.ru/vk.com tab -> eval localStorage web_token -> verify
-with users.get -> on VK error 5 reload the tab once and re-extract.
+Trust assumption: /vk-token serves a full wall-scope token with NO
+authentication. The loopback-only bind (127.0.0.1) is the whole trust
+boundary - any local process, or anything that ever reaches :8792 via
+a port forward, gets a live VK credential. Acceptable on this
+single-operator box; do not expose the port beyond loopback.
+
+Flow: find vk.ru/vk.com tabs (hostname match) -> eval localStorage
+web_token on each until one yields a token -> verify with users.get ->
+on VK error 5 reload the tabs once and re-extract.
 
 Run:
   uv run tools/vk_token_service.py --serve            # port 8792
@@ -38,6 +45,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -54,13 +62,28 @@ def _targets():
         return json.loads(r.read())
 
 
-def find_vk_page():
-    for t in _targets():
-        if t.get("type") == "page" and (
-            "vk.ru" in t.get("url", "") or "vk.com" in t.get("url", "")
-        ):
-            return t
-    return None
+def _is_vk_url(url):
+    """Hostname match: vk.ru / vk.com and their subdomains only.
+
+    A substring check would also match e.g. `vk.ru.evil.example`."""
+    try:
+        host = urllib.parse.urlparse(url).hostname or ""
+    except ValueError:
+        return False
+    return (
+        host in ("vk.ru", "vk.com")
+        or host.endswith(".vk.ru")
+        or host.endswith(".vk.com")
+    )
+
+
+def find_vk_pages():
+    """All open VK tabs - a logged-out first tab must not hide a valid
+    session in another one."""
+    return [
+        t for t in _targets()
+        if t.get("type") == "page" and _is_vk_url(t.get("url", ""))
+    ]
 
 
 def ws_eval(ws_url, expr, timeout=30):
@@ -86,16 +109,21 @@ def ws_eval(ws_url, expr, timeout=30):
 
 
 def extract_token():
-    page = find_vk_page()
-    if not page:
+    pages = find_vk_pages()
+    if not pages:
         return None, "no vk tab in CDP targets"
-    tok = ws_eval(page["webSocketDebuggerUrl"], TOKEN_EXPR)
-    return tok, None if tok else "token eval returned nothing"
+    for page in pages:
+        try:
+            tok = ws_eval(page["webSocketDebuggerUrl"], TOKEN_EXPR)
+        except Exception:  # noqa: BLE001 - dead tab, try the next one
+            continue
+        if tok:
+            return tok, None
+    return None, "token eval returned nothing on all vk tabs"
 
 
 def reload_vk_tab():
-    page = find_vk_page()
-    if page:
+    for page in find_vk_pages():
         ws_eval(page["webSocketDebuggerUrl"], "location.reload(); 'r'")
 
 

@@ -41,8 +41,8 @@ services:
       # Webhooks published at https://shared-person.opticode.su (edge proxy).
       - WEBHOOK_URL=https://shared-person.opticode.su:8443/
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      # platform tokens for the publish workflow (optional - drivers
-      # fall back to the hands-agent queue when a token is absent)
+      # platform tokens for the publish workflow (optional - VK can run
+      # on the refresh-service token; non-VK platforms go to skipped/)
       - VK_ACCESS_TOKEN=${VK_ACCESS_TOKEN:-}
       - VK_USER_ID=${VK_USER_ID:-}
       - LINKEDIN_ACCESS_TOKEN=${LINKEDIN_ACCESS_TOKEN:-}

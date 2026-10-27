@@ -47,6 +47,50 @@ const nodesJson = JSON.stringify(nodes);
 const connJson = JSON.stringify(connections);
 
 const db = new DatabaseSync(DB);
+
+// schema-adaptive insert: keep only columns the table actually has
+// (n8n versions differ: webhook_entity may lack createdAt/updatedAt,
+// trigger status uses nodeId+triggerKind vs nodeName+nodeType)
+const colsOf = (table) =>
+  new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+const ins = (table, row) => {
+  const cols = colsOf(table);
+  const keys = Object.keys(row).filter((k) => cols.has(k));
+  db.prepare(`INSERT OR REPLACE INTO ${table} (${keys.join(',')})
+    VALUES (${keys.map(() => '?').join(',')})`)
+    .run(...keys.map((k) => row[k]));
+};
+
+// trigger + webhook registration for one workflow id. Activation drops
+// webhook_entity and workflow_publication_trigger_status rows, so both
+// create and --update paths have to write them again.
+const registerTriggers = (wfId) => {
+  for (const t of triggers) {
+    const node = nodes.find((n) => n.name === t.node);
+    if (t.path) {
+      const webhookId = node?.webhookId || node?.parameters?.webhookId || crypto.randomUUID();
+      const variant = `${wfId}/${encodeURIComponent(t.node)}/${t.path}`;
+      for (const p of [t.path, variant]) {
+        ins('webhook_entity', {
+          webhookPath: p, method: t.method || 'POST', node: t.node,
+          webhookId, workflowId: wfId, pathLength: t.path.length,
+          createdAt: now, updatedAt: now,
+        });
+      }
+    }
+    ins('workflow_publication_trigger_status', {
+      workflowId: wfId,
+      nodeId: node?.id || t.node,
+      nodeName: t.node,
+      nodeType: t.path ? 'persisted' : 'in-memory',
+      triggerKind: t.path ? 'persisted' : 'in-memory',
+      versionId: VER_ID,
+      status: 'activated',
+      createdAt: now, updatedAt: now,
+    });
+  }
+};
+
 db.exec('BEGIN');
 try {
   if (UPDATE) {
@@ -57,21 +101,29 @@ try {
       VALUES (?,?,?,?,?,?,?,?,?)`)
       .run(VER_ID, wf.id, 'deploy_workflow.js --update', now, now, nodesJson, connJson, name, 0);
     db.prepare(`UPDATE workflow_entity SET nodes=?,connections=?,versionId=?,activeVersionId=?,active=?,updatedAt=? WHERE id=?`)
-      .run(nodesJson, connJson, VER_ID, VER_ID, active, now, wf.id);
-    // published_version row may be missing after a deactivation - upsert
-    db.prepare(`INSERT INTO workflow_published_version
-      (workflowId,publishedVersionId,createdAt,updatedAt) VALUES (?,?,?,?)
-      ON CONFLICT(workflowId) DO UPDATE SET publishedVersionId=excluded.publishedVersionId,updatedAt=excluded.updatedAt`)
-      .run(wf.id, VER_ID, now, now);
-    // trigger status rows are also dropped on deactivation - re-register
-    for (const t of triggers) {
-      const node = nodes.find((n) => n.name === t.node);
-      db.prepare(`INSERT INTO workflow_publication_trigger_status
-        (workflowId,nodeId,versionId,status,createdAt,updatedAt,triggerKind)
-        VALUES (?,?,?,?,?,?,?)
-        ON CONFLICT(workflowId,nodeId) DO UPDATE SET versionId=excluded.versionId,status='activated',updatedAt=excluded.updatedAt`)
-        .run(wf.id, node?.id || t.node, VER_ID, 'activated', now, now,
-          t.path ? 'persisted' : 'in-memory');
+      .run(nodesJson, connJson, VER_ID, active ? VER_ID : null, active, now, wf.id);
+    // published-version and trigger rows only make sense for an ACTIVE
+    // workflow - writing 'activated' rows for an inactive spec leaves
+    // registry entries pointing at a version that never runs
+    if (active) {
+      // published_version row may be missing after a deactivation - upsert
+      db.prepare(`INSERT INTO workflow_published_version
+        (workflowId,publishedVersionId,createdAt,updatedAt) VALUES (?,?,?,?)
+        ON CONFLICT(workflowId) DO UPDATE SET publishedVersionId=excluded.publishedVersionId,updatedAt=excluded.updatedAt`)
+        .run(wf.id, VER_ID, now, now);
+      // trigger status + webhook rows are also dropped on deactivation -
+      // re-register (schema-adaptive, same helper as the create path)
+      registerTriggers(wf.id);
+    } else {
+      // spec deactivates the workflow: n8n drops these rows on
+      // deactivate too - clear stale 'activated' registrations left
+      // over from a previously active version
+      for (const t of ['workflow_published_version',
+        'workflow_publication_trigger_status', 'webhook_entity']) {
+        if (colsOf(t).size) {
+          db.prepare(`DELETE FROM ${t} WHERE workflowId=?`).run(wf.id);
+        }
+      }
     }
     console.log('updated workflow', wf.id, 'version', VER_ID, 'active', active);
   } else {
@@ -100,44 +152,8 @@ try {
         .run(now, now, 'workflow:owner', WF_ID, proj.id);
     }
 
-    // schema-adaptive insert: keep only columns the table actually has
-    // (n8n versions differ: webhook_entity may lack createdAt/updatedAt,
-    // trigger status uses nodeId+triggerKind vs nodeName+nodeType)
-    const colsOf = (table) =>
-      new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
-    const ins = (table, row) => {
-      const cols = colsOf(table);
-      const keys = Object.keys(row).filter((k) => cols.has(k));
-      db.prepare(`INSERT OR REPLACE INTO ${table} (${keys.join(',')})
-        VALUES (${keys.map(() => '?').join(',')})`)
-        .run(...keys.map((k) => row[k]));
-    };
-
-    // trigger registration
-    for (const t of triggers) {
-      const node = nodes.find((n) => n.name === t.node);
-      if (t.path) {
-        const webhookId = node?.webhookId || node?.parameters?.webhookId || crypto.randomUUID();
-        const variant = `${WF_ID}/${encodeURIComponent(t.node)}/${t.path}`;
-        for (const p of [t.path, variant]) {
-          ins('webhook_entity', {
-            webhookPath: p, method: t.method || 'POST', node: t.node,
-            webhookId, workflowId: WF_ID, pathLength: t.path.length,
-            createdAt: now, updatedAt: now,
-          });
-        }
-      }
-      ins('workflow_publication_trigger_status', {
-        workflowId: WF_ID,
-        nodeId: node?.id || t.node,
-        nodeName: t.node,
-        nodeType: t.path ? 'persisted' : 'in-memory',
-        triggerKind: t.path ? 'persisted' : 'in-memory',
-        versionId: VER_ID,
-        status: 'activated',
-        createdAt: now, updatedAt: now,
-      });
-    }
+    // trigger + webhook registration (schema-adaptive ins() helper)
+    if (active) registerTriggers(WF_ID);
     console.log('inserted workflow', WF_ID, 'version', VER_ID, 'triggers', triggers.length);
   }
   db.exec('COMMIT');
