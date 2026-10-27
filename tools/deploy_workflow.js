@@ -116,7 +116,9 @@ try {
       // from a renamed node or a changed webhook path would stay live
       // and keep routing to this workflow (ghost webhooks)
       for (const t of ['workflow_publication_trigger_status', 'webhook_entity']) {
-        if (colsOf(t).size) {
+        // guard on the column, not just the table: a schema without
+        // workflowId would throw mid-transaction on the DELETE
+        if (colsOf(t).has('workflowId')) {
           db.prepare(`DELETE FROM ${t} WHERE workflowId=?`).run(wf.id);
         }
       }
@@ -129,7 +131,7 @@ try {
       // over from a previously active version
       for (const t of ['workflow_published_version',
         'workflow_publication_trigger_status', 'webhook_entity']) {
-        if (colsOf(t).size) {
+        if (colsOf(t).has('workflowId')) {
           db.prepare(`DELETE FROM ${t} WHERE workflowId=?`).run(wf.id);
         }
       }

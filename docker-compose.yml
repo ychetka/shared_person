@@ -45,6 +45,11 @@ services:
       # on the refresh-service token; non-VK platforms go to skipped/)
       - VK_ACCESS_TOKEN=${VK_ACCESS_TOKEN:-}
       - VK_USER_ID=${VK_USER_ID:-}
+      # host-side token refresh service (tools/vk_token_service.py):
+      # the URL override only works if it is passed through here, and
+      # /vk-token requires the shared-secret header
+      - VK_TOKEN_REFRESH_URL=${VK_TOKEN_REFRESH_URL:-}
+      - VK_TOKEN_SECRET=${VK_TOKEN_SECRET:-}
       - LINKEDIN_ACCESS_TOKEN=${LINKEDIN_ACCESS_TOKEN:-}
       - LINKEDIN_PERSON_URN=${LINKEDIN_PERSON_URN:-}
     volumes:

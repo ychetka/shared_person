@@ -22,11 +22,14 @@ Endpoints:
                      "refreshed_tab": bool}
                   -> {"ok": false, "error": "..."}
 
-Trust assumption: /vk-token serves a full wall-scope token with NO
-authentication. The loopback-only bind (127.0.0.1) is the whole trust
-boundary - any local process, or anything that ever reaches :8792 via
-a port forward, gets a live VK credential. Acceptable on this
-single-operator box; do not expose the port beyond loopback.
+Trust assumption: /vk-token serves a full wall-scope token behind two
+cheap gates - the loopback-only bind (127.0.0.1) and a shared-secret
+header. Callers must send `X-Shared-Token` matching env
+VK_TOKEN_SECRET (hmac.compare_digest, 401 otherwise). The check fails
+closed when VK_TOKEN_SECRET is unset, so an unconfigured service
+hands out nothing. This keeps a stray `ssh -L 8792` forward or a
+random local process from turning the port into a live-token oracle;
+do not expose the port beyond loopback regardless.
 
 Flow: find vk.ru/vk.com tabs (hostname match) -> eval localStorage
 web_token on each until one yields a token -> verify with users.get ->
@@ -45,19 +48,21 @@ Run:
   uv run tools/vk_token_service.py --once             # print masked result
   uv run tools/vk_token_service.py --once --show-token  # raw token JSON
 
-Env overrides: VK_CDP_URL (default http://127.0.0.1:9223).
+Env overrides: VK_CDP_URL (default http://127.0.0.1:9223),
+VK_TOKEN_SECRET (required shared secret for /vk-token).
 """
 
 import argparse
+import hmac
 import json
 import os
-import sys
 import time
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CDP = os.environ.get("VK_CDP_URL", "http://127.0.0.1:9223")
+SECRET = os.environ.get("VK_TOKEN_SECRET", "")
 TOKEN_EXPR = (
     "JSON.parse(localStorage.getItem('6287487:web_token:login:auth'))"
     ".access_token"
@@ -192,7 +197,7 @@ def reload_and_extract(stale=None, deadline=None, max_wait=6.0,
     if deadline is not None:
         max_wait = min(max_wait, _remaining(deadline))
     poll_deadline = time.time() + max_wait
-    pages = reload_vk_tab(deadline=poll_deadline)
+    reload_vk_tab(deadline=poll_deadline)
     if deadline is not None:
         poll_deadline = min(poll_deadline, deadline)
     tok, err = extract_token(deadline=poll_deadline)
@@ -268,10 +273,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self):  # noqa: N802 - http.server API
+    def _authorized(self):
+        """Shared-secret gate for /vk-token: the loopback bind alone
+        trusts anything that can reach :8792, so callers must prove
+        they know VK_TOKEN_SECRET. compare_digest avoids a timing
+        side-channel on the prefix match. Fails closed when the env is
+        unset - an unconfigured service is a dead service, not an open
+        one."""
+        hdr = self.headers.get("X-Shared-Token", "")
+        return bool(SECRET) and hmac.compare_digest(hdr, SECRET)
+
+    def do_GET(self):
         if self.path.startswith("/health"):
             self._send(200, {"ok": True})
         elif self.path.startswith("/vk-token"):
+            if not self._authorized():
+                self._send(401, {"ok": False,
+                                 "error": "missing or invalid "
+                                          "X-Shared-Token header"})
+                return
             try:
                 res = get_token()
             except Exception as e:  # noqa: BLE001
@@ -300,7 +320,10 @@ def main():
                          "(default: masked)")
     args = ap.parse_args()
     if args.once:
-        res = get_token()
+        try:
+            res = get_token()
+        except Exception as e:  # noqa: BLE001 - mirrors the HTTP path
+            res = {"ok": False, "error": str(e)[:300]}
         if not args.show_token and res.get("access_token"):
             res["access_token"] = _mask(res["access_token"])
         print(json.dumps(res))
