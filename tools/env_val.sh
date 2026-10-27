@@ -24,9 +24,16 @@
 ENV_FILE="${ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/ENV}"
 
 env_val() {
-  # last KEY= assignment wins - same rule as sourcing would apply
+  # last KEY= assignment wins - same rule as sourcing would apply.
+  # The key is matched as a FIXED string (awk index() on the line,
+  # never interpolated into a regex): a KEY containing BRE
+  # metacharacters ('.', '[', '*', '^', '$') would otherwise match
+  # the wrong lines or none.
   local v
-  v="$(sed -n -e 's/^export[[:space:]]\{1,\}//' -e "s/^$1=//p" "$ENV_FILE" | tail -n 1)"
+  v="$(awk -v k="$1" '
+    { sub(/^export[[:space:]]+/, "") }
+    index($0, k "=") == 1 { print substr($0, length(k) + 2) }
+  ' "$ENV_FILE" | tail -n 1)"
   # ENV accepts KEY="value" and KEY='value' - strip one matching pair
   # of surrounding quotes, otherwise the quote chars end up inside the
   # token/secret/url and every consumer fails. An inline

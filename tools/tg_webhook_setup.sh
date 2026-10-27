@@ -65,20 +65,28 @@ echo ">> setWebhook $WEBHOOK_URL (secret_token=<redacted>)"
 # every method, which also removes the form url-encoding question
 # entirely (a '&'/'='/'%' in the secret could corrupt -d form fields;
 # in JSON it is just a string). The JSON is built by python3 reading
-# the secret from its ENVIRONMENT - a here-doc interpolation or jq
-# --arg would put the value back into an argv line.
+# the secret from a third 0600 file whose PATH rides argv - an
+# env-prefix (SECRET=x python3 ...) would copy the value into
+# /proc/<python3-pid>/environ, the same exposure vector the argv ban
+# removes, and a here-doc interpolation or jq --arg would put it back
+# on the command line. printf is a bash builtin, so staging the
+# secret spawns no child process at all. The webhook URL carries no
+# secret and may ride argv.
 BODY_FILE="$(mktemp)"
 CFG_FILE="$(mktemp)"
-chmod 600 "$BODY_FILE" "$CFG_FILE"  # mktemp already creates 0600; belt & suspenders
-trap 'rm -f "$BODY_FILE" "$CFG_FILE"' EXIT
-TG_WEBHOOK_SECRET="$TG_WEBHOOK_SECRET" WEBHOOK_URL="$WEBHOOK_URL" \
-  python3 - "$BODY_FILE" <<'PYEOF'
-import json, os, sys
+SECRET_FILE="$(mktemp)"
+chmod 600 "$BODY_FILE" "$CFG_FILE" "$SECRET_FILE"  # mktemp already creates 0600; belt & suspenders
+trap 'rm -f "$BODY_FILE" "$CFG_FILE" "$SECRET_FILE"' EXIT
+printf '%s' "$TG_WEBHOOK_SECRET" > "$SECRET_FILE"
+python3 - "$BODY_FILE" "$SECRET_FILE" "$WEBHOOK_URL" <<'PYEOF'
+import json, sys
+with open(sys.argv[2]) as f:
+    secret = f.read()
 with open(sys.argv[1], "w") as f:
     json.dump({
-        "url": os.environ["WEBHOOK_URL"],
+        "url": sys.argv[3],
         "allowed_updates": ["message", "callback_query"],
-        "secret_token": os.environ["TG_WEBHOOK_SECRET"],
+        "secret_token": secret,
     }, f)
 PYEOF
 printf 'url = "%s/setWebhook"\n' "$API" > "$CFG_FILE"
