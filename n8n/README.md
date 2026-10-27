@@ -41,10 +41,21 @@ the moderation `sendPhoto` step.
 
 ### sp-tg-setup (manual)
 
-One-time bootstrap. Reads `getUpdates` (works only before a webhook is
-registered), saves the last chat_id to `state/tg.json`, then calls
-`setWebhook` pointing at `/webhook/tg-moderation` on `WEBHOOK_URL` with
-`secret_token=$TG_WEBHOOK_SECRET` when the env is set.
+One-time bootstrap. Resolves the operator chat_id - `TELEGRAM_CHAT_ID`
+env first, `state/tg.json` from a previous run next, and only when
+neither exists AND no webhook is registered yet, a `getUpdates`
+self-heal that takes the LAST sender's chat_id. That fallback pins
+whoever messaged the bot last, so a third party writing between the
+operator's `/start` and the setup run would become "operator" - the
+result `note` carries an explicit WARNING when `getUpdates` saw more
+than one distinct chat. Writes the id to `state/tg.json`, then calls
+`setWebhook` pointing at `/webhook/tg-moderation` on `WEBHOOK_URL`
+with `secret_token=$TG_WEBHOOK_SECRET`.
+
+`TG_WEBHOOK_SECRET` is REQUIRED: the workflow aborts with an explicit
+error when it is unset. Registering without `secret_token` would leave
+every delivery unsigned while the tg-moderation gate fails closed -
+a silent dead pipeline that still reports "webhook registered".
 
 Run it manually after the user sends `/start` to @shared_person_bot.
 Repeatable CLI equivalent: `tools/tg_webhook_setup.sh` - registers the
@@ -67,6 +78,14 @@ rewrite `tg.json` and hijack previews.
   Reject (`callback_data` = `ap|ed|rj:<id>`). `scope` is rendered above
   the text; `warnings[]` (verifier flags) are appended as a block under
   the text and stored in the draft meta.
+  - shared-secret gate: the endpoint is reachable through the public
+    edge proxy, so every call must carry `X-Shared-Token` or
+    `X-TG-Draft-Secret` matching `DRAFT_WEBHOOK_SECRET` (constant-time
+    compare, fails closed when the env is unset). Without it unlimited
+    draft previews with live Approve buttons could be pushed into the
+    operator chat. The internal caller (sp-content-gen) sends
+    `X-Shared-Token`; a rejected call answers `{ok:false}` and nothing
+    is written or sent.
   - `draft_id` overwrite guard: the webhook is public, so an existing
     `state/drafts/<id>.json` may only be replaced when its moderation
     is already decided AND a rewrite is expected - `status` must be
@@ -346,6 +365,10 @@ is an optional override for the VK token refresh endpoint (default
 `http://10.0.2.2:8792/vk-token`). `TG_WEBHOOK_SECRET` is REQUIRED for
 moderation to work - it is the `secret_token` Telegram signs webhook
 deliveries with (`tools/tg_webhook_setup.sh` registers it; without it
-the tg-moderation gate fails closed). `TELEGRAM_CHAT_ID` pins the
+the tg-moderation gate fails closed). `DRAFT_WEBHOOK_SECRET` is
+REQUIRED for draft delivery - it gates `POST /webhook/moderation-draft`
+(`X-Shared-Token`/`X-TG-Draft-Secret` header; fails closed when unset)
+and sp-content-gen sends it on the internal dispatch.
+`TELEGRAM_CHAT_ID` pins the
 operator chat (`state/tg.json` is the fallback). Code nodes need
 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (set in docker-compose.yml).

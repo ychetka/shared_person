@@ -8,6 +8,13 @@
 # Repeatable: run again after rotating TG_WEBHOOK_SECRET or changing the
 # public webhook URL.
 #
+# TG_WEBHOOK_SECRET is REQUIRED - the script refuses to run without it
+# (:? guard below), because registering the webhook unsigned would
+# leave every delivery unsigned while the moderation gate fails
+# closed: a silent outage that still looks "registered". The
+# sp-tg-setup workflow aborts the same way when the env is missing.
+# Generate one with `openssl rand -hex 32` and add it to ENV.
+#
 # Usage:
 #   tools/tg_webhook_setup.sh            # register + show getWebhookInfo
 #   TG_WEBHOOK_URL=https://... tools/tg_webhook_setup.sh
