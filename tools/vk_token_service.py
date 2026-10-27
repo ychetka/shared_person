@@ -280,10 +280,21 @@ def get_token(budget=TOTAL_BUDGET):
         if code == 5:
             _log("vk_check rejected the token (error 5) - "
                  "reloading vk tabs for a fresh one")
-            tok, err = reload_and_extract(stale=tok, deadline=deadline)
+            stale = tok
+            tok, err = reload_and_extract(stale=stale, deadline=deadline)
             refreshed = True
-            code = (vk_check(tok, deadline=deadline)
-                    if tok else "no-token")
+            if not tok:
+                # reload path produced nothing - surface the real
+                # reason from reload_and_extract (deadline hit, token
+                # did not rotate, ...) instead of a generic
+                # 'vk check failed: no-token' that makes a
+                # token-service outage look like a VK-side rejection.
+                # Scrub first: exception text may echo the stale token.
+                reason = _scrub(err, stale) if err else \
+                    "no token after tab reload"
+                _log(f"no token after tab reload: {reason}")
+                return {"ok": False, "error": reason}
+            code = vk_check(tok, deadline=deadline)
         if code:
             _log(f"vk_check failed: {code}")
             return {"ok": False, "error": f"vk check failed: {code}"}
@@ -379,6 +390,16 @@ def _mask(token):
     scrollback and CI logs, so the raw credential stays hidden."""
     t = str(token)
     return t if len(t) < 12 else t[:6] + "***" + t[-4:]
+
+
+def _scrub(msg, *secrets):
+    """Strip known secret values out of an error string before it
+    reaches an HTTP response body or the journal."""
+    s = str(msg)
+    for sec in secrets:
+        if sec:
+            s = s.split(str(sec)).join("***")
+    return s
 
 
 def main():

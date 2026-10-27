@@ -26,3 +26,6 @@ rss-reader/dist/
 rss-reader/state/
 edge/caddy
 edge/data/
+
+# generated secrets - never commit (see deploy/vk-token.service)
+deploy/vk-token.env

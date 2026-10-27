@@ -122,6 +122,10 @@ as `token_service_down` (the env `VK_ACCESS_TOKEN` fallback is a
 last resort only). Run it under systemd so it survives reboots:
 
 ```bash
+# the unit reads a dedicated env file with ONLY VK_TOKEN_SECRET -
+# generate it from the project ENV (gitignored, never commit it):
+grep '^VK_TOKEN_SECRET=' ../ENV > deploy/vk-token.env
+chmod 600 deploy/vk-token.env
 mkdir -p ~/.config/systemd/user
 cp deploy/vk-token.service ~/.config/systemd/user/
 systemctl --user daemon-reload
@@ -132,11 +136,15 @@ loginctl enable-linger "$USER"
 ```
 
 The unit runs `uv run tools/vk_token_service.py --port 8792` from the
-checkout and reads `VK_TOKEN_SECRET` via `EnvironmentFile` - adjust
-`WorkingDirectory`/`EnvironmentFile` in `deploy/vk-token.service` if
-the repo lives elsewhere. `Restart=always` covers process death; the
-unit is a host service, not part of docker-compose (it needs the
-project checkout and the operator's Chrome CDP).
+checkout and reads `VK_TOKEN_SECRET` via `EnvironmentFile` pointing at
+`deploy/vk-token.env` - a dedicated file holding only that one var, NOT
+the project `ENV`: its ~18 secrets would otherwise all land in
+`systemctl --user show -p Environment` and `/proc/<pid>/environ` of a
+daemon that needs exactly one. Adjust `WorkingDirectory`/
+`EnvironmentFile` in `deploy/vk-token.service` if the repo lives
+elsewhere. `Restart=always` covers process death; the unit is a host
+service, not part of docker-compose (it needs the project checkout and
+the operator's Chrome CDP).
 
 ## port_fwd.sh / port_fwd.py
 

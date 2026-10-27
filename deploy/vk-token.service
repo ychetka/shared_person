@@ -2,6 +2,8 @@
 # required dependency of the sp-publish n8n workflow).
 #
 # Install:
+#   grep '^VK_TOKEN_SECRET=' ../ENV > deploy/vk-token.env
+#   chmod 600 deploy/vk-token.env
 #   mkdir -p ~/.config/systemd/user
 #   cp deploy/vk-token.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
@@ -19,10 +21,16 @@ After=default.target
 [Service]
 Type=simple
 WorkingDirectory=%h/projects/shared_person/code
-# VK_TOKEN_SECRET (shared-secret gate for /vk-token) plus any other
-# env the script accepts (VK_CDP_URL). Missing file is tolerated so a
-# fresh checkout still starts - the service then fails closed on 401.
-EnvironmentFile=-%h/projects/shared_person/ENV
+# Dedicated env file holding ONLY VK_TOKEN_SECRET (the shared-secret
+# gate for /vk-token) - do NOT point this at the project ENV: its ~18
+# secrets (TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, VK_ACCESS_TOKEN, ...)
+# would all land in `systemctl --user show -p Environment` and
+# /proc/<pid>/environ of a daemon that needs exactly one. Generate it
+# from the project ENV at install (see header; the file is gitignored).
+# Missing file is tolerated so a fresh checkout still starts - the
+# service then fails closed on 401. Extra overrides (VK_CDP_URL) can
+# be appended to deploy/vk-token.env if ever needed.
+EnvironmentFile=-%h/projects/shared_person/code/deploy/vk-token.env
 ExecStart=%h/.local/bin/uv run tools/vk_token_service.py --port 8792
 Restart=always
 RestartSec=5

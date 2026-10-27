@@ -41,6 +41,12 @@ services:
       # Webhooks published at https://shared-person.opticode.su (edge proxy).
       - WEBHOOK_URL=https://shared-person.opticode.su:8443/
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      # enabled publish platforms, comma-separated - single source for
+      # the ENABLED gates in sp-publish (Publish Tick) and
+      # sp-tg-moderation (Handle TG Update); both read $env via
+      # PUBLISH_PLATFORMS so the two cannot drift. Default keeps VK
+      # only; non-enabled platforms land in queue skipped/
+      - PUBLISH_PLATFORMS=${PUBLISH_PLATFORMS:-vk}
       # platform tokens for the publish workflow (optional - VK can run
       # on the refresh-service token; non-VK platforms go to skipped/)
       - VK_ACCESS_TOKEN=${VK_ACCESS_TOKEN:-}

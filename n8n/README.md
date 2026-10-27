@@ -52,6 +52,16 @@ incoming update handled by sp-tg-moderation instead.
   Reject (`callback_data` = `ap|ed|rj:<id>`). `scope` is rendered above
   the text; `warnings[]` (verifier flags) are appended as a block under
   the text and stored in the draft meta.
+  - `draft_id` overwrite guard: the webhook is public, so an existing
+    `state/drafts/<id>.json` may only be replaced when its moderation
+    is already decided AND a rewrite is expected - `status` must be
+    `rejected` (dead draft, id free for reuse) or `rewrite` (set by
+    Handle TG Update when an Edit rewrite is dispatched to
+    content-gen, which reuses the same `draft_id`). `pending`,
+    `approved` or any unknown status refuses the write
+    (`{ok: false, error: "draft exists ..."}`) - otherwise a caller
+    could swap the text under a preview the operator is about to
+    Approve (the queue payload snapshots `d.text` at Approve time).
   - `media[]` - selected media paths (from the media-selector pass).
     Each path is resolved inside the container: literal path, anything
     under `materials/` maps to the read-only `/home/node/materials`
@@ -68,7 +78,9 @@ incoming update handled by sp-tg-moderation instead.
   - Reject > marks draft rejected, logs to `moderation.jsonl`
   - Edit > stores a pending-edit marker; the next plain-text message in
     the chat is forwarded to `/webhook/content-gen` as a rewrite request
-    (mode `rewrite`, with feedback + previous draft)
+    (mode `rewrite`, with feedback + previous draft). The draft flips
+    to `status: "rewrite"` at dispatch so the regenerated version can
+    reclaim the same `draft_id` under the overwrite guard above.
   - `post N` (plain text) > resolves item N from `state/digest.json`
     (newest stored day first), builds a `source_type: "hype"` brief
     (facts = source/published/metrics/angle/summary, links, scope,
@@ -206,8 +218,12 @@ Scans `queue/publish/` and routes per platform. Each file is claimed
 atomically before the first VK call - renamed into
 `queue/publish/processing/` - so an overlapping tick sees the file
 gone and cannot double-publish. Currently VK only (issue #1): the
-`ENABLED` map in the Code node gates execution, every other
-platform's queue file is moved to `queue/publish/skipped/` with a
+`ENABLED` map gates execution and is built from the
+`PUBLISH_PLATFORMS` env var (comma-separated, default `vk`, injected
+via `docker-compose.yml`) - the same var sp-tg-moderation's Handle TG
+Update reads for its requeue gate, so the two cannot drift. Every
+non-enabled platform's queue file is moved to
+`queue/publish/skipped/` with a
 `platform not enabled` log line - nothing goes to FB/LI/IG/TikTok.
 Enabling a platform requires moving its `skipped/` files back to the
 queue root manually.
@@ -264,7 +280,9 @@ flat `published` for test drafts); results are summarized to Telegram.
 
 All tokens come from container env (`../ENV` via compose
 `--env-file`), read in Code nodes with `$env` - never hardcoded in node
-parameters. Required compose vars: `TELEGRAM_BOT_TOKEN`,
+parameters. `PUBLISH_PLATFORMS` (comma-separated, default `vk`) is the
+single source for the ENABLED gates in sp-publish and
+sp-tg-moderation. Required compose vars: `TELEGRAM_BOT_TOKEN`,
 `GEMINI_API_KEY` (llm-gateway), `VK_ACCESS_TOKEN`, `VK_USER_ID`,
 `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN` (last four optional -
 VK can run on the refresh-service token alone, and non-VK platforms go
