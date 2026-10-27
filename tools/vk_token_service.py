@@ -71,6 +71,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CDP = os.environ.get("VK_CDP_URL", "http://127.0.0.1:9223")
@@ -118,8 +119,14 @@ _GET_TOKEN_LOCK = threading.Lock()
 # bodies), but the do_GET catch-all sits above the locals that hold
 # them. Every run registers the tokens it touched here so error
 # responses and the journal can be _scrub'd against the live values.
-# Bounded - the service is long-running and tokens rotate.
+# Bounded - the service is long-running and tokens rotate. Eviction
+# is incremental FIFO (oldest first), never a full clear() at the cap:
+# wiping every entry at once would un-scrub ALL older tokens in one
+# step - a still-referenced stale token could then reach the journal
+# verbatim. _SECRETS_ORDER tracks insertion order for the eviction.
+_SECRETS_CAP = 64
 _SECRETS_SEEN = set()
+_SECRETS_ORDER = deque()
 # Mutations and snapshots both go through this dedicated lock, NOT
 # _GET_TOKEN_LOCK: the scrub path in do_GET runs on a handler thread
 # while another thread's get_token() holds the big lock for up to
@@ -127,15 +134,24 @@ _SECRETS_SEEN = set()
 # response for the whole run. _remember_secret is only called inside
 # _GET_TOKEN_LOCK anyway, so the small lock adds no contention.
 _SECRETS_LOCK = threading.Lock()
+# minimum value length _scrub/_remember_secret act on - see _scrub
+_MIN_SCRUB_LEN = 8
 
 
 def _remember_secret(value):
-    if not value:
+    # same length floor as _scrub: a sub-8-char value is never masked
+    # anyway, and a real VK token is far longer - skip it here so it
+    # cannot occupy an eviction slot
+    if not value or len(str(value)) < _MIN_SCRUB_LEN:
         return
     with _SECRETS_LOCK:
-        if len(_SECRETS_SEEN) >= 64:
-            _SECRETS_SEEN.clear()
-        _SECRETS_SEEN.add(str(value))
+        s = str(value)
+        if s in _SECRETS_SEEN:
+            return
+        _SECRETS_SEEN.add(s)
+        _SECRETS_ORDER.append(s)
+        while len(_SECRETS_ORDER) > _SECRETS_CAP:
+            _SECRETS_SEEN.discard(_SECRETS_ORDER.popleft())
 
 
 def _secrets_snapshot():
@@ -545,11 +561,18 @@ def _mask(token):
 
 def _scrub(msg, *secrets):
     """Strip known secret values out of an error string before it
-    reaches an HTTP response body or the journal."""
+    reaches an HTTP response body or the journal.
+
+    Values under _MIN_SCRUB_LEN are skipped: a short secret matches
+    common substrings and would shred unrelated words out of the
+    message (over-masking), while a real token is far longer."""
     s = str(msg)
     for sec in secrets:
-        if sec:
-            s = s.split(str(sec)).join("***")
+        if sec and len(str(sec)) >= _MIN_SCRUB_LEN:
+            # "***".join(split): str.split returns a list, so the
+            # previous s.split(sec).join order raised AttributeError
+            # on every non-empty secret
+            s = "***".join(s.split(str(sec)))
     return s
 
 
