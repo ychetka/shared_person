@@ -281,12 +281,24 @@ class Handler(BaseHTTPRequestHandler):
         unset - an unconfigured service is a dead service, not an open
         one."""
         hdr = self.headers.get("X-Shared-Token", "")
-        return bool(SECRET) and hmac.compare_digest(hdr, SECRET)
+        if not SECRET:
+            return False
+        try:
+            return hmac.compare_digest(hdr, SECRET)
+        except TypeError:
+            # non-ASCII bytes in the header make compare_digest raise
+            # TypeError - an invalid credential, so fail closed with a
+            # clean 401 instead of dropping the connection
+            return False
 
     def do_GET(self):
-        if self.path.startswith("/health"):
+        # exact path match: startswith would also route
+        # /vk-token-anything to the token endpoint; urlsplit strips
+        # the query string so /health?x keeps working
+        path = urllib.parse.urlsplit(self.path).path
+        if path == "/health":
             self._send(200, {"ok": True})
-        elif self.path.startswith("/vk-token"):
+        elif path == "/vk-token":
             if not self._authorized():
                 self._send(401, {"ok": False,
                                  "error": "missing or invalid "

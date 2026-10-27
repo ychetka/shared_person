@@ -103,11 +103,40 @@ uv run tools/vk_token_service.py --once                # print token JSON
 Endpoints: `GET /health`, `GET /vk-token` ->
 `{"ok": true, "access_token": "..."}`. Binds host loopback:8792; the n8n
 container reaches it through the slirp gateway as `http://10.0.2.2:8792`
-(same reachability quirk as the viz renderer). Trust assumption:
-`/vk-token` serves a full wall-scope token with no auth - the loopback
-bind is the whole trust boundary, so the port must never be exposed
-beyond loopback (port forwards included). Not part of
-docker-compose - relaunch the same way after a reboot.
+(same reachability quirk as the viz renderer).
+
+`/vk-token` serves a full wall-scope token, so it sits behind a
+shared-secret gate: callers must send the `X-Shared-Token` header
+matching the `VK_TOKEN_SECRET` env var (`hmac.compare_digest`, 401 on a
+missing/invalid header). The check fails closed when `VK_TOKEN_SECRET`
+is unset - an unconfigured service hands out nothing. The loopback
+bind is still part of the trust boundary: never expose :8792 beyond
+loopback (port forwards included). On the n8n side `VK_TOKEN_SECRET`
+is passed through `docker-compose.yml` and sent by `vkRefresh()` in
+sp-publish; an unset container env makes every refresh answer 401,
+surfacing as `token_service_down` in `vk_status.json`.
+
+This service is a required dependency of the `sp-publish` workflow
+(`active: true`, every 2 min): when it is down, every VK publish fails
+as `token_service_down` (the env `VK_ACCESS_TOKEN` fallback is a
+last resort only). Run it under systemd so it survives reboots:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp deploy/vk-token.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now vk-token.service
+systemctl --user status vk-token.service
+# so it also starts at boot without a login session:
+loginctl enable-linger "$USER"
+```
+
+The unit runs `uv run tools/vk_token_service.py --port 8792` from the
+checkout and reads `VK_TOKEN_SECRET` via `EnvironmentFile` - adjust
+`WorkingDirectory`/`EnvironmentFile` in `deploy/vk-token.service` if
+the repo lives elsewhere. `Restart=always` covers process death; the
+unit is a host service, not part of docker-compose (it needs the
+project checkout and the operator's Chrome CDP).
 
 ## port_fwd.sh / port_fwd.py
 

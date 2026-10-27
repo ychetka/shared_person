@@ -126,9 +126,18 @@ try {
       // re-register (schema-adaptive, same helper as the create path)
       registerTriggers(wf.id);
     } else {
-      // spec deactivates the workflow: n8n drops these rows on
-      // deactivate too - clear stale 'activated' registrations left
-      // over from a previously active version
+      // spec deactivates the workflow: clear stale 'activated'
+      // registrations left over from a previously active version.
+      // Verified against n8n 2.41.3 source (useWorkflowPublicationService
+      // is the default on 2.x): deactivateWorkflow ->
+      // _unpublishViaOutbox clears workflow_entity.active/
+      // activeVersionId synchronously, then the outbox consumer's
+      // WorkflowPublicationApplier.unpublish() tears down trigger
+      // registrations AND calls
+      // workflowPublishedVersionRepository.removePublishedVersion() -
+      // so a real n8n deactivate DOES delete the
+      // workflow_published_version row (asynchronously, same final
+      // state). Deleting all three tables here mirrors exactly that.
       for (const t of ['workflow_published_version',
         'workflow_publication_trigger_status', 'webhook_entity']) {
         if (colsOf(t).has('workflowId')) {
