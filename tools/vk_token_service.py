@@ -735,14 +735,108 @@ def _scrub(msg, *secrets):
     return s
 
 
+def _selftest():
+    """Offline unit checks for the pure helpers - no Chrome/CDP, no
+    VK API, no socket. Run: vk_token_service.py --selftest.
+
+    These protect the 'journald never stores a live credential'
+    invariant: _mask/_scrub/_check_result sit on every error surface,
+    so a regression there leaks a wall-scope token to journald or an
+    HTTP body. _authorized's compare_digest gate is covered too (the
+    fake-handler call exercises the real code path with a stubbed
+    self)."""
+    global SECRET  # patched below to exercise _authorized both ways
+    failures = []
+
+    def check(name, cond):
+        if cond:
+            print(f"PASS {name}")
+        else:
+            failures.append(name)
+            print(f"FAIL {name}")
+
+    tok = "vk1.a." + "t" * 60
+    check("_mask short -> ***", _mask("abc") == "***")
+    check("_mask none -> ***", _mask(None) == "***")
+    masked = _mask(tok)
+    check("_mask long prefix-only",
+          masked == tok[:4] + "***" and tok[4:] not in masked)
+    s = _scrub(f"err {tok} mid {tok} end", tok)
+    check("_scrub masks every occurrence",
+          tok not in s and s.count("***") == 2)
+    check("_scrub sub-8-char secret skipped",
+          _scrub("a b c", "b") == "a b c")
+    check("_scrub empty/None secrets ignored",
+          _scrub("plain", None, "") == "plain")
+    check("_scrub non-str msg", _scrub(12345, tok) == "12345")
+    check("_check_result None -> accept",
+          _check_result(None, "") is None)
+    r5 = _check_result(5, "")
+    check("_check_result 5 -> terminal",
+          r5 is not None and r5.get("ok") is False and
+          "retryable" not in r5)
+    r6 = _check_result(6, "")
+    check("_check_result non-5 -> retryable",
+          r6 is not None and r6.get("retryable") is True)
+    # transport-error masking goes through the secrets registry, not
+    # the value under check - _get_token() always _remember_secret's
+    # the token before vk_check, so register it the same way here
+    _remember_secret(tok)
+    rt = _check_result({"transport": f"reset by peer {tok}"}, "")
+    check("_check_result transport -> retryable",
+          rt is not None and rt.get("retryable") is True)
+    check("_check_result transport scrubbed",
+          rt is not None and tok not in rt.get("error", ""))
+    check("_is_vk_url vk hosts",
+          _is_vk_url("https://vk.ru/feed") and
+          _is_vk_url("https://m.vk.com/x") and
+          not _is_vk_url("https://vk.ru.evil.example/") and
+          not _is_vk_url("https://example.com/") and
+          not _is_vk_url("not a url"))
+    # _authorized's shared-secret gate: stub `self` with a headers
+    # dict, patch the module SECRET - the real code path runs.
+    import types
+    saved = SECRET
+    try:
+        SECRET = "selftest-shared-secret"
+        good = types.SimpleNamespace(
+            headers={"X-Shared-Token": "selftest-shared-secret"})
+        bad = types.SimpleNamespace(
+            headers={"X-Shared-Token": "wrong"})
+        none_hdr = types.SimpleNamespace(headers={})
+        check("_authorized valid secret",
+              Handler._authorized(good) is True)
+        check("_authorized wrong secret",
+              Handler._authorized(bad) is False)
+        check("_authorized missing header",
+              Handler._authorized(none_hdr) is False)
+        SECRET = ""
+        check("_authorized fails closed on empty SECRET",
+              Handler._authorized(good) is False)
+    finally:
+        SECRET = saved
+    if failures:
+        print(f"selftest: {len(failures)} failure(s): "
+              + ", ".join(failures))
+        return 1
+    print("selftest: all checks passed")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8792)
     ap.add_argument("--once", action="store_true")
+    ap.add_argument("--selftest", action="store_true",
+                    help="run offline unit checks for the pure "
+                         "helpers (_mask/_scrub/_check_result/"
+                         "_is_vk_url/_authorized) and exit")
     ap.add_argument("--show-token", action="store_true",
                     help="print the raw access_token with --once "
                          "(default: masked)")
     args = ap.parse_args()
+    if args.selftest:
+        sys.exit(_selftest())
     if args.once:
         try:
             res = get_token()
