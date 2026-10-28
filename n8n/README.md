@@ -133,7 +133,12 @@ rewrite `tg.json` and hijack previews.
   `TG_WEBHOOK_SECRET` (registered via `setWebhook`'s `secret_token`,
   see `tools/tg_webhook_setup.sh`) and come from the pinned operator
   chat (`TELEGRAM_CHAT_ID` env, `state/tg.json` fallback) - anything
-  else is dropped before it can touch drafts or the publish queue:
+  else is dropped before it can touch drafts or the publish queue.
+  Signed updates are also deduplicated on `update_id` (atomic marker
+  files under `state/seen_updates/`, ~24h TTL, capped at 1000
+  entries): the webhook answers only at workflow end, so a Telegram
+  retry of a slow `post N` generation would otherwise re-dispatch the
+  whole handler - duplicate LLM spend plus a second draft batch:
   - Approve > writes `queue/publish/<id>.json` (carries `test: true`
     through from the draft meta when set), marks the TG message. A
     draft whose platform is not in `PUBLISH_PLATFORMS` is refused with
@@ -171,10 +176,17 @@ rewrite `tg.json` and hijack previews.
     `processing/`): that is the single intended publish, not a
     duplicate.
   - Reject > marks draft rejected, logs to `moderation.jsonl`
-  - Edit > stores a pending-edit marker AND retracts a queued
-    `queue/publish/<id>.json` immediately at button-press time (an
-    already-approved draft would otherwise publish the pre-edit text
-    in the minutes until the feedback text arrives); the next
+  - Edit > refused while the publish is already decided: a draft in
+    `status: "approved"` or with a `queue/publish/<id>.json` copy in
+    the root, `processing/` or `done/` answers `already
+    queued/published - Reject first to edit` before any marker is
+    armed (copies in `failed/`/`skipped/` stay editable - dead
+    records, not live publishes). The flow is Reject first: Reject
+    retracts the queued publish and flips the draft to `rejected`,
+    which Edit then revives. On an editable draft Edit stores a
+    pending-edit marker and still runs a press-time `retractQueued`
+    as a race-catcher for a queue copy that slipped in after the
+    refusal probes; the next
     plain-text message in the chat is forwarded to
     `/webhook/content-gen` as a rewrite request
     (mode `rewrite`, with feedback + previous draft). The draft flips

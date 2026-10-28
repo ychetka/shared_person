@@ -16,7 +16,9 @@
 // events_seen vs rejects_seen) legitimately differ per node, while the
 // shared LOGIC must match line for line.
 //
-// Not wired to CI - run it by hand after touching any SYNC'd helper:
+// deploy_workflow.js runs this as a preflight before touching the n8n
+// DB (a drifted helper cannot deploy silently); still runnable by
+// hand after touching any SYNC'd helper:
 //
 //   node tools/check_sync.js
 //

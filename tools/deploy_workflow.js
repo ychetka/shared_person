@@ -160,6 +160,26 @@ const VER_ID = crypto.randomUUID();
 const nodesJson = JSON.stringify(nodes);
 const connJson = JSON.stringify(connections);
 
+// Preflight drift check BEFORE any DB write: n8n Code nodes cannot
+// share a prelude, so shared helpers are duplicated across the
+// workflows' jsCode behind SYNC-BEGIN/SYNC-END markers - check_sync.js
+// is the only guard that the copies stayed identical. A drifted
+// helper deployed silently would leave workflows inconsistent until
+// someone ran the check by hand, so any failure here (drift,
+// unbalanced markers, a checker crash) aborts the deploy. The check
+// covers every workflow in n8n/workflows/, not just the one being
+// deployed - the copies are consistent as a SET or not at all.
+try {
+  execSync(
+    JSON.stringify(process.execPath) + ' ' +
+    JSON.stringify(path.join(__dirname, 'check_sync.js')),
+    { stdio: 'inherit' });
+} catch (e) {
+  console.error('preflight failed: SYNC-marker drift check did not ' +
+    'pass (see check_sync.js output above) - refusing to deploy');
+  process.exit(1);
+}
+
 const db = new DatabaseSync(DB);
 
 // schema-adaptive insert: keep only columns the table actually has
