@@ -337,10 +337,16 @@ if (UPDATE) {
 db.exec('BEGIN');
 try {
   if (UPDATE) {
-    db.prepare(`INSERT INTO workflow_history
-      (versionId,workflowId,authors,createdAt,updatedAt,nodes,connections,name,autosaved)
-      VALUES (?,?,?,?,?,?,?,?,?)`)
-      .run(VER_ID, wf.id, 'deploy_workflow.js --update', now, now, nodesJson, connJson, name, 0);
+    // schema-adaptive ins() like every other write in the script:
+    // a schema without autosaved/authors would throw mid-transaction
+    // on a fixed column list, contradicting the design the
+    // workflow_entity UPDATE below follows
+    ins('workflow_history', {
+      versionId: VER_ID, workflowId: wf.id,
+      authors: 'deploy_workflow.js --update',
+      createdAt: now, updatedAt: now,
+      nodes: nodesJson, connections: connJson, name, autosaved: 0,
+    });
     // schema-adaptive UPDATE like the rest of the script: n8n 2.x
     // versions differ on whether workflow_entity still has an `active`
     // column (2.x leans on activeVersionId) - write only the columns
@@ -447,10 +453,15 @@ try {
       triggerCount: triggers.length, createdAt: now, updatedAt: now,
       isArchived: 0, versionCounter: 1, activeVersionId: null,
     });
-    db.prepare(`INSERT INTO workflow_history
-      (versionId,workflowId,authors,createdAt,updatedAt,nodes,connections,name,autosaved)
-      VALUES (?,?,?,?,?,?,?,?,?)`)
-      .run(VER_ID, WF_ID, 'deploy_workflow.js', now, now, nodesJson, connJson, name, 0);
+    // schema-adaptive ins() like the update path above - a fixed
+    // column list would throw mid-transaction on a schema missing
+    // autosaved/authors
+    ins('workflow_history', {
+      versionId: VER_ID, workflowId: WF_ID,
+      authors: 'deploy_workflow.js',
+      createdAt: now, updatedAt: now,
+      nodes: nodesJson, connections: connJson, name, autosaved: 0,
+    });
     // same invariant as the update path: published-version and
     // activeVersionId pointers only exist for an ACTIVE spec - an
     // inactive create must not register a version that never runs
@@ -473,9 +484,13 @@ try {
     const proj = db.prepare(
       `SELECT id FROM project WHERE type='personal' LIMIT 1`).get();
     if (proj) {
-      db.prepare(`INSERT INTO shared_workflow
-        (createdAt,updatedAt,role,workflowId,projectId) VALUES (?,?,?,?,?)`)
-        .run(now, now, 'workflow:owner', WF_ID, proj.id);
+      // schema-adaptive ins() like the rest of the script - a schema
+      // missing `role` or a timestamp column would otherwise throw
+      // mid-transaction
+      ins('shared_workflow', {
+        createdAt: now, updatedAt: now, role: 'workflow:owner',
+        workflowId: WF_ID, projectId: proj.id,
+      });
     }
 
     // trigger + webhook registration (schema-adaptive ins() helper)

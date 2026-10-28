@@ -38,6 +38,17 @@
 
 set -euo pipefail
 
+# python3 builds the setWebhook JSON body below (it keeps the secret
+# off every argv/environ vector - see the staging comment). Preflight
+# it like the other fail-loud guards: on a host without python3 the
+# script would otherwise die mid-run on an opaque
+# 'python3: command not found' after the staging files exist.
+command -v python3 >/dev/null 2>&1 || {
+  echo "!! python3 is required but not on PATH - install python3" >&2
+  echo "   (it builds the setWebhook JSON body) and re-run $0" >&2
+  exit 1
+}
+
 ENV_FILE="${ENV_FILE:-$(cd "$(dirname "$0")/../.." && pwd)/ENV}"
 # Never `set -a; . "$ENV_FILE"`: sourcing exports every project secret
 # (~16 vars) into the environment of each child process this script
