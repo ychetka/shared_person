@@ -212,9 +212,28 @@ const colsOf = (table) => {
   }
   return colsCache.get(table);
 };
+// ins()/upsert() project each row onto the live schema: a row key
+// whose column does not exist on this n8n version is dropped from the
+// INSERT. A fully-empty projection is guarded loudly below, but a
+// PARTIAL one (e.g. versionId absent on workflow_... tables) used to
+// write a half-registered row with no trace - the deploy reported
+// success while the trigger could never fire. Name the skipped keys
+// once per (table, key) so the registration is diagnosable without
+// spamming one line per row (registerTriggers calls these helpers
+// several times per trigger).
+const droppedSeen = new Set();
+const warnDropped = (helper, table, row, cols) => {
+  const fresh = Object.keys(row).filter((k) =>
+    !cols.has(k) && !droppedSeen.has(table + ':' + k));
+  if (!fresh.length) return;
+  for (const k of fresh) droppedSeen.add(table + ':' + k);
+  console.warn(`${helper}(${table}): schema lacks columns ` +
+    `${fresh.join(', ')} - keys skipped`);
+};
 const ins = (table, row) => {
   const cols = colsOf(table);
   const keys = Object.keys(row).filter((k) => cols.has(k));
+  warnDropped('ins', table, row, cols);
   // an empty projection - extreme schema drift where NONE of the
   // row's keys exist as columns - would emit
   // 'INSERT OR REPLACE INTO t () VALUES ()', which SQLite rejects
@@ -239,6 +258,7 @@ const ins = (table, row) => {
 const upsert = (table, row, conflictCol, updateCols) => {
   const cols = colsOf(table);
   const keys = Object.keys(row).filter((k) => cols.has(k));
+  warnDropped('upsert', table, row, cols);
   const upd = updateCols.filter((k) => keys.includes(k));
   // without the conflict column the ON CONFLICT target cannot resolve,
   // and with nothing to update the upsert degenerates to a plain
@@ -340,10 +360,10 @@ const registerTriggers = (wfId, priorWebhookIds = new Map()) => {
       // nodeType carries the node's n8n type ('n8n-nodes-base.webhook'),
       // NOT the persistence kind - verified against the live DB: the
       // current n8n 2.x schema has no nodeType column at all (ins()
-      // drops it silently), but where a schema does carry it the
-      // persistence kind already lives in triggerKind (CHECK
-      // 'in-memory'/'persisted'), so duplicating it into nodeType
-      // would write a wrong value
+      // drops it, warned by warnDropped), but where a schema does
+      // carry it the persistence kind already lives in triggerKind
+      // (CHECK 'in-memory'/'persisted'), so duplicating it into
+      // nodeType would write a wrong value
       nodeType: node.type,
       triggerKind: t.path ? 'persisted' : 'in-memory',
       versionId: VER_ID,

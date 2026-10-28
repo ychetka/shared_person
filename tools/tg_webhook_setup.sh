@@ -11,8 +11,9 @@
 # URL env contract: WEBHOOK_URL is the canonical name everywhere else
 # (docker-compose.yml -> the n8n container's WEBHOOK_URL env, and the
 # sp-tg-setup workflow's ENV('WEBHOOK_URL')) and carries the public
-# BASE URL of the n8n instance - the moderation hook path
-# (/webhook/tg-moderation) is appended below. TG_WEBHOOK_URL is kept as
+# BASE URL of the n8n instance - the moderation hook path (derived
+# from the sp-tg-moderation spec's triggers[], not hardcoded) is
+# appended below. TG_WEBHOOK_URL is kept as
 # a compat alias for the legacy FULL webhook URL this script used to
 # read. There is deliberately NO hardcoded fallback anymore: the old
 # default silently registered a baked-in domain, so on a domain change
@@ -89,7 +90,34 @@ fi
 # unless the value already ends in it. TG_WEBHOOK_URL is the legacy
 # FULL hook URL and is used verbatim. Neither set = refuse loudly -
 # see the contract note in the header.
-HOOK_PATH='/webhook/tg-moderation'
+#
+# The hook path is NOT a hardcoded literal: it is read from the
+# sp-tg-moderation spec's triggers[] entry for the 'TG Update' webhook
+# node - the same source deploy_workflow.js registers into
+# webhook_entity, so the path this script registers with Telegram
+# cannot drift away from the path the workflow actually serves. A
+# missing spec file or a missing/renamed entry fails loudly: silently
+# falling back to a baked-in path is exactly the dead-registration
+# drift this derivation removes.
+WF_SPEC="$(dirname "$0")/../n8n/workflows/sp-tg-moderation.json"
+HOOK_PATH="$(python3 - "$WF_SPEC" <<'PYEOF'
+import json, sys
+try:
+    spec = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+for t in spec.get("triggers") or []:
+    if t.get("node") == "TG Update" and t.get("path"):
+        sys.stdout.write("/webhook/" + t["path"].strip("/") + "\n")
+        break
+PYEOF
+)" || HOOK_PATH=""
+if [ -z "$HOOK_PATH" ]; then
+  echo "!! cannot derive the moderation webhook path from" >&2
+  echo "   $WF_SPEC (no triggers[] entry with node 'TG Update'" >&2
+  echo "   carrying a path) - fix the spec or re-check the checkout." >&2
+  exit 1
+fi
 # strip ALL trailing slashes, not just one: ${var%/} removes a single
 # '/', so WEBHOOK_URL=https://x// would register
 # https://x//webhook/tg-moderation. Same trim the sp-tg-setup workflow
@@ -155,8 +183,8 @@ with open(sys.argv[1], "w") as f:
         "allowed_updates": ["message", "callback_query"],
         # drop every update Telegram queued while the webhook was unset
         # or unreachable (it keeps them up to 24h): re-registering
-        # without this flag replays the whole backlog to
-        # /webhook/tg-moderation, and stale ap:/ed:/rj: callbacks or
+        # without this flag replays the whole backlog to the
+        # moderation hook path, and stale ap:/ed:/rj: callbacks or
         # 'post N' messages pass the signature gate and act on current
         # state - a dead Approve can enqueue a real wall.post. The
         # moderation bot never depends on replayed updates.

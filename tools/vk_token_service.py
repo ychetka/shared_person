@@ -150,6 +150,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 # inventing one, but a refused redirect costs nothing:
 # redirect_request returning None surfaces the 3xx as HTTPError,
 # which vk_check files under the retryable transport bucket.
+# The CDP probes (_targets/_cdp_reachable) use the same opener: a
+# spoofed or competing local CDP endpoint could redirect /json/list
+# and serve fake page targets - bounded risk (candidate tokens are
+# still validated against the real VK API) but uniform discipline.
 _NO_REDIRECT = urllib.request.build_opener(_NoRedirect())
 # One get_token() call must never outlast the 60s timeout the n8n
 # vkRefresh() uses - the budget is shared across all tabs and retries.
@@ -277,7 +281,11 @@ def _share(deadline, n_left, cap):
 def _targets(deadline=None):
     timeout = 10 if deadline is None else min(10, max(0.5,
                                                     _remaining(deadline)))
-    with urllib.request.urlopen(f"{CDP}/json/list", timeout=timeout) as r:
+    # _NO_REDIRECT, not plain urlopen - the same redirect-refusing
+    # opener vk_check uses: a redirected /json/list could serve
+    # attacker page targets (bounded - tokens are still verified
+    # against the real VK API, but the refusal is free)
+    with _NO_REDIRECT.open(f"{CDP}/json/list", timeout=timeout) as r:
         return json.loads(r.read())
 
 
@@ -290,8 +298,10 @@ def _cdp_reachable(timeout=1.5):
     it. NOT serialized on _GET_TOKEN_LOCK and deliberately run outside
     it: a health probe must not queue behind a 50s token run."""
     try:
-        with urllib.request.urlopen(f"{CDP}/json/version",
-                                    timeout=timeout) as r:
+        # _NO_REDIRECT like _targets above - a 3xx answer surfaces as
+        # HTTPError and lands in the same 'unreachable' verdict
+        with _NO_REDIRECT.open(f"{CDP}/json/version",
+                               timeout=timeout) as r:
             r.read(1024)
         return True
     except Exception:  # noqa: BLE001 - any failure means unreachable

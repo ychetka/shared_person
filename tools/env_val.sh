@@ -175,7 +175,10 @@ env_val() {
             "$ENV_FILE" "$1" >&2 ;;
       esac ;;
   esac
-  printf '%s' "$v"
+  # trailing newline: $(...) captures strip it anyway, so sourced
+  # callers are unaffected - only a bare `env_val.sh KEY` terminal run
+  # used to leave the next prompt glued to the value
+  printf '%s\n' "$v"
 }
 
 # executed directly (not sourced): print the parsed value of one var
