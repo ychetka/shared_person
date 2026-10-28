@@ -47,10 +47,20 @@ const arg = (k) => {
   }
   return '';
 };
-// the workflow file is the first *.json positional - flag arguments
+// the workflow file is the *.json positional - flag arguments
 // (--db=x.json) and the value of `--db <file>.json` must not match it
-const file = argv.find((a, i) =>
+const positionals = argv.filter((a, i) =>
   a.endsWith('.json') && !a.startsWith('--') && argv[i - 1] !== '--db');
+// a second .json positional used to be silently ignored (argv.find
+// kept the first): `deploy_workflow.js a.json b.json` deployed only
+// a.json with no hint - fail loudly on the typo instead
+if (positionals.length > 1) {
+  console.error('extra positional arguments: ' +
+    positionals.slice(1).join(', ') +
+    ' - deploy_workflow.js takes exactly one workflow file');
+  process.exit(1);
+}
+const file = positionals[0];
 const UPDATE = argv.includes('--update');
 // resolve the n8n DB from the docker volume instead of hardcoding a
 // host path - see the header comment

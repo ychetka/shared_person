@@ -49,7 +49,20 @@ command -v python3 >/dev/null 2>&1 || {
   exit 1
 }
 
-ENV_FILE="${ENV_FILE:-$(cd "$(dirname "$0")/../.." && pwd)/ENV}"
+# If the checkout moved, the cd inside a plain $(cd ... && pwd)
+# substitution fails and ENV_FILE collapses to '/ENV' - every
+# ':? missing - add it to $ENV_FILE' error below would then point the
+# operator at a bogus path. Resolve into a var with a fail-loud guard
+# first, mirroring env_val.sh's own resolver (sourced below).
+if [ -z "${ENV_FILE:-}" ]; then
+  _project_root="$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)" || {
+    echo "!! cannot resolve project root from $(dirname "$0")" >&2
+    echo "   (checkout moved?) - export ENV_FILE explicitly and re-run $0" >&2
+    exit 1
+  }
+  ENV_FILE="$_project_root/ENV"
+  unset _project_root
+fi
 # Never `set -a; . "$ENV_FILE"`: sourcing exports every project secret
 # (~16 vars) into the environment of each child process this script
 # spawns (curl, python3), where /proc/<pid>/environ exposes them to

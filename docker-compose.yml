@@ -134,7 +134,11 @@ services:
       - apparmor=unconfined
     environment:
       - LLM_GATEWAY_PORT=8787
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # required for the LLM pipeline (llm-gateway /run and /image both
+      # call Gemini): ${VAR:?} fails `docker compose up` loudly instead
+      # of injecting an empty key that only surfaces as silent LLM
+      # failures at runtime
+      - GEMINI_API_KEY=${GEMINI_API_KEY:?GEMINI_API_KEY is required - set it in the compose environment}
       - ROLES_DIR=/app/code/roles
       - PROMPTS_DIR=/app/code/prompts
       - CONTEXT_DIR=/app/code/context
