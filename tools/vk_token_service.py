@@ -797,6 +797,23 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, {"ok": False, "error": "not found"})
 
+    def log_request(self, code="-", size="-"):
+        # send_response routes every request line through here into
+        # journald - including routine /health probes served on the
+        # worker path. The overflow path deliberately answers /health
+        # with NO journal line (a liveness probe's only audience is
+        # the checker), so match that here: a frequent poller must not
+        # fill the journal with noise. Every other endpoint keeps its
+        # request log.
+        try:
+            if urllib.parse.urlsplit(self.path).path == "/health":
+                return
+        except (ValueError, AttributeError):
+            # malformed/absent path - let the line log normally
+            # (do_GET answers a malformed request-target with 400)
+            pass
+        super().log_request(code, size)
+
     def log_message(self, fmt, *args):
         # the unit daemonizes the process - journald picks up stderr,
         # so route BaseHTTPRequestHandler's request/response lines

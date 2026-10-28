@@ -361,10 +361,12 @@ Update reads for its requeue gate, so the two cannot drift. Every
 non-enabled platform's queue file is moved to
 `queue/publish/skipped/` with a
 `platform not enabled` log line - nothing goes to FB/LI/IG/TikTok.
-Note the `skipped/` gate is env-only: a platform that IS listed in
-`PUBLISH_PLATFORMS` but has no implemented driver passes the gate and
-then fails on `no driver for platform <p>`, landing in `failed/`
-instead (only `vk` ships a driver today).
+A platform that IS listed in `PUBLISH_PLATFORMS` but has no
+implemented driver lands in `skipped/` too: it passes the ENABLED
+gate, then the tick parks the file with a `no driver for platform
+<p>` log reason and `skipped` in `vk_status.json` - a config-only
+gap is parked, not failed (only `vk` ships a driver today, so
+`PUBLISH_PLATFORMS=all` currently parks fb/linkedin files this way).
 After enabling a platform, re-approve its parked drafts to re-queue
 them - the Approve path drops the stale `skipped/` copy and writes a
 fresh queue file (it refuses while the platform is still disabled).
@@ -373,7 +375,9 @@ VK driver flow per queue file `{platform: "vk", text, media[], test?}`:
 
 1. `wall.post` with `owner_id=$VK_USER_ID` and `message=text`.
    Text-only for now - `media[]` is carried through but not attached
-   (wall photo upload is a follow-up).
+   (wall photo upload is a follow-up). The legacy `image` field is
+   dropped the same way and counts into `media_ignored`, so a
+   set-but-unattached field is never lost silently.
 2. Ledger-first: a `post-created` record carrying `external_id` is
    appended to `state/published.jsonl` immediately after `wall.post`
    returns - before verification - so a later failure cannot orphan a
