@@ -499,7 +499,19 @@ def _check_result(code, ctx):
                                        *_secrets_snapshot()),
                 "retryable": True}
     _log(f"vk_check failed{ctx}: {code}")
-    if code == 5:
+    # the schema promises an integer error_code, but a proxy or shim
+    # in front of api.vk.com can answer it as a string ("5"): a raw
+    # == 5 comparison would then file a real token rejection under
+    # retryable, and the publish tick would requeue a dead credential
+    # every round instead of dead-lettering it. Normalize before the
+    # check so a numeric-string 5 still lands in the terminal bucket;
+    # an unparseable code stays retryable - an unknown shape is not a
+    # classified rejection.
+    try:
+        code_num = int(code)
+    except (TypeError, ValueError):
+        code_num = None
+    if code_num == 5:
         return {"ok": False, "error": "vk check failed: 5 "
                                       "(token rejected)"}
     return {"ok": False, "error": f"vk check failed: {code}",
@@ -847,10 +859,15 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         window or a live service gets restarted mid-burst. Any other
         identified request gets a bounded 503 'server busy' - a clean
         refusal the n8n caller classifies as retryable, instead of a
-        silent reset or an unbounded backlog queue. A request the read
-        cannot identify (nothing readable within _TRIAGE_TIMEOUT) is
-        closed without an answer: under contention only identifiable
-        traffic is served. No journal line for the health answer - a
+        silent reset or an unbounded backlog queue. That includes
+        non-origin-form request targets (absolute-URI
+        'GET http://...', asterisk-form 'OPTIONS *'): a parsed
+        METHOD <target> pair gets the 503 even though it can never
+        match /health - a silent close would leave a proxy or probe
+        with no distinguishable answer under contention. Only a
+        request the read cannot identify at all (nothing readable
+        within _TRIAGE_TIMEOUT, or no METHOD <target> pair) is closed
+        without an answer. No journal line for the health answer - a
         liveness probe's only audience is the checker, and logging
         every probe would spam journald."""
         head = b""
@@ -871,14 +888,21 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             head = b""
         resp = None
         parts = head.split(b"\r\n", 1)[0].split(b" ")
-        if len(parts) >= 2 and parts[1].startswith(b"/"):
-            try:
-                # same query-stripping as do_GET, so /health?x also
-                # qualifies for the inline answer
-                path = urllib.parse.urlsplit(
-                    parts[1].decode("latin-1")).path
-            except ValueError:
-                path = ""
+        if len(parts) >= 2:
+            # any parsed METHOD <target> pair earns a bounded answer:
+            # only origin-form targets (leading '/') can qualify for
+            # the inline /health - absolute-URI and asterisk-form
+            # targets leave path empty and fall through to the 503,
+            # so they get a refusal instead of a silent close
+            path = ""
+            if parts[1].startswith(b"/"):
+                try:
+                    # same query-stripping as do_GET, so /health?x
+                    # also qualifies for the inline answer
+                    path = urllib.parse.urlsplit(
+                        parts[1].decode("latin-1")).path
+                except ValueError:
+                    path = ""
             if parts[0] == b"GET" and path == "/health":
                 resp = self._HEALTH_RESP
             else:

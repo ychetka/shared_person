@@ -73,6 +73,29 @@ diagram from `topology`). Max 2 specs per request.
 - `VIZ_RENDERER_URL` (n8n container env, optional) - override the
   render endpoint; default `http://10.0.2.2:8791/render`.
 
+## check_sync.js - SYNC-marker drift check for Code-node helpers
+
+n8n Code nodes cannot share a prelude, so the same helper is
+hand-copied across six nodes in `n8n/workflows/*.json` (the plain
+`writeJsonAtomic` in five nodes plus Publish Tick's hardened 0o600
+variant, the `secretOk` padded compare in three nodes, the
+bounded-append counter in two). Drift between copies was policed by
+prose comments only; now each shared body is bracketed by
+`// SYNC-BEGIN: <group>` / `// SYNC-END: <group>` marker lines inside
+the jsCode and this script verifies every copy in a group is identical
+after group-specific identifier normalization (the constant names each
+copy binds legitimately differ per node - `DRAFT_SECRET` vs
+`WEBHOOK_SECRET`, `ctrFile` vs `REJECT_CTR`).
+
+```bash
+node tools/check_sync.js   # exit 0 = all groups consistent, 1 = drift
+```
+
+Not wired to CI - run it by hand after touching any SYNC'd helper.
+Groups, expected member counts and normalizations live in the `GROUPS`
+table at the top of the script; a marker group with no table entry
+fails the run, so new shared helpers must be registered there.
+
 ## deploy_workflow.js
 
 SQLite deployer for `n8n/workflows/*.json` - see `n8n/README.md`.
