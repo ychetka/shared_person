@@ -114,6 +114,24 @@ TOKEN_EXPR = (
     "})()"
 )
 VK_API = "https://api.vk.com/method/{m}"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect - see vk_check."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+# urllib.request.urlopen auto-follows redirects, and for 307/308 it
+# re-sends the request - POST BODY INCLUDED - to whatever host the
+# Location header names. vk_check's body carries access_token, so a
+# redirect is an off-domain leak of a live wall-scope credential,
+# the exact thing the "body, never URL" design exists to prevent.
+# api.vk.com does not redirect today and TLS blocks a MITM from
+# inventing one, but a refused redirect costs nothing:
+# redirect_request returning None surfaces the 3xx as HTTPError,
+# which vk_check files under the retryable transport bucket.
+_NO_REDIRECT = urllib.request.build_opener(_NoRedirect())
 # One get_token() call must never outlast the 60s timeout the n8n
 # vkRefresh() uses - the budget is shared across all tabs and retries.
 TOTAL_BUDGET = 50.0
@@ -368,6 +386,11 @@ def vk_check(token, deadline=None):
     errors and logs can echo back. `deadline` caps the HTTP timeout by
     the shared get_token() budget.
 
+    Requests go through _NO_REDIRECT, not urlopen: the default opener
+    follows 307/308 by re-sending the body - access_token included -
+    to the Location host. A refused redirect raises HTTPError and
+    lands in the same retryable transport bucket as a timeout.
+
     A transport failure (timeout, reset, DNS blip) is NOT a token
     rejection: returning a truthy 'http: ...' string used to file it
     under the same non-retryable 502 as a real VK error code, and the
@@ -381,7 +404,7 @@ def vk_check(token, deadline=None):
         {"v": "5.199", "access_token": token}).encode()
     req = urllib.request.Request(VK_API.format(m="users.get"), data=body)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _NO_REDIRECT.open(req, timeout=timeout) as r:
             resp = json.loads(r.read())
     except Exception as e:  # noqa: BLE001 - report, do not crash
         return {"transport": str(e)}
@@ -691,33 +714,33 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     (each can wait up to TOTAL_BUDGET on _GET_TOKEN_LOCK), a liveness
     probe would not even be accepted, and a busy token window would
     make a live service look dead. Under contention
-    process_request() peeks the request line and answers `GET
+    process_request() reads the request line and answers `GET
     /health` inline on the accept thread - a fixed trivial response,
     no worker slot, no queue. Identified non-health overflow gets a
     503 'busy' refusal instead of an unbounded queue; Handler's
-    do_GET stays the fallback for anything the peek could not
+    do_GET stays the fallback for anything the triage read could not
     confirm (e.g. a request line split across packets).
 
     Residual bound, honestly: the overflow triage is serialized on
     the accept thread, and each connect-and-stall client can hold it
-    for up to _PEEK_TIMEOUT while recv() waits for a request line
+    for up to _TRIAGE_TIMEOUT while recv() waits for a request line
     that never arrives. A probe sitting behind K stalled connections
-    is therefore delayed by at most ~K x _PEEK_TIMEOUT (K is bounded
-    by the listen backlog, request_queue_size) - a bounded delay,
-    not a guarantee of zero wait. A sustained flood CAN still make
-    an individual probe time out; it cannot wedge the accept loop
-    the way a blocking semaphore acquire would."""
+    is therefore delayed by at most ~K x _TRIAGE_TIMEOUT (K is
+    bounded by the listen backlog, request_queue_size) - a bounded
+    delay, not a guarantee of zero wait. A sustained flood CAN still
+    make an individual probe time out; it cannot wedge the accept
+    loop the way a blocking semaphore acquire would."""
 
     daemon_threads = True
     max_workers = 8
-    # MSG_PEEK budget for a contended connection - long enough for a
+    # Read budget for a contended connection - long enough for a
     # loopback client to have its request line delivered (the first
     # segment is already in flight when accept() returns), short
     # enough that a connect-and-stall flood can hold the accept
     # thread for only ~0.3s per stalled connection. Only contended
-    # connections pay it; with a free worker slot nothing is peeked
-    # at all.
-    _PEEK_TIMEOUT = 0.3
+    # connections pay it; with a free worker slot nothing is read at
+    # all. Also bounds the inline send below.
+    _TRIAGE_TIMEOUT = 0.3
     _HEALTH_BODY = b'{"ok": true}'
     _BUSY_BODY = (b'{"ok": false, "error": "server busy", '
                   b'"retryable": true}')
@@ -739,13 +762,13 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     def _serve_overflow(self, request):
         """Handle a connection accepted with no free worker slot.
 
-        Peek the request line: a confirmed `GET /health` is answered
+        Read the request line: a confirmed `GET /health` is answered
         inline - the liveness surface must respond during a busy token
         window or a live service gets restarted mid-burst. Any other
         identified request gets a bounded 503 'server busy' - a clean
         refusal the n8n caller classifies as retryable, instead of a
-        silent reset or an unbounded backlog queue. A request the peek
-        cannot identify (nothing readable within _PEEK_TIMEOUT) is
+        silent reset or an unbounded backlog queue. A request the read
+        cannot identify (nothing readable within _TRIAGE_TIMEOUT) is
         closed without an answer: under contention only identifiable
         traffic is served. No journal line for the health answer - a
         liveness probe's only audience is the checker, and logging
@@ -753,9 +776,15 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         head = b""
         try:
             prev = request.gettimeout()
-            request.settimeout(self._PEEK_TIMEOUT)
+            request.settimeout(self._TRIAGE_TIMEOUT)
             try:
-                head = request.recv(512, socket.MSG_PEEK)
+                # plain recv, NOT MSG_PEEK: the bytes are never routed
+                # to a worker anyway, and a peeked-then-closed socket
+                # still holds them in its receive queue - close() on a
+                # socket with unread data answers RST, which can eat
+                # the 200/503 this path just sent before the client
+                # reads it (ECONNRESET instead of the bounded answer)
+                head = request.recv(512)
             finally:
                 request.settimeout(prev)
         except OSError:
@@ -776,17 +805,25 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
                 resp = self._BUSY_RESP
         if resp is not None:
             try:
-                request.settimeout(self._PEEK_TIMEOUT)
+                request.settimeout(self._TRIAGE_TIMEOUT)
                 request.sendall(resp)
             except OSError:
                 pass  # dead peer - close anyway
+        # discard whatever the 512-byte read left behind (headers,
+        # pipelined bytes): SHUT_RDWR empties the receive queue, so
+        # the close below sends FIN - not the RST that unread data
+        # would trigger. Same reason the triage read is not a peek.
+        try:
+            request.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         # the framework only shutdown_request()s connections it routed
         # to a worker - an overflow-handled socket is ours to close
         self.shutdown_request(request)
 
     def process_request(self, request, client_address):
         # fast path first: with a free worker slot the connection goes
-        # straight to a thread, no peek, no delay - acquire BEFORE
+        # straight to a thread, no triage read, no delay - acquire BEFORE
         # spawning so a full semaphore cannot leak a thread per
         # pending socket. The acquire is NON-blocking: blocking here
         # would pin the accept thread and strand every queued
