@@ -170,9 +170,19 @@ def _secrets_snapshot():
 def _log(msg):
     """stderr line - the systemd unit runs this daemonized, so
     journald only sees what lands on stderr/stdout. --once keeps
-    stdout clean for the JSON result, so everything goes to stderr."""
+    stdout clean for the JSON result, so everything goes to stderr.
+
+    Every line passes through _scrub with the shared secret plus a
+    locked snapshot of every token this process has seen - the same
+    masking the HTTP error bodies get. The invariant is 'journald
+    never stores a live wall-scope credential': websocket/urllib
+    exception text can echo args or response payloads (the
+    Runtime.evaluate response carries the raw token), so scrubbing
+    at the sink covers every _log call site, present and future,
+    instead of relying on each caller to scrub first."""
     sys.stderr.write(
-        f"{time.strftime('%Y-%m-%dT%H:%M:%S')} vk_token_service: {msg}\n")
+        f"{time.strftime('%Y-%m-%dT%H:%M:%S')} vk_token_service: "
+        f"{_scrub(msg, SECRET, *_secrets_snapshot())}\n")
     sys.stderr.flush()
 
 

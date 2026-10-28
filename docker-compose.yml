@@ -45,9 +45,12 @@ services:
       # secret_token; Telegram then signs every delivery with the
       # X-Telegram-Bot-Api-Secret-Token header, which sp-tg-moderation
       # verifies before touching any update (tools/tg_webhook_setup.sh
-      # re-registers the webhook). Required - the gate fails closed
-      # when unset.
-      - TG_WEBHOOK_SECRET=${TG_WEBHOOK_SECRET:-}
+      # re-registers the webhook). Required - ${VAR:?} makes an unset
+      # secret fail `docker compose up` loudly instead of injecting an
+      # empty value that leaves the gate closed at runtime (a dead
+      # pipeline that still looks deployed). The runtime fail-closed
+      # check stays as the second layer.
+      - TG_WEBHOOK_SECRET=${TG_WEBHOOK_SECRET:?TG_WEBHOOK_SECRET is required - set it in the compose environment}
       # operator chat is pinned config, not learned from updates - a
       # forged message used to rewrite state/tg.json and hijack every
       # preview. tg.json (written by sp-tg-setup) stays as fallback.
@@ -57,7 +60,9 @@ services:
       # matching this (fails closed when unset); the content-gen
       # workflow sends it on its internal draft dispatch. Required for
       # draft delivery - generate with `openssl rand -hex 32`.
-      - DRAFT_WEBHOOK_SECRET=${DRAFT_WEBHOOK_SECRET:-}
+      # ${VAR:?} like TG_WEBHOOK_SECRET: fail at compose-up time, not
+      # silently at runtime.
+      - DRAFT_WEBHOOK_SECRET=${DRAFT_WEBHOOK_SECRET:?DRAFT_WEBHOOK_SECRET is required - set it in the compose environment}
       # content-gen webhook shared secret: this endpoint is public via
       # the edge proxy too, and a forged POST makes the workflow itself
       # dispatch attacker text to moderation-draft with the valid
@@ -66,7 +71,9 @@ services:
       # header matching this (fails closed when unset); the internal
       # callers in sp-tg-moderation (post N, edit rewrite) send it.
       # Required for generation - generate with `openssl rand -hex 32`.
-      - CONTENT_GEN_WEBHOOK_SECRET=${CONTENT_GEN_WEBHOOK_SECRET:-}
+      # ${VAR:?} like TG_WEBHOOK_SECRET: fail at compose-up time, not
+      # silently at runtime.
+      - CONTENT_GEN_WEBHOOK_SECRET=${CONTENT_GEN_WEBHOOK_SECRET:?CONTENT_GEN_WEBHOOK_SECRET is required - set it in the compose environment}
       # enabled publish platforms, comma-separated - single source for
       # the ENABLED gates in sp-publish (Publish Tick) and
       # sp-tg-moderation (Handle TG Update); both read $env via
@@ -90,7 +97,10 @@ services:
       # the URL override only works if it is passed through here, and
       # /vk-token requires the shared-secret header
       - VK_TOKEN_REFRESH_URL=${VK_TOKEN_REFRESH_URL:-}
-      - VK_TOKEN_SECRET=${VK_TOKEN_SECRET:-}
+      # required like the webhook secrets above: ${VAR:?} fails
+      # compose up loudly instead of injecting an empty value that
+      # leaves the /vk-token gate closed at runtime
+      - VK_TOKEN_SECRET=${VK_TOKEN_SECRET:?VK_TOKEN_SECRET is required - set it in the compose environment}
       - LINKEDIN_ACCESS_TOKEN=${LINKEDIN_ACCESS_TOKEN:-}
       - LINKEDIN_PERSON_URN=${LINKEDIN_PERSON_URN:-}
     volumes:

@@ -160,6 +160,17 @@ const upsert = (table, row, conflictCol, updateCols) => {
 const registerTriggers = (wfId, priorWebhookIds = new Map()) => {
   for (const t of triggers) {
     const node = nodes.find((n) => n.name === t.node);
+    // fail-fast on a typo'd triggers[].node: without this check the
+    // loop registers webhook_entity / trigger_status rows for a node
+    // the spec does not have - the deploy reports success while the
+    // path routes nowhere (a silent dead webhook). Throw here, inside
+    // the transaction, so the catch's ROLLBACK leaves no partial
+    // registration behind - same loudness contract as the webhook
+    // hijack guard below.
+    if (!node) {
+      throw new Error(`trigger node "${t.node}" not found in ` +
+        'spec.nodes - fix the triggers[] entry or the node name');
+    }
     if (t.path) {
       // webhook_entity.webhookId must not desync from the node the
       // runtime activates: n8n writes node.webhookId here, so a random
