@@ -292,7 +292,14 @@ const registerTriggers = (wfId, priorWebhookIds = new Map()) => {
       workflowId: wfId,
       nodeId: node?.id || t.node,
       nodeName: t.node,
-      nodeType: t.path ? 'persisted' : 'in-memory',
+      // nodeType carries the node's n8n type ('n8n-nodes-base.webhook'),
+      // NOT the persistence kind - verified against the live DB: the
+      // current n8n 2.x schema has no nodeType column at all (ins()
+      // drops it silently), but where a schema does carry it the
+      // persistence kind already lives in triggerKind (CHECK
+      // 'in-memory'/'persisted'), so duplicating it into nodeType
+      // would write a wrong value
+      nodeType: node.type,
       triggerKind: t.path ? 'persisted' : 'in-memory',
       versionId: VER_ID,
       status: 'activated',

@@ -5,10 +5,16 @@
 # where /proc/<pid>/environ exposes them to other processes of the
 # same uid).
 #
-# Semantics track what sourcing a single KEY= line would produce (one
-# known divergence, called out below: a quoted value TRUNCATES at the
+# Semantics track what sourcing a single KEY= line would produce (two
+# known divergences, called out below: a quoted value TRUNCATES at the
 # closing quote, where sourcing would concatenate - KEY="a"b yields a
-# here but ab under . / source):
+# here but ab under . / source; and shell EXPANSIONS inside a
+# double-quoted value - $VAR, $(...) and `backticks` - stay LITERAL
+# here where sourcing would expand or execute them. The second
+# divergence is deliberate: an env file must never run code or pull
+# sibling variables into a secret, so consumers get the text as
+# written - a KEY="$(rm -rf x)" line is inert text for us but a
+# command under . / source):
 #   - leading whitespace before the key is tolerated - an indented
 #     '  KEY=value' sources fine in bash;
 #   - an optional 'export ' prefix is tolerated;
@@ -18,7 +24,9 @@
 #     inside a double-quoted value the shell's escape rules apply
 #     (\" \\ \$ \` fold to the escaped char, the closing quote is the
 #     first UNESCAPED one - KEY="a\"b" parses as a"b, matching
-#     sourcing); single quotes take no escapes, same as sourcing;
+#     sourcing) but $VAR/$(...)/backticks stay LITERAL where sourcing
+#     would expand or execute them - deliberate, see the header;
+#     single quotes take no escapes, same as sourcing;
 #   - an UNTERMINATED quote (KEY='abc) is NOT silently repaired:
 #     sourcing the same line is a syntax error, so the raw value is
 #     kept verbatim and a warning goes to stderr - a consumer failing

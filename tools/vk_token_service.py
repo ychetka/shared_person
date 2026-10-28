@@ -187,9 +187,14 @@ def _log(msg):
     Runtime.evaluate response carries the raw token), so scrubbing
     at the sink covers every _log call site, present and future,
     instead of relying on each caller to scrub first."""
+    secrets = (SECRET, *_secrets_snapshot())
+    # _edge_mask on top of _scrub: the journal line is not truncated,
+    # but the raw message can still END mid-secret (a clipped
+    # exception repr), leaving a live-token prefix the full-value
+    # match cannot catch
     sys.stderr.write(
         f"{time.strftime('%Y-%m-%dT%H:%M:%S')} vk_token_service: "
-        f"{_scrub(msg, SECRET, *_secrets_snapshot())}\n")
+        f"{_edge_mask(_scrub(msg, *secrets), secrets)}\n")
     sys.stderr.flush()
 
 
@@ -406,8 +411,8 @@ def _check_result(code, ctx):
         _log(f"vk_check transport failure{ctx}: {code['transport']}")
         return {"ok": False,
                 "error": "vk check transport failure: " +
-                         _scrub(code["transport"],
-                                *_secrets_snapshot())[:200],
+                         _scrub_capped(code["transport"], 200,
+                                       *_secrets_snapshot()),
                 "retryable": True}
     _log(f"vk_check failed{ctx}: {code}")
     if code == 5:
@@ -457,7 +462,7 @@ def _get_token(budget):
         _log(f"token extract raised: {e}")
         return {"ok": False,
                 "error": "token extract failed: " +
-                         _scrub(e, *_secrets_snapshot())[:200],
+                         _scrub_capped(e, 200, *_secrets_snapshot()),
                 "retryable": True}
     _remember_secret(tok)
     refreshed = False
@@ -474,8 +479,8 @@ def _get_token(budget):
                 _log(f"token reload raised: {e}")
                 return {"ok": False,
                         "error": "token reload failed: " +
-                                 _scrub(e, stale,
-                                        *_secrets_snapshot())[:200],
+                                 _scrub_capped(e, 200, stale,
+                                               *_secrets_snapshot()),
                         "retryable": True}
             _remember_secret(tok)
             refreshed = True
@@ -488,8 +493,9 @@ def _get_token(budget):
                 # Scrub first: exception text may echo the stale token.
                 # retryable: a deadline hit or a slow reload is
                 # transient - the tick requeues for the next run.
-                reason = _scrub(err, stale) if err else \
-                    "no token after tab reload"
+                reason = _scrub_capped(err, 200, stale,
+                                       *_secrets_snapshot()) \
+                    if err else "no token after tab reload"
                 _log(f"no token after tab reload: {reason}")
                 return {"ok": False, "error": reason,
                         "retryable": True}
@@ -506,7 +512,7 @@ def _get_token(budget):
             _log(f"token reload raised: {e}")
             return {"ok": False,
                     "error": "token reload failed: " +
-                             _scrub(e, *_secrets_snapshot())[:200],
+                             _scrub_capped(e, 200, *_secrets_snapshot()),
                     "retryable": True}
         _remember_secret(tok)
         refreshed = True
@@ -633,8 +639,8 @@ class Handler(BaseHTTPRequestHandler):
                 # _remember_secret while this handler thread is outside
                 # _GET_TOKEN_LOCK - iterating the live set could raise
                 # RuntimeError and kill the connection
-                res["error"] = _scrub(
-                    res["error"], SECRET, *_secrets_snapshot())[:300]
+                res["error"] = _scrub_capped(
+                    res["error"], 300, SECRET, *_secrets_snapshot())
             if res.get("ok"):
                 # masked token only - the journal must never hold a
                 # live wall-scope credential
@@ -678,27 +684,40 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     - and mark workers daemon so a wedged handler can never block
     shutdown.
 
-    /health never starves behind a full semaphore: _conn_sem is
-    acquired on the accept thread, so blocking on it also stalls every
-    connection still queued in the listen backlog - while all slots
-    are held by /vk-token callers (each can wait up to TOTAL_BUDGET on
-    _GET_TOKEN_LOCK), a liveness probe would not even be accepted, and
-    a busy token window would make a live service look dead. Under
-    contention process_request() peeks the request line and answers
-    `GET /health` inline on the accept thread - a fixed trivial
-    response, no worker slot, no queue. Identified non-health
-    overflow gets a 503 'busy' refusal instead of an unbounded queue;
-    Handler's do_GET stays the fallback for anything the peek could
-    not confirm (e.g. a request line split across packets)."""
+    /health stays responsive behind a full semaphore - but NOT
+    starvation-free: _conn_sem is acquired on the accept thread, so
+    blocking on it also stalls every connection still queued in the
+    listen backlog - while all slots are held by /vk-token callers
+    (each can wait up to TOTAL_BUDGET on _GET_TOKEN_LOCK), a liveness
+    probe would not even be accepted, and a busy token window would
+    make a live service look dead. Under contention
+    process_request() peeks the request line and answers `GET
+    /health` inline on the accept thread - a fixed trivial response,
+    no worker slot, no queue. Identified non-health overflow gets a
+    503 'busy' refusal instead of an unbounded queue; Handler's
+    do_GET stays the fallback for anything the peek could not
+    confirm (e.g. a request line split across packets).
+
+    Residual bound, honestly: the overflow triage is serialized on
+    the accept thread, and each connect-and-stall client can hold it
+    for up to _PEEK_TIMEOUT while recv() waits for a request line
+    that never arrives. A probe sitting behind K stalled connections
+    is therefore delayed by at most ~K x _PEEK_TIMEOUT (K is bounded
+    by the listen backlog, request_queue_size) - a bounded delay,
+    not a guarantee of zero wait. A sustained flood CAN still make
+    an individual probe time out; it cannot wedge the accept loop
+    the way a blocking semaphore acquire would."""
 
     daemon_threads = True
     max_workers = 8
     # MSG_PEEK budget for a contended connection - long enough for a
-    # loopback client to have its request line delivered, short enough
-    # that a connect-and-stall pattern cannot pin the accept thread
-    # under load. Only contended connections pay it; with a free
-    # worker slot nothing is peeked at all.
-    _PEEK_TIMEOUT = 1.0
+    # loopback client to have its request line delivered (the first
+    # segment is already in flight when accept() returns), short
+    # enough that a connect-and-stall flood can hold the accept
+    # thread for only ~0.3s per stalled connection. Only contended
+    # connections pay it; with a free worker slot nothing is peeked
+    # at all.
+    _PEEK_TIMEOUT = 0.3
     _HEALTH_BODY = b'{"ok": true}'
     _BUSY_BODY = (b'{"ok": false, "error": "server busy", '
                   b'"retryable": true}')
@@ -823,6 +842,50 @@ def _scrub(msg, *secrets):
     return s
 
 
+def _edge_mask(s, secrets):
+    """Mask a partial secret sitting on either edge of `s`.
+
+    _scrub only replaces FULL occurrences: a value clipped mid-secret
+    - an upstream [:N] on the raw message, or the boundary a caller's
+    own truncation just cut - leaves a secret prefix at the tail (or a
+    suffix at the head) that no longer matches the secret and would
+    leak verbatim. Check both edges and mask the longest edge match of
+    at least _MIN_SCRUB_LEN chars - the same length floor as _scrub,
+    so short common prefixes are not over-masked."""
+    for sec in secrets:
+        sec = str(sec) if sec else ""
+        if len(sec) < _MIN_SCRUB_LEN:
+            continue
+        # longest tail that is a proper prefix of the secret: k is
+        # capped at len(sec) - 1 because a full occurrence was already
+        # replaced by _scrub and needs no edge pass
+        for k in range(min(len(s), len(sec) - 1),
+                       _MIN_SCRUB_LEN - 1, -1):
+            if s.endswith(sec[:k]):
+                s = s[:len(s) - k] + "***"
+                break
+        # longest head that is a proper suffix of the secret - covers
+        # a raw message clipped on the left before it reached _scrub
+        for k in range(min(len(s), len(sec) - 1),
+                       _MIN_SCRUB_LEN - 1, -1):
+            if s.startswith(sec[len(sec) - k:]):
+                s = "***" + s[k:]
+                break
+    return s
+
+
+def _scrub_capped(msg, cap, *secrets):
+    """_scrub() + an edge-safe [:cap] for HTTP bodies and the journal.
+
+    Order matters: the FULL message is scrubbed first so a secret
+    straddling the cap is replaced whole, then the string is cut, then
+    _edge_mask removes any partial secret the cut - or a clip that
+    already happened upstream - left on a boundary. A raw prefix no
+    longer matches the full value, so without the edge pass
+    _scrub(s)[:cap] could leak the head of a live token."""
+    return _edge_mask(_scrub(msg, *secrets)[:cap], secrets)
+
+
 def _selftest():
     """Offline unit checks for the pure helpers - no Chrome/CDP, no
     VK API, no socket. Run: vk_token_service.py --selftest.
@@ -857,6 +920,24 @@ def _selftest():
     check("_scrub empty/None secrets ignored",
           _scrub("plain", None, "") == "plain")
     check("_scrub non-str msg", _scrub(12345, tok) == "12345")
+    # _scrub_capped: a full secret straddling the cap is replaced
+    # before the cut, and a partial secret left on a boundary (the
+    # cap itself, or a raw message already clipped mid-secret) is
+    # edge-masked instead of leaking a live-token prefix
+    capped = _scrub_capped("x" * 295 + tok + " tail", 300, tok)
+    check("_scrub_capped secret straddling cap stays masked",
+          "t" * 8 not in capped and len(capped) <= 300)
+    tail = _scrub_capped("boom: " + tok[:40], 300, tok)
+    check("_scrub_capped masks tail-edge secret prefix",
+          tok[:40] not in tail and tail.endswith("***"))
+    head = _scrub_capped(tok[30:] + " failed", 300, tok)
+    check("_scrub_capped masks head-edge secret suffix",
+          not head.startswith("t") and head.startswith("***"))
+    check("_scrub_capped plain text untouched",
+          _scrub_capped("plain error", 300, tok) == "plain error")
+    check("_edge_mask below-length-floor prefix kept",
+          _edge_mask("ends " + tok[:5], (tok,)) ==
+          "ends " + tok[:5])
     check("_check_result None -> accept",
           _check_result(None, "") is None)
     r5 = _check_result(5, "")
@@ -935,8 +1016,8 @@ def main():
         # (here the run is single-threaded, but the shapes stay
         # identical so a future shared call site stays safe)
         if res.get("error"):
-            res["error"] = _scrub(res["error"], SECRET,
-                                  *_secrets_snapshot())[:300]
+            res["error"] = _scrub_capped(res["error"], 300, SECRET,
+                                         *_secrets_snapshot())
         if not args.show_token and res.get("access_token"):
             res["access_token"] = _mask(res["access_token"])
         print(json.dumps(res))
