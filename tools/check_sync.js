@@ -62,6 +62,22 @@ const GROUPS = {
       [/\b(?:ctrFile|REJECT_CTR)\b/g, 'CTR'],
       [/\b(?:events_seen|rejects_seen)\b/g, 'seen']
     ]
+  },
+  // PUBLISH_PLATFORMS gate block: the ALL_PLATFORMS fan-out list, the
+  // facebook->fb alias map and the ENABLED expansion loop - Publish
+  // Tick (sp-publish) and Handle TG Update (sp-tg-moderation) run
+  // identical copies so a platform enabled on one side cannot drift
+  // from what the Approve gate honors on the other
+  'enabled-platforms': { expect: 2 },
+  // REWRITE_WINDOW_MS const: Prepare Draft plus the 'ap' and 'ed'
+  // refusal sites in Handle TG Update (all sp-tg-moderation) - the
+  // copies sit at different nesting depths, so leading indentation
+  // is stripped before comparing
+  'rewrite-window-ms': {
+    expect: 3,
+    normalize: [
+      [/^\s+/gm, '']
+    ]
   }
 };
 

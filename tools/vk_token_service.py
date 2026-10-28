@@ -470,7 +470,18 @@ def vk_check(token, deadline=None):
     if not isinstance(err, dict):
         return {"transport": "non-object error field: "
                              f"{str(err)[:120]}"}
-    return err.get("error_code")
+    # an error object whose error_code is absent (or null) is still an
+    # error ANSWER: resp carried an 'error' field, so VK refused the
+    # call - returning err.get() -> None used to drop it into the
+    # accepted-token path with no users.get verdict at all. It is not
+    # a classified rejection either (no code to classify), so file it
+    # under the same retryable anomaly marker as the non-dict error
+    # above - /vk-token answers 503 and the tick requeues.
+    code = err.get("error_code")
+    if code is None:
+        return {"transport": "error object without error_code: "
+                             f"{str(err)[:120]}"}
+    return code
 
 
 def _check_result(code, ctx):
@@ -565,7 +576,20 @@ def _get_token(budget):
     if tok:
         code = vk_check(tok, deadline=deadline)
         ctx = ""
-        if code == 5:
+        # the ==5 self-heal must see the same normalized code
+        # _check_result uses below: a proxy/shim answering error_code
+        # as a string ("5") used to skip the tab reload entirely and
+        # file the rejection straight to the terminal 502 - a dead
+        # credential parked in failed/ instead of recovered by the
+        # reload. Dict transport markers and unparseable codes
+        # normalize to None and skip the reload, matching
+        # _check_result's 'unknown shape is not a classified
+        # rejection'.
+        try:
+            code_num = int(code)
+        except (TypeError, ValueError):
+            code_num = None
+        if code_num == 5:
             _log("vk_check rejected the token (error 5) - "
                  "reloading vk tabs for a fresh one")
             stale = tok
