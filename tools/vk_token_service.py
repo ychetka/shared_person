@@ -387,12 +387,19 @@ def vk_check(token, deadline=None):
 def _check_result(code, ctx):
     """Map a vk_check() outcome to a result dict or None.
 
-    None -> None (token accepted). An int error_code is a genuine
-    VK-side rejection -> a non-retryable error. A {'transport': ...}
-    marker is transient -> retryable, so /vk-token answers 503 and the
-    publish tick requeues the file instead of parking it in failed/.
-    `ctx` is a log-line suffix telling apart the pre- and post-reload
-    checks."""
+    None -> None (token accepted). Of the integer VK error codes only
+    5 (invalid token) is a genuine token rejection -> a non-retryable
+    error. Every other users.get code is a transient VK-side
+    condition, not a verdict on the token: 6 too many requests per
+    second, 9 flood control, 10 internal server error, 29 rate limit
+    reached, 601 too many actions this day. Classifying them all as
+    non-retryable made a momentary api.vk.com rate-limit answer 502,
+    and the publish tick parked the queue file in failed/ until a
+    manual re-approve - a permanent failure for a temporary error.
+    Anything but 5 is retryable: /vk-token answers 503 and the file
+    comes back next tick. A {'transport': ...} marker is transient
+    for the same reason. `ctx` is a log-line suffix telling apart the
+    pre- and post-reload checks."""
     if code is None:
         return None
     if isinstance(code, dict):
@@ -403,7 +410,11 @@ def _check_result(code, ctx):
                                 *_secrets_snapshot())[:200],
                 "retryable": True}
     _log(f"vk_check failed{ctx}: {code}")
-    return {"ok": False, "error": f"vk check failed: {code}"}
+    if code == 5:
+        return {"ok": False, "error": "vk check failed: 5 "
+                                      "(token rejected)"}
+    return {"ok": False, "error": f"vk check failed: {code}",
+            "retryable": True}
 
 
 def get_token(budget=TOTAL_BUDGET):

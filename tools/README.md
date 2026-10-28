@@ -138,8 +138,12 @@ last resort only). Run it under systemd so it survives reboots:
 # one quote pair stripped, ' # comment' tail removed); a bare
 # grep|sed would leave quote chars and comment tails inside the value
 # systemd exports:
-printf 'VK_TOKEN_SECRET=%s\n' \
-  "$(tools/env_val.sh VK_TOKEN_SECRET)" > deploy/vk-token.env
+# guard on empty: a missing key resolves to '' and the env file would
+# carry a blank VK_TOKEN_SECRET - the service then fails closed on
+# 401 with no obvious cause. Fail loudly at install time instead:
+sec="$(tools/env_val.sh VK_TOKEN_SECRET)" && [ -n "$sec" ] \
+  || { echo "VK_TOKEN_SECRET missing or empty in ../ENV" >&2; exit 1; }
+printf 'VK_TOKEN_SECRET=%s\n' "$sec" > deploy/vk-token.env
 chmod 600 deploy/vk-token.env
 mkdir -p ~/.config/systemd/user
 cp deploy/vk-token.service ~/.config/systemd/user/
