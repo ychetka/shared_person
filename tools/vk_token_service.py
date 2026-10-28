@@ -27,6 +27,10 @@ Endpoints:
                           can now tell a dead-end service apart from a
                           working one instead of reading a bare
                           {"ok": true} on a service that can only fail.
+                          Under worker-slot contention the accept thread
+                          answers /health inline with the static
+                          {"ok": true, "liveness_only": true} - proof of
+                          life only, never a readiness claim.
   GET /vk-token  -> 200 {"ok": true, "access_token": "...", "source": "cdp",
                          "refreshed_tab": bool}
                   -> 503 {"ok": false, "error": "...", "retryable": true}
@@ -833,7 +837,10 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     hung endpoint instead of a refused loopback one), and under
     contention the only thing that matters is that the service process
     is up - the worker-path /health reports the degraded readiness
-    whenever a slot is free.
+    whenever a slot is free. The static body carries
+    "liveness_only": true so a JSON-parsing watcher can tell this
+    shape apart from the readiness report instead of mistaking the
+    200 for 'ready' during a degraded window.
 
     Residual bound, honestly: the overflow triage is serialized on
     the accept thread, and each connect-and-stall client can hold it
@@ -856,8 +863,15 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     # all. Also bounds the inline send below.
     _TRIAGE_TIMEOUT = 0.3
     # static liveness-only body for the overflow path - see the class
-    # docstring; the full degraded report lives on the worker path
-    _HEALTH_BODY = b'{"ok": true}'
+    # docstring; the full degraded report lives on the worker path.
+    # 'liveness_only' marks the shape for JSON-parsing watchers: ok is
+    # the accept thread's proof of life, NOT readiness - a contended
+    # inline answer can say ok:true while the worker-path /health
+    # would report degraded (secret_set/cdp_reachable false). A
+    # watcher treating 200 here as 'ready' must check for the flag.
+    # Keeping the body a fixed constant (no dynamic fields) is the
+    # safety property: nothing on the accept thread may run a probe.
+    _HEALTH_BODY = b'{"ok": true, "liveness_only": true}'
     _BUSY_BODY = (b'{"ok": false, "error": "server busy", '
                   b'"retryable": true}')
     _HEALTH_RESP = (
