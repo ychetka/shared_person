@@ -12,6 +12,10 @@
 #   - the LAST KEY= assignment wins;
 #   - one pair of surrounding quotes (' or ") is stripped - a quoted
 #     value loses everything after the closing quote (comment or not);
+#   - an UNTERMINATED quote (KEY='abc) is NOT silently repaired:
+#     sourcing the same line is a syntax error, so the raw value is
+#     kept verbatim and a warning goes to stderr - a consumer failing
+#     on the stray quote char is the visible equivalent;
 #   - for a bare value an inline comment (everything from the first
 #     ' #') is removed; a '#' mid-word stays literal;
 #   - trailing whitespace left by a stripped comment is trimmed.
@@ -39,14 +43,22 @@ env_val() {
   ' "$ENV_FILE" | tail -n 1)"
   # ENV accepts KEY="value" and KEY='value' - strip one matching pair
   # of surrounding quotes, otherwise the quote chars end up inside the
-  # token/secret/url and every consumer fails. An inline
+  # token/secret/url and every consumer fails. Only a MATCHED pair is
+  # stripped: an opening quote with no closing one anywhere later in
+  # the value (KEY='abc) would be a syntax error under sourcing, so
+  # the raw value - quote char included - is kept and a warning is
+  # printed instead of silently returning a repaired token. An inline
   # comment (KEY=value # note) is shell syntax, not part of the value:
   # for a quoted value everything after the closing quote goes with
   # the quotes; for a bare value everything from the first ' #' goes
   # (a '#' mid-word is literal, same as sourcing).
   case "$v" in
-    \"*) v="${v#\"}"; v="${v%%\"*}" ;;
-    \'*) v="${v#\'}"; v="${v%%\'*}" ;;
+    \"*\"*) v="${v#\"}"; v="${v%%\"*}" ;;
+    \'*\'*) v="${v#\'}"; v="${v%%\'*}" ;;
+    \"*|\'*)
+      printf 'env_val.sh: unterminated quote in %s for key %s\n' \
+        "$ENV_FILE" "$1" >&2
+      v="${v%% #*}" ;;
     *) v="${v%% #*}" ;;
   esac
   # whitespace left behind by a stripped comment is not part of the
