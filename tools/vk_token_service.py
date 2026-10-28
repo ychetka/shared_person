@@ -911,7 +911,13 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         except OSError:
             head = b""
         resp = None
-        parts = head.split(b"\r\n", 1)[0].split(b" ")
+        # split on whitespace RUNS (bytes.split() with no sep), not a
+        # single space: 'GET  /health' with a double space used to put
+        # b'' in parts[1], miss the path match below and answer a
+        # liveness probe with 503 'busy'. Stray tabs parse the same
+        # way; a bare 'GET' line still yields one part and falls
+        # through to the silent close.
+        parts = head.split(b"\r\n", 1)[0].split()
         if len(parts) >= 2:
             # any parsed METHOD <target> pair earns a bounded answer:
             # only origin-form targets (leading '/') can qualify for

@@ -31,7 +31,7 @@
 // shared_workflow row is created for the owner project automatically.
 
 const { DatabaseSync } = require('node:sqlite');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -169,10 +169,13 @@ const connJson = JSON.stringify(connections);
 // unbalanced markers, a checker crash) aborts the deploy. The check
 // covers every workflow in n8n/workflows/, not just the one being
 // deployed - the copies are consistent as a SET or not at all.
+// execFileSync, NOT execSync: the previous shell command quoted paths
+// via JSON.stringify, but "..." quoting does not stop $VAR/`...`
+// expansion - a path containing either would be shell-expanded before
+// node ever saw it. execFileSync passes argv with no shell at all.
 try {
-  execSync(
-    JSON.stringify(process.execPath) + ' ' +
-    JSON.stringify(path.join(__dirname, 'check_sync.js')),
+  execFileSync(process.execPath,
+    [path.join(__dirname, 'check_sync.js')],
     { stdio: 'inherit' });
 } catch (e) {
   console.error('preflight failed: SYNC-marker drift check did not ' +
