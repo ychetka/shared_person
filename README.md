@@ -54,12 +54,14 @@ All project secrets/config live in `../ENV` (not part of this repo):
 `VK_ACCESS_TOKEN`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`,
 `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN`.
 
-**Required secrets (breaking):** `docker-compose.yml` declares four
-secrets with `${VAR:?}` guards, so `docker compose up` FAILS until the
-compose environment provides them (via `--env-file ../ENV` or exported
-vars) - previously an unset value was injected empty and the runtime
-gate failed closed in silence. Generate each with
-`openssl rand -hex 32` and add to `../ENV` before `compose up`:
+**Required secrets (breaking):** `docker-compose.yml` declares five
+vars with `${VAR:?}` guards - `TELEGRAM_BOT_TOKEN` plus the four
+generated secrets listed below - so `docker compose up` FAILS until
+the compose environment provides them (via `--env-file ../ENV` or
+exported vars) - previously an unset value was injected empty and the
+runtime gate failed closed in silence. Generate each of the four
+below with `openssl rand -hex 32` and add to `../ENV` before
+`compose up`:
 
 - `TG_WEBHOOK_SECRET` - signs Telegram webhook deliveries
   (X-Telegram-Bot-Api-Secret-Token); re-register with
