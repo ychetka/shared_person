@@ -90,11 +90,55 @@ if (!fs.existsSync(DB)) {
   console.error(`n8n DB not found: ${DB}`);
   process.exit(1);
 }
-const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+// parse + sanity-check the spec BEFORE opening the DB and BEGIN: a
+// corrupt file (missing name, empty/mistyped nodes, broken JSON) used
+// to reach the first INSERT and die on an opaque driver error
+// mid-transaction, leaving the operator to guess which field broke.
+// Fail fast here with a message that names the broken field.
+let spec;
+try {
+  spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+} catch (e) {
+  console.error(`invalid workflow spec ${file}: not valid JSON - ${e.message}`);
+  process.exit(1);
+}
+const specFail = (m) => {
+  console.error(`invalid workflow spec ${file}: ${m}`);
+  process.exit(1);
+};
+if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+  specFail('top level must be a JSON object');
+}
 const { name, nodes, connections } = spec;
 const settings = spec.settings ?? { executionOrder: 'v1' };
 const triggers = spec.triggers ?? [];
 const active = spec.active === false ? 0 : 1;
+
+if (typeof name !== 'string' || !name.trim()) {
+  specFail('"name" must be a non-empty string');
+}
+if (!Array.isArray(nodes) || !nodes.length) {
+  specFail('"nodes" must be a non-empty array');
+}
+nodes.forEach((n, i) => {
+  if (!n || typeof n !== 'object' || Array.isArray(n) ||
+      typeof n.name !== 'string' || !n.name.trim()) {
+    specFail(`nodes[${i}] must be an object with a non-empty "name"`);
+  }
+  if (typeof n.type !== 'string' || !n.type.trim()) {
+    specFail(`nodes[${i}] ("${n.name}") is missing a non-empty "type"`);
+  }
+});
+if (!connections || typeof connections !== 'object' ||
+    Array.isArray(connections)) {
+  specFail('"connections" must be an object ({} is valid)');
+}
+if (!Array.isArray(triggers)) {
+  specFail('"triggers" must be an array when present');
+}
+if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+  specFail('"settings" must be an object when present');
+}
 
 const now = new Date().toISOString().replace('T', ' ').slice(0, 23);
 const VER_ID = crypto.randomUUID();
