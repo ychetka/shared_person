@@ -65,6 +65,10 @@ services:
       # operator chat is pinned config, not learned from updates - a
       # forged message used to rewrite state/tg.json and hijack every
       # preview. tg.json (written by sp-tg-setup) stays as fallback.
+      # Intentionally NOT ${VAR:?}: the setup flow resolves the chat id
+      # into tg.json on first run, so compose must still start without
+      # it - but with NEITHER set the OPERATOR_CHAT gate drops every
+      # update silently (see README).
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       # moderation-draft webhook shared secret: the public draft
       # endpoint requires an X-Shared-Token or X-TG-Draft-Secret header

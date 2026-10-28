@@ -198,8 +198,20 @@ const db = new DatabaseSync(DB);
 // schema-adaptive insert: keep only columns the table actually has
 // (n8n versions differ: webhook_entity may lack createdAt/updatedAt,
 // trigger status uses nodeId+triggerKind vs nodeName+nodeType)
-const colsOf = (table) =>
-  new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+// cache the column set per table: registerTriggers() calls
+// ins()/upsert() several times per trigger, and an uncached colsOf()
+// used to run one PRAGMA table_info per call. The schema cannot
+// change under this process (the DB is opened once, n8n is stopped),
+// so a lifetime-of-process Map is safe.
+const colsCache = new Map();
+const colsOf = (table) => {
+  if (!colsCache.has(table)) {
+    colsCache.set(table,
+      new Set(db.prepare(`PRAGMA table_info(${table})`).all()
+        .map((c) => c.name)));
+  }
+  return colsCache.get(table);
+};
 const ins = (table, row) => {
   const cols = colsOf(table);
   const keys = Object.keys(row).filter((k) => cols.has(k));

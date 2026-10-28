@@ -79,6 +79,16 @@ to `../ENV` before `compose up`:
 - `VK_TOKEN_SECRET` - shared secret on the host vk-token service
   (`tools/vk_token_service.py`, X-Shared-Token header).
 
+`TELEGRAM_CHAT_ID` is deliberately NOT behind `${VAR:?}`: the setup
+flow (sp-tg-setup) can legitimately discover the operator chat id and
+persist it into `state/tg.json` on first run, so a fresh install must
+still boot without it. The cost is a silent dead-end: with NEITHER
+`TELEGRAM_CHAT_ID` NOR a populated `tg.json`, the OPERATOR_CHAT gate
+in sp-tg-moderation drops every signed update and the bot looks dead
+- nothing works until `tg.json` is populated (or the env var is set).
+Set `TELEGRAM_CHAT_ID` in `../ENV` to pin the operator chat from the
+start.
+
 ## Platform access
 
 See `PLATFORM_ACCESS.md` - how VK/LinkedIn credentials were obtained

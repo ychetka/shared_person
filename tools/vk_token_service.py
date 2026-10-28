@@ -193,6 +193,12 @@ _MIN_SCRUB_LEN = 8
 # not an audit trail.
 _AUTH_401_COUNT = 0
 _AUTH_401_LOCK = threading.Lock()
+# _log() runs on concurrent handler threads (requests, log_message
+# from send_response, _check_result inside get_token): a bare
+# sys.stderr.write + flush are two separate calls, so lines from two
+# threads could interleave in journald. Hold a lock for the write so
+# each line lands atomically.
+_LOG_LOCK = threading.Lock()
 
 
 def _auth_401_seen():
@@ -249,10 +255,11 @@ def _log(msg):
     # but the raw message can still END mid-secret (a clipped
     # exception repr), leaving a live-token prefix the full-value
     # match cannot catch
-    sys.stderr.write(
-        f"{time.strftime('%Y-%m-%dT%H:%M:%S')} vk_token_service: "
-        f"{_edge_mask(_scrub(msg, *secrets), secrets)}\n")
-    sys.stderr.flush()
+    with _LOG_LOCK:
+        sys.stderr.write(
+            f"{time.strftime('%Y-%m-%dT%H:%M:%S')} vk_token_service: "
+            f"{_edge_mask(_scrub(msg, *secrets), secrets)}\n")
+        sys.stderr.flush()
 
 
 def _remaining(deadline):
