@@ -747,7 +747,11 @@ def main():
         if not args.show_token and res.get("access_token"):
             res["access_token"] = _mask(res["access_token"])
         print(json.dumps(res))
-        return
+        # scripted callers (health checks, the documented cache-warm
+        # run) read the exit code, not the JSON body - a failed
+        # get_token() must exit nonzero or {"ok": false} still looks
+        # like success to them
+        sys.exit(0 if res.get("ok") else 1)
     # BoundedThreadingHTTPServer: a /vk-token reload+poll window must
     # not stall concurrent /health or other /vk-token callers, but the
     # thread count stays capped so a loopback connection flood cannot

@@ -207,6 +207,20 @@ const registerTriggers = (wfId, priorWebhookIds = new Map()) => {
               `${owner.workflowId} - remove that registration or ` +
               'deactivate the owning workflow first');
           }
+        } else if (whCols.has('webhookPath') && whCols.has('method')) {
+          // schema drift: the routing key exists but workflowId does
+          // not, so the ownership probe above CANNOT run - yet the
+          // INSERT OR REPLACE below still keys on (webhookPath,
+          // method) and would silently re-point a path another
+          // workflow owns, exactly what this guard exists to prevent.
+          // Do NOT skip quietly: warn loudly so the operator knows
+          // this registration ran unguarded.
+          console.error('!! webhook hijack guard SKIPPED for "' + p +
+            '" (' + whMethod + '): webhook_entity lacks the ' +
+            'workflowId column - ownership cannot be checked. ' +
+            'The insert below proceeds UNGUARDED and may re-point a ' +
+            'path owned by another workflow. Verify no other workflow ' +
+            'registers this path, or fix the schema drift.');
         }
         ins('webhook_entity', {
           webhookPath: p, method: whMethod, node: t.node,

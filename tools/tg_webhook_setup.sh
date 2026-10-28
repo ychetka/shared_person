@@ -120,6 +120,14 @@ with open(sys.argv[1], "w") as f:
     json.dump({
         "url": sys.argv[3],
         "allowed_updates": ["message", "callback_query"],
+        # drop every update Telegram queued while the webhook was unset
+        # or unreachable (it keeps them up to 24h): re-registering
+        # without this flag replays the whole backlog to
+        # /webhook/tg-moderation, and stale ap:/ed:/rj: callbacks or
+        # 'post N' messages pass the signature gate and act on current
+        # state - a dead Approve can enqueue a real wall.post. The
+        # moderation bot never depends on replayed updates.
+        "drop_pending_updates": True,
         "secret_token": secret,
     }, f)
 PYEOF
