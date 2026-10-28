@@ -1061,7 +1061,22 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             try:
                 super().process_request(request, client_address)
             except Exception:
-                self._conn_sem.release()
+                # super().process_request() CAN fail after the worker
+                # thread was already spawned (a signal or an error in
+                # the bookkeeping around t.start()) - the worker's
+                # finally then owns this slot, and a blind second
+                # release makes BoundedSemaphore raise ValueError,
+                # masking the real exception. The race against the
+                # worker's own finally is not observable from here, so
+                # both sides release under a ValueError guard: the
+                # first release wins, the second is ignored - exactly
+                # once either way. The semaphore count itself is never
+                # corrupted: BoundedSemaphore refuses the over-release
+                # before touching the counter.
+                try:
+                    self._conn_sem.release()
+                except ValueError:
+                    pass
                 raise
             return
         self._serve_overflow(request)
@@ -1070,7 +1085,13 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         try:
             super().process_request_thread(request, client_address)
         finally:
-            self._conn_sem.release()
+            # guarded for the same reason as the accept-side release
+            # in process_request: a spawn-then-fail there may already
+            # have freed this slot
+            try:
+                self._conn_sem.release()
+            except ValueError:
+                pass
 
 
 def _mask(token):

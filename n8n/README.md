@@ -437,9 +437,11 @@ parameters. `PUBLISH_PLATFORMS` (comma-separated, default `vk`) is the
 single source for the ENABLED gates in sp-publish and
 sp-tg-moderation. Required compose vars: `TELEGRAM_BOT_TOKEN`,
 `GEMINI_API_KEY` (llm-gateway), `VK_ACCESS_TOKEN`, `VK_USER_ID`,
-`LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN` (last four optional -
-VK can run on the refresh-service token alone, and non-VK platforms go
-to `skipped/` via the ENABLED gate regardless of env vars).
+`LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN` (optional at compose
+level: `VK_ACCESS_TOKEN` and the `LINKEDIN_*` pair - VK can run on the
+refresh-service token alone, and non-VK platforms go to `skipped/` via
+the ENABLED gate regardless of env vars; `VK_USER_ID` is required -
+docker-compose fails `up` without it via `${VK_USER_ID:?}`).
 `VK_TOKEN_REFRESH_URL`
 is an optional override for the VK token refresh endpoint (default
 `http://10.0.2.2:8792/vk-token`). `TG_WEBHOOK_SECRET` is REQUIRED for

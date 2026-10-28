@@ -91,7 +91,8 @@ copy binds legitimately differ per node - `DRAFT_SECRET` vs
 node tools/check_sync.js   # exit 0 = all groups consistent, 1 = drift
 ```
 
-Not wired to CI - run it by hand after touching any SYNC'd helper.
+Not wired to CI - the deploy_workflow.js preflight is the gate; run
+it by hand after touching any SYNC'd helper.
 Groups, expected member counts and normalizations live in the `GROUPS`
 table at the top of the script; a marker group with no table entry
 fails the run, so new shared helpers must be registered there.
