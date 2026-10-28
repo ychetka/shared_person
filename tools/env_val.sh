@@ -5,7 +5,10 @@
 # where /proc/<pid>/environ exposes them to other processes of the
 # same uid).
 #
-# Semantics match what sourcing a single KEY= line would produce:
+# Semantics track what sourcing a single KEY= line would produce (one
+# known divergence, called out below: a quoted value TRUNCATES at the
+# closing quote, where sourcing would concatenate - KEY="a"b yields a
+# here but ab under . / source):
 #   - leading whitespace before the key is tolerated - an indented
 #     '  KEY=value' sources fine in bash;
 #   - an optional 'export ' prefix is tolerated;
@@ -63,6 +66,13 @@ env_val() {
     # sourcing KEY="a b " keeps the interior/trailing whitespace, so
     # no trimming may run on this branch
     \"*\"*)
+      # keep the raw post-= text for the not-really-closed case below:
+      # a value like KEY="a\"b matches this branch (it contains a later
+      # '"') but its last quote is ESCAPED, so the scan folds it and
+      # reaches the end with no unescaped closing quote - an
+      # unterminated quote under sourcing, handled like the \"*|\'*
+      # branch (warn + raw kept), not silently returned folded.
+      local raw="$v"
       v="${v#\"}"
       # the closing quote is the first UNESCAPED one, and the shell's
       # double-quote escapes fold: sourcing KEY="a\"b" yields a"b,
@@ -70,7 +80,7 @@ env_val() {
       # value with no warning. Scan char by char and fold \" \\ \$
       # \` to the escaped char; any other backslash stays literal,
       # matching double-quote sourcing semantics.
-      local inner="" n=${#v} i c nx
+      local inner="" n=${#v} i c nx closed=
       for (( i=0; i<n; i++ )); do
         c="${v:i:1}"
         if [ "$c" = '\' ] && [ $((i+1)) -lt "$n" ]; then
@@ -81,12 +91,22 @@ env_val() {
             *) inner+="$c" ;;
           esac
         elif [ "$c" = '"' ]; then
+          closed=1
           break
         else
           inner+="$c"
         fi
       done
-      v="$inner" ;;
+      if [ -n "$closed" ]; then
+        v="$inner"
+      else
+        printf 'env_val.sh: unterminated quote in %s for key %s\n' \
+          "$ENV_FILE" "$1" >&2
+        # raw value kept verbatim (quote char and escapes included) -
+        # same no-trimming rule as the matched-quote branches, same
+        # warn-and-keep-raw contract as the plainly-unterminated one
+        v="${raw%% #*}"
+      fi ;;
     \'*\'*) v="${v#\'}"; v="${v%%\'*}" ;;
     \"*|\'*)
       printf 'env_val.sh: unterminated quote in %s for key %s\n' \
