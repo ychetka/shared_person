@@ -827,9 +827,12 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     process_request() reads the request line and answers `GET
     /health` inline on the accept thread - a fixed trivial response,
     no worker slot, no queue. Identified non-health overflow gets a
-    503 'busy' refusal instead of an unbounded queue; Handler's
-    do_GET stays the fallback for anything the triage read could not
-    confirm (e.g. a request line split across packets).
+    503 'busy' refusal instead of an unbounded queue; only a request
+    the triage read cannot identify at all (nothing readable within
+    _TRIAGE_TIMEOUT, or no METHOD <target> pair - e.g. a request line
+    still split across TCP segments when the budget runs out) is
+    closed without an answer. No overflow connection is ever routed
+    to a worker - do_GET only sees connections that acquired a slot.
 
     The inline answer is deliberately the static _HEALTH_RESP, NOT the
     dynamic _health_status(): running a CDP probe on the accept thread

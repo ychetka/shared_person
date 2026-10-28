@@ -3,6 +3,13 @@
 # images must be flattened imports (see n8n-local / docs/deploy.md).
 # Build steps (npm install, tsc) run on the HOST - containers only COPY
 # prebuilt artifacts, so no network is needed inside `docker build`.
+#
+# Operational caveat: the ${VAR:?} guards below are evaluated for EVERY
+# compose subcommand, not just `up` - `down`, `stop`, `ps`, `logs`,
+# `exec` all fail in a shell without the vars. Keep `--env-file ../ENV`
+# on every `docker compose` call. If ../ENV is unavailable and the
+# stack must be stopped, `docker stop <container>` works directly
+# (container_name is pinned for every service).
 
 name: shared-person
 
