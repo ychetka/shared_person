@@ -17,7 +17,16 @@ binds host loopback:8792 so the Code node calls
 http://10.0.2.2:8792/vk-token.
 
 Endpoints:
-  GET /health    -> {"ok": true}
+  GET /health    -> 200 {"ok": true, "secret_set": true,
+                          "cdp_reachable": true} when the service can
+                          actually serve tokens
+                  -> 503 {"ok": false, "secret_set": bool,
+                          "cdp_reachable": bool} when degraded -
+                          VK_TOKEN_SECRET unset (every /vk-token would
+                          401) or CDP unreachable. A liveness watcher
+                          can now tell a dead-end service apart from a
+                          working one instead of reading a bare
+                          {"ok": true} on a service that can only fail.
   GET /vk-token  -> 200 {"ok": true, "access_token": "...", "source": "cdp",
                          "refreshed_tab": bool}
                   -> 503 {"ok": false, "error": "...", "retryable": true}
@@ -233,6 +242,39 @@ def _targets(deadline=None):
                                                     _remaining(deadline)))
     with urllib.request.urlopen(f"{CDP}/json/list", timeout=timeout) as r:
         return json.loads(r.read())
+
+
+def _cdp_reachable(timeout=1.5):
+    """Cheap CDP liveness for /health: one short-timeout GET on
+    /json/version (lighter than /json/list - no target enumeration).
+
+    Loopback refusal (Chrome down) returns instantly; the timeout caps
+    a hung or filtered endpoint so the health answer never stalls on
+    it. NOT serialized on _GET_TOKEN_LOCK and deliberately run outside
+    it: a health probe must not queue behind a 50s token run."""
+    try:
+        with urllib.request.urlopen(f"{CDP}/json/version",
+                                    timeout=timeout) as r:
+            r.read(1024)
+        return True
+    except Exception:  # noqa: BLE001 - any failure means unreachable
+        return False
+
+
+def _health_status():
+    """Readiness for /health - cheap fields only, no token work.
+
+    ok is true only when the service can plausibly serve /vk-token:
+    the shared secret is configured (unset = every /vk-token call
+    fails closed with 401 forever) AND the CDP endpoint answers (dead
+    Chrome = every token extraction raises). A bare {"ok": true}
+    reported liveness of the HTTP socket only, which a watcher cannot
+    distinguish from a service that can never produce a token."""
+    secret_set = bool(SECRET)
+    cdp_reachable = _cdp_reachable()
+    return {"ok": secret_set and cdp_reachable,
+            "secret_set": secret_set,
+            "cdp_reachable": cdp_reachable}
 
 
 def _is_vk_url(url):
@@ -491,6 +533,7 @@ def _get_token(budget):
     refreshed = False
     if tok:
         code = vk_check(tok, deadline=deadline)
+        ctx = ""
         if code == 5:
             _log("vk_check rejected the token (error 5) - "
                  "reloading vk tabs for a fresh one")
@@ -523,7 +566,11 @@ def _get_token(budget):
                 return {"ok": False, "error": reason,
                         "retryable": True}
             code = vk_check(tok, deadline=deadline)
-        bad = _check_result(code, "")
+            # the second vk_check runs AFTER the tab reload - mark the
+            # journal line so pre- and post-reload failures read apart
+            # (the sibling no-token branch below does the same)
+            ctx = " after reload"
+        bad = _check_result(code, ctx)
         if bad:
             return bad
     else:
@@ -630,7 +677,11 @@ class Handler(BaseHTTPRequestHandler):
                              "error": "malformed request target"})
             return
         if path == "/health":
-            self._send(200, {"ok": True})
+            st = _health_status()
+            # 503 on degraded: a probe that reads only the status code
+            # (systemd watchdogs, curl -f callers) must see the same
+            # 'cannot serve tokens' answer as one parsing the body
+            self._send(200 if st["ok"] else 503, st)
         elif path == "/vk-token":
             if not self._authorized():
                 self.log_message(
@@ -721,6 +772,14 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     do_GET stays the fallback for anything the triage read could not
     confirm (e.g. a request line split across packets).
 
+    The inline answer is deliberately the static _HEALTH_RESP, NOT the
+    dynamic _health_status(): running a CDP probe on the accept thread
+    could stall the accept loop by the probe timeout (a filtered or
+    hung endpoint instead of a refused loopback one), and under
+    contention the only thing that matters is that the service process
+    is up - the worker-path /health reports the degraded readiness
+    whenever a slot is free.
+
     Residual bound, honestly: the overflow triage is serialized on
     the accept thread, and each connect-and-stall client can hold it
     for up to _TRIAGE_TIMEOUT while recv() waits for a request line
@@ -741,6 +800,8 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     # connections pay it; with a free worker slot nothing is read at
     # all. Also bounds the inline send below.
     _TRIAGE_TIMEOUT = 0.3
+    # static liveness-only body for the overflow path - see the class
+    # docstring; the full degraded report lives on the worker path
     _HEALTH_BODY = b'{"ok": true}'
     _BUSY_BODY = (b'{"ok": false, "error": "server busy", '
                   b'"retryable": true}')
@@ -1021,6 +1082,26 @@ def _selftest():
               Handler._authorized(good) is False)
     finally:
         SECRET = saved
+    # _health_status: secret_set mirrors the SECRET global and ok
+    # requires both legs. The CDP probe is real here - a refused
+    # loopback connect returns False instantly, a live Chrome True -
+    # so only the shape and the ok formula are asserted, not the
+    # reachability value itself.
+    saved = SECRET
+    try:
+        SECRET = "selftest-shared-secret"
+        hs = _health_status()
+        check("_health_status secret_set + ok formula",
+              hs.get("secret_set") is True and
+              isinstance(hs.get("cdp_reachable"), bool) and
+              hs.get("ok") ==
+              (hs["secret_set"] and hs["cdp_reachable"]))
+        SECRET = ""
+        check("_health_status degraded without secret",
+              _health_status()["ok"] is False and
+              _health_status()["secret_set"] is False)
+    finally:
+        SECRET = saved
     if failures:
         print(f"selftest: {len(failures)} failure(s): "
               + ", ".join(failures))
@@ -1036,7 +1117,8 @@ def main():
     ap.add_argument("--selftest", action="store_true",
                     help="run offline unit checks for the pure "
                          "helpers (_mask/_scrub/_check_result/"
-                         "_is_vk_url/_authorized) and exit")
+                         "_is_vk_url/_authorized/_health_status) "
+                         "and exit")
     ap.add_argument("--show-token", action="store_true",
                     help="print the raw access_token with --once "
                          "(default: masked)")

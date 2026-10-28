@@ -66,14 +66,23 @@ fi
 # FULL hook URL and is used verbatim. Neither set = refuse loudly -
 # see the contract note in the header.
 HOOK_PATH='/webhook/tg-moderation'
+# strip ALL trailing slashes, not just one: ${var%/} removes a single
+# '/', so WEBHOOK_URL=https://x// would register
+# https://x//webhook/tg-moderation. Same trim the sp-tg-setup workflow
+# applies with /\/+$/
+strip_trailing_slashes() {
+  local v="$1"
+  while [ -n "$v" ] && [ "${v: -1}" = '/' ]; do v="${v%/}"; done
+  printf '%s' "$v"
+}
 if [ -n "${WEBHOOK_URL:-}" ]; then
-  _base="${WEBHOOK_URL%/}"
+  _base="$(strip_trailing_slashes "$WEBHOOK_URL")"
   case "$_base" in
     *"$HOOK_PATH") HOOK_URL="$_base" ;;
     *)             HOOK_URL="${_base}${HOOK_PATH}" ;;
   esac
 elif [ -n "${TG_WEBHOOK_URL:-}" ]; then
-  HOOK_URL="${TG_WEBHOOK_URL%/}"
+  HOOK_URL="$(strip_trailing_slashes "$TG_WEBHOOK_URL")"
 else
   echo "!! WEBHOOK_URL is not set - add the public n8n base URL" >&2
   echo "   (e.g. https://<domain>:<port>/) to $ENV_FILE or export it." >&2
