@@ -676,25 +676,113 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     process's thread budget. Cap concurrent handlers with a
     semaphore - extra connections wait at accept() until a slot frees
     - and mark workers daemon so a wedged handler can never block
-    shutdown."""
+    shutdown.
+
+    /health never starves behind a full semaphore: _conn_sem is
+    acquired on the accept thread, so blocking on it also stalls every
+    connection still queued in the listen backlog - while all slots
+    are held by /vk-token callers (each can wait up to TOTAL_BUDGET on
+    _GET_TOKEN_LOCK), a liveness probe would not even be accepted, and
+    a busy token window would make a live service look dead. Under
+    contention process_request() peeks the request line and answers
+    `GET /health` inline on the accept thread - a fixed trivial
+    response, no worker slot, no queue. Identified non-health
+    overflow gets a 503 'busy' refusal instead of an unbounded queue;
+    Handler's do_GET stays the fallback for anything the peek could
+    not confirm (e.g. a request line split across packets)."""
 
     daemon_threads = True
     max_workers = 8
+    # MSG_PEEK budget for a contended connection - long enough for a
+    # loopback client to have its request line delivered, short enough
+    # that a connect-and-stall pattern cannot pin the accept thread
+    # under load. Only contended connections pay it; with a free
+    # worker slot nothing is peeked at all.
+    _PEEK_TIMEOUT = 1.0
+    _HEALTH_BODY = b'{"ok": true}'
+    _BUSY_BODY = (b'{"ok": false, "error": "server busy", '
+                  b'"retryable": true}')
+    _HEALTH_RESP = (
+        b"HTTP/1.0 200 OK\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: " + str(len(_HEALTH_BODY)).encode() + b"\r\n"
+        b"Connection: close\r\n\r\n" + _HEALTH_BODY)
+    _BUSY_RESP = (
+        b"HTTP/1.0 503 Service Unavailable\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: " + str(len(_BUSY_BODY)).encode() + b"\r\n"
+        b"Connection: close\r\n\r\n" + _BUSY_BODY)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._conn_sem = threading.BoundedSemaphore(self.max_workers)
 
-    def process_request(self, request, client_address):
-        # acquire BEFORE spawning the worker: a full semaphore queues
-        # the connection in the accept backlog instead of leaking a
-        # thread per pending socket
-        self._conn_sem.acquire()
+    def _serve_overflow(self, request):
+        """Handle a connection accepted with no free worker slot.
+
+        Peek the request line: a confirmed `GET /health` is answered
+        inline - the liveness surface must respond during a busy token
+        window or a live service gets restarted mid-burst. Any other
+        identified request gets a bounded 503 'server busy' - a clean
+        refusal the n8n caller classifies as retryable, instead of a
+        silent reset or an unbounded backlog queue. A request the peek
+        cannot identify (nothing readable within _PEEK_TIMEOUT) is
+        closed without an answer: under contention only identifiable
+        traffic is served. No journal line for the health answer - a
+        liveness probe's only audience is the checker, and logging
+        every probe would spam journald."""
+        head = b""
         try:
-            super().process_request(request, client_address)
-        except Exception:
-            self._conn_sem.release()
-            raise
+            prev = request.gettimeout()
+            request.settimeout(self._PEEK_TIMEOUT)
+            try:
+                head = request.recv(512, socket.MSG_PEEK)
+            finally:
+                request.settimeout(prev)
+        except OSError:
+            head = b""
+        resp = None
+        parts = head.split(b"\r\n", 1)[0].split(b" ")
+        if len(parts) >= 2 and parts[1].startswith(b"/"):
+            try:
+                # same query-stripping as do_GET, so /health?x also
+                # qualifies for the inline answer
+                path = urllib.parse.urlsplit(
+                    parts[1].decode("latin-1")).path
+            except ValueError:
+                path = ""
+            if parts[0] == b"GET" and path == "/health":
+                resp = self._HEALTH_RESP
+            else:
+                resp = self._BUSY_RESP
+        if resp is not None:
+            try:
+                request.settimeout(self._PEEK_TIMEOUT)
+                request.sendall(resp)
+            except OSError:
+                pass  # dead peer - close anyway
+        # the framework only shutdown_request()s connections it routed
+        # to a worker - an overflow-handled socket is ours to close
+        self.shutdown_request(request)
+
+    def process_request(self, request, client_address):
+        # fast path first: with a free worker slot the connection goes
+        # straight to a thread, no peek, no delay - acquire BEFORE
+        # spawning so a full semaphore cannot leak a thread per
+        # pending socket. The acquire is NON-blocking: blocking here
+        # would pin the accept thread and strand every queued
+        # connection (including liveness probes) behind the caller
+        # holding the last slot - the exact starvation this server
+        # exists to avoid. Contended connections are triaged by
+        # _serve_overflow instead.
+        if self._conn_sem.acquire(blocking=False):
+            try:
+                super().process_request(request, client_address)
+            except Exception:
+                self._conn_sem.release()
+                raise
+            return
+        self._serve_overflow(request)
 
     def process_request_thread(self, request, client_address):
         try:

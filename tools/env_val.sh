@@ -12,6 +12,10 @@
 #   - the LAST KEY= assignment wins;
 #   - one pair of surrounding quotes (' or ") is stripped - a quoted
 #     value loses everything after the closing quote (comment or not);
+#     inside a double-quoted value the shell's escape rules apply
+#     (\" \\ \$ \` fold to the escaped char, the closing quote is the
+#     first UNESCAPED one - KEY="a\"b" parses as a"b, matching
+#     sourcing); single quotes take no escapes, same as sourcing;
 #   - an UNTERMINATED quote (KEY='abc) is NOT silently repaired:
 #     sourcing the same line is a syntax error, so the raw value is
 #     kept verbatim and a warning goes to stderr - a consumer failing
@@ -58,7 +62,31 @@ env_val() {
     # quoted value: everything between the quote pair is verbatim -
     # sourcing KEY="a b " keeps the interior/trailing whitespace, so
     # no trimming may run on this branch
-    \"*\"*) v="${v#\"}"; v="${v%%\"*}" ;;
+    \"*\"*)
+      v="${v#\"}"
+      # the closing quote is the first UNESCAPED one, and the shell's
+      # double-quote escapes fold: sourcing KEY="a\"b" yields a"b,
+      # while truncating at the first '"' would return a\ - a wrong
+      # value with no warning. Scan char by char and fold \" \\ \$
+      # \` to the escaped char; any other backslash stays literal,
+      # matching double-quote sourcing semantics.
+      local inner="" n=${#v} i c nx
+      for (( i=0; i<n; i++ )); do
+        c="${v:i:1}"
+        if [ "$c" = '\' ] && [ $((i+1)) -lt "$n" ]; then
+          nx="${v:i+1:1}"
+          case "$nx" in
+            '"'|'\'|'$'|'`')
+              inner+="$nx"; i=$((i+1)) ;;
+            *) inner+="$c" ;;
+          esac
+        elif [ "$c" = '"' ]; then
+          break
+        else
+          inner+="$c"
+        fi
+      done
+      v="$inner" ;;
     \'*\'*) v="${v#\'}"; v="${v%%\'*}" ;;
     \"*|\'*)
       printf 'env_val.sh: unterminated quote in %s for key %s\n' \

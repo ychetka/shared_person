@@ -307,11 +307,24 @@ const registerTriggers = (wfId, priorWebhookIds = new Map()) => {
 // process dies - and on WAL that still holds the write lock
 let wf = null;
 if (UPDATE) {
-  wf = db.prepare('SELECT id FROM workflow_entity WHERE name = ?').get(name);
-  if (!wf) {
+  // n8n allows duplicate workflow names, so WHERE name = ? can match
+  // several rows - taking the first would silently patch a different
+  // workflow than the operator intended. Count first and refuse the
+  // ambiguity loudly.
+  const named = db.prepare(
+    'SELECT id FROM workflow_entity WHERE name = ?').all(name);
+  if (!named.length) {
     console.error(`workflow "${name}" not found - run without --update first`);
     process.exit(1);
   }
+  if (named.length > 1) {
+    console.error(`workflow name "${name}" is ambiguous - ` +
+      `${named.length} rows share it (` +
+      named.map((r) => r.id).join(', ') + '). Rename the duplicates ' +
+      'or delete the stale one in n8n, then retry --update.');
+    process.exit(1);
+  }
+  wf = named[0];
 }
 
 db.exec('BEGIN');
