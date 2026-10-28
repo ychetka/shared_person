@@ -40,7 +40,11 @@ services:
       - N8N_SECURE_COOKIE=false
       # Webhooks published at https://shared-person.opticode.su (edge proxy).
       - WEBHOOK_URL=https://shared-person.opticode.su:8443/
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      # required like the webhook secrets below: every Code node TG
+      # call reads this via $env, and an empty value only surfaces as
+      # silent 404s from api.telegram.org at runtime - ${VAR:?} fails
+      # `docker compose up` loudly instead
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:?required - set in ../ENV}
       # Telegram webhook authenticity: setWebhook registers this as
       # secret_token; Telegram then signs every delivery with the
       # X-Telegram-Bot-Api-Secret-Token header, which sp-tg-moderation

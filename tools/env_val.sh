@@ -18,7 +18,9 @@
 #     on the stray quote char is the visible equivalent;
 #   - for a bare value an inline comment (everything from the first
 #     ' #') is removed; a '#' mid-word stays literal;
-#   - trailing whitespace left by a stripped comment is trimmed.
+#   - trailing whitespace left by a stripped comment is trimmed -
+#     bare values only; the interior of a quoted value (trailing
+#     spaces included) is kept verbatim, matching sourcing.
 #
 # Usage:
 #   . tools/env_val.sh            # defines env_val() in the caller
@@ -53,17 +55,23 @@ env_val() {
   # the quotes; for a bare value everything from the first ' #' goes
   # (a '#' mid-word is literal, same as sourcing).
   case "$v" in
+    # quoted value: everything between the quote pair is verbatim -
+    # sourcing KEY="a b " keeps the interior/trailing whitespace, so
+    # no trimming may run on this branch
     \"*\"*) v="${v#\"}"; v="${v%%\"*}" ;;
     \'*\'*) v="${v#\'}"; v="${v%%\'*}" ;;
     \"*|\'*)
       printf 'env_val.sh: unterminated quote in %s for key %s\n' \
         "$ENV_FILE" "$1" >&2
+      # raw value kept verbatim (quote char included) - same
+      # no-trimming rule as the matched-quote branches
       v="${v%% #*}" ;;
-    *) v="${v%% #*}" ;;
+    *)
+      v="${v%% #*}"
+      # whitespace left behind by a stripped comment is not part of a
+      # BARE value either - only this branch may trim
+      v="${v%"${v##*[![:space:]]}"}" ;;
   esac
-  # whitespace left behind by a stripped comment is not part of the
-  # value either
-  v="${v%"${v##*[![:space:]]}"}"
   printf '%s' "$v"
 }
 

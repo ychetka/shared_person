@@ -708,14 +708,14 @@ def _mask(token):
     scrollback and CI logs, so the raw credential stays hidden.
     Mask unconditionally: a short/malformed value returned verbatim
     would echo a live credential to journald. Under 8 chars nothing
-    is shown; up to ~12 only the first 4 (a trailing 4 there would
-    expose nearly the whole value)."""
+    is shown; longer values get only the first-4 prefix - the journal
+    never holds a live credential, and a 'first4***last4' slice still
+    hands an attacker 8 real chars of the secret plus a checksum hint
+    for the middle."""
     t = str(token)
     if len(t) < 8:
         return "***"
-    if len(t) < 12:
-        return t[:4] + "***"
-    return t[:4] + "***" + t[-4:]
+    return t[:4] + "***"
 
 
 def _scrub(msg, *secrets):
