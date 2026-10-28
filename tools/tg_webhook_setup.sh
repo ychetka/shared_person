@@ -183,7 +183,19 @@ if ! RESP="$(curl -sS --max-time 30 -K "$CFG_FILE" -X POST \
   exit 1
 fi
 echo "$RESP"
-echo "$RESP" | grep -q '"ok" *: *true' || {
+# parse the JSON 'ok' field, do NOT grep the raw body: a response
+# string field containing the literal "ok" *: *true (a Telegram
+# description echoing config, a proxy error page) would pass the
+# grep while the call actually failed. python3 is already a hard
+# dependency of this script (the body staging above). A non-JSON
+# body answers ok:false too - malformed output is not success.
+echo "$RESP" | python3 -c '
+import json, sys
+try:
+    ok = json.load(sys.stdin).get("ok") is True
+except Exception:
+    ok = False
+sys.exit(0 if ok else 1)' || {
   echo "!! setWebhook reported ok:false - webhook NOT registered" >&2
   exit 1
 }
@@ -195,7 +207,13 @@ if ! RESP="$(curl -sS --max-time 30 -K "$CFG_FILE")"; then
   exit 1
 fi
 echo "$RESP"
-echo "$RESP" | grep -q '"ok" *: *true' || {
+echo "$RESP" | python3 -c '
+import json, sys
+try:
+    ok = json.load(sys.stdin).get("ok") is True
+except Exception:
+    ok = False
+sys.exit(0 if ok else 1)' || {
   echo "!! getWebhookInfo reported ok:false" >&2
   exit 1
 }

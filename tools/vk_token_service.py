@@ -183,6 +183,26 @@ _SECRETS_ORDER = deque()
 _SECRETS_LOCK = threading.Lock()
 # minimum value length _scrub/_remember_secret act on - see _scrub
 _MIN_SCRUB_LEN = 8
+# Rate limit for the /vk-token 401 journal line: the endpoint is
+# loopback-only, but a local process hammering it with a bad or absent
+# X-Shared-Token would otherwise write one journald entry per request
+# forever. Same discipline as the n8n side's logCapped/logReject -
+# the first few events verbatim, then once per ~100 carrying the
+# running total so suppressed ones stay visible in the count. The
+# counter is process-local by design: it bounds journal volume, it is
+# not an audit trail.
+_AUTH_401_COUNT = 0
+_AUTH_401_LOCK = threading.Lock()
+
+
+def _auth_401_seen():
+    """Count a failed /vk-token auth; return True when this event
+    should reach the journal (first 5 verbatim, then every 100th)."""
+    global _AUTH_401_COUNT
+    with _AUTH_401_LOCK:
+        _AUTH_401_COUNT += 1
+        n = _AUTH_401_COUNT
+    return n if (n <= 5 or n % 100 == 0) else 0
 
 
 def _remember_secret(value):
@@ -743,8 +763,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200 if st["ok"] else 503, st)
         elif path == "/vk-token":
             if not self._authorized():
-                self.log_message(
-                    "/vk-token -> 401 missing/invalid X-Shared-Token")
+                # rate-limited (see _auth_401_seen): the 401 response
+                # itself is NOT suppressed - only the journal line
+                n401 = _auth_401_seen()
+                if n401:
+                    self.log_message(
+                        "/vk-token -> 401 missing/invalid "
+                        "X-Shared-Token (seen %d)", n401)
                 self._send(401, {"ok": False,
                                  "error": "missing or invalid "
                                           "X-Shared-Token header"})
@@ -1102,6 +1127,7 @@ def _selftest():
     fake-handler call exercises the real code path with a stubbed
     self)."""
     global SECRET  # patched below to exercise _authorized both ways
+    global _AUTH_401_COUNT  # patched/reset around the rate-limit check
     failures = []
 
     def check(name, cond):
@@ -1189,6 +1215,20 @@ def _selftest():
               Handler._authorized(good) is False)
     finally:
         SECRET = saved
+    # _auth_401_seen rate-limits the /vk-token 401 journal line: the
+    # first 5 events log verbatim, 6-99 are suppressed, the 100th logs
+    # again carrying the running total - a loopback flood inflates the
+    # counter but not the journal
+    saved401 = _AUTH_401_COUNT
+    try:
+        _AUTH_401_COUNT = 0
+        verbatim = [_auth_401_seen() for _ in range(5)]
+        suppressed = all(_auth_401_seen() == 0 for _ in range(94))
+        check("_auth_401_seen first-5 verbatim then 100th",
+              verbatim == [1, 2, 3, 4, 5] and suppressed and
+              _auth_401_seen() == 100)
+    finally:
+        _AUTH_401_COUNT = saved401
     # _health_status: secret_set mirrors the SECRET global and ok
     # requires both legs. The CDP probe is real here - a refused
     # loopback connect returns False instantly, a live Chrome True -

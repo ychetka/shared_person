@@ -54,17 +54,18 @@ All project secrets/config live in `../ENV` (not part of this repo):
 `VK_ACCESS_TOKEN`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`,
 `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN`.
 
-**Required secrets (breaking):** `docker-compose.yml` declares five
-vars with `${VAR:?}` guards - `TELEGRAM_BOT_TOKEN` plus the four
-generated secrets listed below - so `docker compose up` FAILS until
-the compose environment provides them (via `--env-file ../ENV` or
-exported vars) - previously an unset value was injected empty and the
-runtime gate failed closed in silence. The guards are evaluated for
-EVERY compose subcommand, not only `up`: `down`, `stop`, `ps`,
-`logs`, `exec` all fail in a shell without the vars, so keep
-`--env-file ../ENV` on every `docker compose` call. If `../ENV` is
-unavailable and the stack must be stopped, `docker stop <container>`
-works directly (every service has a pinned `container_name`).
+**Required secrets (breaking):** `docker-compose.yml` declares six
+vars with `${VAR:?}` guards - `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`
+and the four generated secrets listed below - so `docker compose up`
+FAILS until the compose environment provides them (via `--env-file
+../ENV` or exported vars) - previously an unset value was injected
+empty and the runtime gate failed closed in silence. The guards are
+evaluated for EVERY compose subcommand, not only `up`: `down`,
+`stop`, `ps`, `logs`, `exec` all fail in a shell without the vars,
+so keep `--env-file ../ENV` on every `docker compose` call. If
+`../ENV` is unavailable and the stack must be stopped,
+`docker stop <container>` works directly (every service has a pinned
+`container_name`).
 Generate each of the four below with `openssl rand -hex 32` and add
 to `../ENV` before `compose up`:
 
