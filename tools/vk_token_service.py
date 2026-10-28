@@ -56,12 +56,14 @@ on VK error 5 or a failed extraction reload the tabs once and poll
 localStorage for the token (no fixed sleep window).
 
 Scope limitation: users.get proves the token is valid, not that it
-carries `wall` scope. The localStorage pick order narrows this (the
-canonical ':web_token:login:auth' key shape first, then only
-web_token keys under the VK web app id 6287487), but a token minted
-for another VK app under the canonical key shape would still pass.
-A stronger check would need a scope-proving call such as
-account.getAppPermissions or a wall.get probe - not implemented yet.
+carries `wall` scope. The localStorage pick order narrows this: both
+picks (the canonical ':web_token:login:auth' key shape first, then
+any 'web_token' key) require the '<app_id>:' prefix to be 6287487
+(the VK web client app id), so a token minted for another VK app is
+never selected. A token stored under that prefix but minted without
+`wall` scope would still pass - closing that needs a scope-proving
+call such as account.getAppPermissions or a wall.get probe, which is
+not implemented yet.
 
 Latency contract: get_token() enforces a GLOBAL deadline (TOTAL_BUDGET,
 50s) shared across every tab eval, reload, poll and vk_check call, so
@@ -100,13 +102,14 @@ SECRET = os.environ.get("VK_TOKEN_SECRET", "")
 # hardcode the whole name: enumerate localStorage keys instead.
 # Prefer keys that still end in the known ':web_token:login:auth'
 # shape, then fall back to any 'web_token' key whose value parses to
-# an object carrying access_token - but ONLY when its '<app_id>:'
-# prefix is 6287487 (the VK web client app id). vk_check's users.get
-# proves a token is live, not that it carries the `wall` scope the
-# publisher needs: a web_token minted for a different VK app would
-# pass users.get, get cached, and then fail every wall.post at
-# publish time. Keys with no '<app_id>:' prefix are skipped for the
-# same reason.
+# an object carrying access_token. BOTH picks require the key's
+# '<app_id>:' prefix to be 6287487 (the VK web client app id):
+# vk_check's users.get proves a token is live, not that it carries
+# the `wall` scope the publisher needs, so a web_token minted for a
+# different VK app under the canonical key shape would pass
+# users.get, get cached, and then fail every wall.post at publish
+# time. Keys with no '<app_id>:' prefix are skipped for the same
+# reason.
 TOKEN_EXPR = (
     "(function(){"
     "var ks=Object.keys(localStorage);"
@@ -115,7 +118,10 @@ TOKEN_EXPR = (
     "try{var v=JSON.parse(localStorage.getItem(ks[i]));"
     "if(v&&v.access_token)return v.access_token;}catch(e){}}"
     "return null;};"
-    "return pick(function(k){return /(^|:)web_token:login:auth$/.test(k);})"
+    "return pick(function(k){"
+    "var c=k.indexOf(':');"
+    "return c!==-1&&k.slice(0,c)==='6287487'"
+    "&&/(^|:)web_token:login:auth$/.test(k);})"
     "||pick(function(k){"
     "var c=k.indexOf(':');"
     "return c!==-1&&k.slice(0,c)==='6287487'"
@@ -450,8 +456,21 @@ def vk_check(token, deadline=None):
             resp = json.loads(r.read())
     except Exception as e:  # noqa: BLE001 - report, do not crash
         return {"transport": str(e)}
+    # a proxy or shim in front of api.vk.com can answer a JSON array
+    # or scalar - .get() would raise AttributeError outside the try.
+    # A non-object body is a transport-level anomaly, not a token
+    # verdict: file it under the same retryable marker so it keeps
+    # the {transport} classification and structured logging
+    if not isinstance(resp, dict):
+        return {"transport": "non-object JSON body: "
+                             f"{type(resp).__name__}"}
     err = resp.get("error")
-    return err.get("error_code") if err else None
+    if err is None:
+        return None
+    if not isinstance(err, dict):
+        return {"transport": "non-object error field: "
+                             f"{str(err)[:120]}"}
+    return err.get("error_code")
 
 
 def _check_result(code, ctx):

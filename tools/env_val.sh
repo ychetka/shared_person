@@ -44,9 +44,30 @@
 # ENV_FILE (default: ../../ENV relative to this script - the project
 # root) selects the file read; callers may preset it before sourcing.
 
-ENV_FILE="${ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/ENV}"
+if [ -z "${ENV_FILE:-}" ]; then
+  # Resolve ../../ENV next to this script. If the checkout moved so
+  # the parent dir is gone, cd fails and the substitution would leave
+  # ENV_FILE='/ENV' - a missing file every consumer then reports as a
+  # missing KEY, which points at the wrong problem. Fail loudly here
+  # instead of defaulting to a bogus absolute path.
+  _env_val_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." \
+    2>/dev/null && pwd)" || {
+      printf 'env_val.sh: cannot resolve project root from %s\n' \
+        "$(dirname "${BASH_SOURCE[0]}")" >&2
+      return 1 2>/dev/null || exit 1
+    }
+  ENV_FILE="$_env_val_root/ENV"
+  unset _env_val_root
+fi
 
 env_val() {
+  # Same fail-loud guard at use time: a preset ENV_FILE can also point
+  # at a path that does not exist, and awk's 'can't open file' leaves
+  # an empty value that downstream reports as a missing key.
+  if [ ! -f "$ENV_FILE" ]; then
+    printf 'env_val.sh: ENV file not found: %s\n' "$ENV_FILE" >&2
+    return 2
+  fi
   # last KEY= assignment wins - same rule as sourcing would apply.
   # The key is matched as a FIXED string (awk index() on the line,
   # never interpolated into a regex): a KEY containing BRE
