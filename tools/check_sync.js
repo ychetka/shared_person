@@ -104,6 +104,87 @@ const GROUPS = {
     normalize: [
       [/^\s+/gm, '']
     ]
+  },
+  // updateDraft guarded re-read+mutate: Handle TG Update and Prepare
+  // Draft (both sp-tg-moderation). The load/save lines legitimately
+  // differ (loadDraft/saveDraft wrappers vs inline
+  // readFileSync/writeJsonAtomic) and normalize to LOAD/SAVE
+  // placeholders; the guard/mutate contract must stay identical
+  'update-draft': {
+    expect: 2,
+    normalize: [
+      [/const cur = loadDraft\(id\);/, 'const cur = LOAD;'],
+      [/const cur = JSON\.parse\(\s*fs\.readFileSync\(DRAFTS \+ '\/' \+ id \+ '\.json', 'utf8'\)\);/,
+        'const cur = LOAD;'],
+      [/saveDraft\(cur\);/, 'SAVE;'],
+      [/writeJsonAtomic\(DRAFTS \+ '\/' \+ id \+ '\.json', cur\);/, 'SAVE;']
+    ]
+  },
+  // the guarded-write snapshot comparator: sameDraftSnapshot (an arrow
+  // helper in Handle TG Update) vs the inline sameSnapshot const in
+  // Compose Message - same field list, different binding names and
+  // line wraps, so identifiers fold to the HTU names, the arrow
+  // signature is dropped and the whole block collapses to one
+  // whitespace-normalized token stream
+  'draft-snapshot': {
+    expect: 2,
+    normalize: [
+      [/\b(?:sameDraftSnapshot|sameSnapshot)\b/g, 'CMP'],
+      [/\bdraftCur\b/g, 'cur'],
+      [/\bdraft\b/g, 'd'],
+      [/\(cur, d\) =>/, ''],
+      [/\s+/g, ' '],
+      [/^\s+|\s+$/g, '']
+    ]
+  },
+  // scrubSecrets secret masking: Generate Drafts (sp-content-gen),
+  // Handle TG Update (sp-tg-moderation) and Resolve Chat + Webhook
+  // (sp-tg-setup). The >=8 length floor lives inside the loop in all
+  // three copies; SECRET_VALUES collection itself legitimately
+  // differs per node and stays outside the markers. Publish Tick's
+  // scrub/KNOWN_TOKENS is INTENTIONALLY divergent (a dynamic token
+  // set plus access_token= form masking) and must NOT get a fourth
+  // copy here
+  'scrub-secrets': { expect: 3 },
+  // mkdirErrs collection prelude: Handle TG Update, Prepare Draft
+  // (both sp-tg-moderation), Resolve Chat + Webhook (sp-tg-setup)
+  // and Generate Drafts (sp-content-gen). Only the dir list and the
+  // loop variable name differ per node. Publish Tick's plain
+  // mkdirSync swallow is a different contract on purpose (a missing
+  // dir surfaces through mv()/log() failures there, not per-item
+  // refusals) and stays unmarked
+  'mkdir-collect': {
+    expect: 4,
+    normalize: [
+      [/of \[[^\]]*\]/, 'of [DIRS]'],
+      [/\b(?:d0|d)\b/g, 'D']
+    ]
+  },
+  // the api.telegram.org request contract shared by the four tg()
+  // helpers (Publish Tick, Handle TG Update, Compose Message,
+  // Resolve Chat + Webhook) and Generate Drafts' notify()
+  // sendMessage: POST + bot-token URL + json:true + explicit 30s
+  // timeout - an unbounded httpRequest hangs the node behind it.
+  // Call-opening lines (return await / return / await) and per-node
+  // rationale comments legitimately differ; Generate Drafts carries
+  // an inline body and a literal /sendMessage URL, so it forms a
+  // second normalized class (maxClasses: 2). tokenSet then polices
+  // the contract tokens every copy must share on the RAW text
+  'tg-timeout': {
+    expect: 5,
+    maxClasses: 2,
+    tokenSet:
+      /api\.telegram\.org|method: 'POST'|json: true|timeout: [0-9]+/g,
+    normalize: [
+      // whole-line comments differ per node (each explains its own
+      // stall consequence) - drop them with their newline
+      [/^[ \t]*\/\/[^\n]*(?:\n|$)/gm, ''],
+      // collapse the call-opening line (return await / return /
+      // await + differing receivers)
+      [/^.*httpRequest.*$/m, 'REQ('],
+      // leading indentation differs by nesting depth
+      [/^[ \t]+/gm, '']
+    ]
   }
 };
 

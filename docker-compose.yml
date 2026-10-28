@@ -107,7 +107,12 @@ services:
       # platform tokens for the publish workflow (optional - VK can run
       # on the refresh-service token; non-VK platforms go to skipped/)
       - VK_ACCESS_TOKEN=${VK_ACCESS_TOKEN:-}
-      - VK_USER_ID=${VK_USER_ID:-}
+      # required by the VK publish driver: publishVk uses it as the
+      # wall owner_id for wall.post, wall.getById and the orphan
+      # probe, and vk is the only enabled driver - ${VAR:?} fails
+      # compose up loudly instead of a runtime 'VK_USER_ID not set'
+      # throw on the first approved draft
+      - VK_USER_ID=${VK_USER_ID:?VK_USER_ID is required - set it in the compose environment}
       # host-side token refresh service (tools/vk_token_service.py):
       # the URL override only works if it is passed through here, and
       # /vk-token requires the shared-secret header

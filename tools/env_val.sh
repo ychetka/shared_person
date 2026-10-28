@@ -68,6 +68,16 @@ env_val() {
     printf 'env_val.sh: ENV file not found: %s\n' "$ENV_FILE" >&2
     return 2
   fi
+  # `awk -v k="$1"` interprets backslash escapes in the assignment
+  # value, so a KEY containing a backslash (or a literal '\c' cut
+  # sequence on some awks) would be compared mangled. Env var names
+  # are [A-Za-z_][A-Za-z0-9_]* anyway - allowlist the argument so the
+  # awk compare always sees a plain identifier.
+  case "$1" in
+    ''|[0-9]*|*[!A-Za-z0-9_]*)
+      printf 'env_val.sh: invalid key name: %s\n' "$1" >&2
+      return 2 ;;
+  esac
   # last KEY= assignment wins - same rule as sourcing would apply.
   # The key is matched as a FIXED string (awk index() on the line,
   # never interpolated into a regex): a KEY containing BRE

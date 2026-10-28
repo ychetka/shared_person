@@ -298,6 +298,29 @@ def _cdp_reachable(timeout=1.5):
         return False
 
 
+# /health is unauthenticated, and under slirp4netns every sibling
+# container reaches host loopback - a per-request _cdp_reachable()
+# probe would let any local process drive outbound CDP probe traffic
+# at ~1.5s per call. Cache the verdict briefly: a watcher polling
+# every second still gets a fresh-enough answer while real probes
+# stay rare. The probe runs inside the lock so a burst of concurrent
+# /health calls behind a stale cache cannot double-fire.
+_CDP_PROBE_TTL = 10.0
+_cdp_probe_lock = threading.Lock()
+_cdp_probe_state = {"ts": 0.0, "reachable": False}
+
+
+def _cdp_reachable_cached():
+    with _cdp_probe_lock:
+        if (time.monotonic() - _cdp_probe_state["ts"]
+                < _CDP_PROBE_TTL):
+            return _cdp_probe_state["reachable"]
+        reachable = _cdp_reachable()
+        _cdp_probe_state["ts"] = time.monotonic()
+        _cdp_probe_state["reachable"] = reachable
+        return reachable
+
+
 def _health_status():
     """Readiness for /health - cheap fields only, no token work.
 
@@ -306,9 +329,12 @@ def _health_status():
     fails closed with 401 forever) AND the CDP endpoint answers (dead
     Chrome = every token extraction raises). A bare {"ok": true}
     reported liveness of the HTTP socket only, which a watcher cannot
-    distinguish from a service that can never produce a token."""
+    distinguish from a service that can never produce a token. The
+    CDP leg is cached for _CDP_PROBE_TTL seconds - see
+    _cdp_reachable_cached for why an unauthenticated endpoint must
+    not fire a real probe per call."""
     secret_set = bool(SECRET)
-    cdp_reachable = _cdp_reachable()
+    cdp_reachable = _cdp_reachable_cached()
     return {"ok": secret_set and cdp_reachable,
             "secret_set": secret_set,
             "cdp_reachable": cdp_reachable}
@@ -1237,10 +1263,11 @@ def _selftest():
     finally:
         _AUTH_401_COUNT = saved401
     # _health_status: secret_set mirrors the SECRET global and ok
-    # requires both legs. The CDP probe is real here - a refused
-    # loopback connect returns False instantly, a live Chrome True -
-    # so only the shape and the ok formula are asserted, not the
-    # reachability value itself.
+    # requires both legs. The CDP probe is real on the first call
+    # (a refused loopback connect returns False instantly, a live
+    # Chrome True); the second call lands inside the _CDP_PROBE_TTL
+    # cache and must reuse the verdict without probing again - the
+    # unchanged probe timestamp proves no second CDP request fired.
     saved = SECRET
     try:
         SECRET = "selftest-shared-secret"
@@ -1250,6 +1277,11 @@ def _selftest():
               isinstance(hs.get("cdp_reachable"), bool) and
               hs.get("ok") ==
               (hs["secret_set"] and hs["cdp_reachable"]))
+        probe_ts = _cdp_probe_state["ts"]
+        hs2 = _health_status()
+        check("_health_status cdp probe cached inside TTL",
+              _cdp_probe_state["ts"] == probe_ts and
+              hs2["cdp_reachable"] == hs["cdp_reachable"])
         SECRET = ""
         check("_health_status degraded without secret",
               _health_status()["ok"] is False and
