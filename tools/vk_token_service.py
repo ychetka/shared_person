@@ -34,6 +34,13 @@ hands out nothing. This keeps a stray `ssh -L 8792` forward or a
 random local process from turning the port into a live-token oracle;
 do not expose the port beyond loopback regardless.
 
+Nuance on the bind: "loopback-only" does NOT restrict callers to host
+processes under rootless docker - every sibling container's own
+slirp4netns gateway (its own 10.0.2.2) reaches host loopback:8792,
+which is exactly how the n8n Code node calls this service. The
+X-Shared-Token gate is the real trust boundary; the bind only keeps
+the port off the LAN and the host's external interfaces.
+
 Flow: find vk.ru/vk.com tabs (hostname match) -> eval localStorage
 web_token on each until one yields a token -> verify with users.get ->
 on VK error 5 or a failed extraction reload the tabs once and poll
