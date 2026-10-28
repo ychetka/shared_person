@@ -536,6 +536,18 @@ try {
         createdAt: now, updatedAt: now, role: 'workflow:owner',
         workflowId: WF_ID, projectId: proj.id,
       });
+    } else {
+      // no personal project row = a fresh or drifted DB. The binding
+      // is REQUIRED (EntityNotFoundError on publish without it), so a
+      // silent skip would deploy a workflow that only fails later at
+      // publish time - surface it now, while the operator is looking.
+      // Not a hard error: the row is one INSERT away once the owner
+      // project exists (first n8n login creates it).
+      console.error('!! shared_workflow owner binding SKIPPED: no ' +
+        'project row with type=\'personal\' - workflow ' + WF_ID +
+        ' deploys UNOWNED and n8n will throw EntityNotFoundError on ' +
+        'publish. Finish the n8n owner setup first (first UI login ' +
+        'creates the personal project), then re-run the deploy.');
     }
 
     // trigger + webhook registration (schema-adaptive ins() helper)

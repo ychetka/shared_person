@@ -30,7 +30,11 @@
 #   - an UNTERMINATED quote (KEY='abc) is NOT silently repaired:
 #     sourcing the same line is a syntax error, so the raw value is
 #     kept verbatim and a warning goes to stderr - a consumer failing
-#     on the stray quote char is the visible equivalent;
+#     on the stray quote char is the visible equivalent. The same
+#     warn-and-keep-raw applies to a quote char inside a BARE value
+#     (H=unclosed'quote - a syntax error under sourcing - and a
+#     mid-word pair H=a'b'c, where sourcing would silently strip the
+#     pair via quote-removal);
 #   - for a bare value an inline comment (everything from the first
 #     ' #') is removed; a '#' mid-word stays literal;
 #   - trailing whitespace left by a stripped comment is trimmed -
@@ -157,7 +161,19 @@ env_val() {
       v="${v%% #*}"
       # whitespace left behind by a stripped comment is not part of a
       # BARE value either - only this branch may trim
-      v="${v%"${v##*[![:space:]]}"}" ;;
+      v="${v%"${v##*[![:space:]]}"}"
+      # a quote char surviving in a BARE value is malformed under
+      # sourcing too: H=unclosed'quote is a syntax error (the ' opens
+      # an unterminated quoted region) and a mid-word pair H=a'b'c
+      # would lose the quotes to quote-removal - neither behavior is
+      # replicated here. Keep the raw value verbatim but warn, the
+      # same warn-and-keep-raw contract the unterminated
+      # opening-quote branches above follow.
+      case "$v" in
+        *\'*|*\"*)
+          printf 'env_val.sh: stray quote in bare value in %s for key %s\n' \
+            "$ENV_FILE" "$1" >&2 ;;
+      esac ;;
   esac
   printf '%s' "$v"
 }

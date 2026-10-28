@@ -415,6 +415,11 @@ error 5 (expired/rejected) it calls the host refresh service
 `http://10.0.2.2:8792/vk-token`), persists the fresh token to
 `vk_token.json` and retries once. A persistent error 5 marks
 `state/vk_status.json` as `auth_error` and the file lands in `failed/`.
+The fresh token is installed only AFTER `vk_token.json` is persisted:
+a state-write failure (ENOSPC/EACCES on the state volume) is flagged
+`state_write_error` in `vk_status.json` - a local FS problem, not a
+token-service outage - and the file lands in `failed/` pointing at the
+state dir instead of burning the token-service retry budget.
 The service serializes refreshes under a lock and answers HTTP 503
 `{retryable: true}` when another get_token() is still in flight
 (e.g. two overlapping ticks refreshing on the same stale token). That
