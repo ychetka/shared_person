@@ -154,15 +154,22 @@ rewrite `tg.json` and hijack previews.
     Approve - the queued file's payload is synced to the latest draft
     in place (atomic dot-tmp + rename) instead of refusing, so the
     corrected text is what reaches the wall. An identical payload
-    still answers `already queued`. The sync guards the same race the
-    enqueue path does: the tick-owned dirs are checked right before
-    AND after the rename, and if a competing `<id>.json` copy shows up
-    in `processing/` or a terminal dir (the tick claimed/moved the old
-    file in the gap), the fresh file is retracted instead of becoming
-    a second queue entry - otherwise both payloads would reach the
-    wall. A copy whose payload already matches the fresh write is the
-    tick claiming OUR file (root > `processing/`): that is the single
-    intended publish, not a duplicate.
+    still answers `already queued`. The same comparison runs on the
+    exclusive enqueue's EEXIST branch: when `link()` loses the
+    single-writer race (a root file appeared after the probes - a
+    busy-requeue can leave pre-edit text there), the existing file's
+    payload fields are compared to the current draft; a stale payload
+    is atomically overwritten and answered `queue payload updated`,
+    an identical one keeps `already queued`. The sync guards the same
+    race the enqueue path does: the tick-owned dirs are checked right
+    before AND after the rename, and if a competing `<id>.json` copy
+    shows up in `processing/` or a terminal dir (the tick
+    claimed/moved the old file in the gap), the fresh file is
+    retracted instead of becoming a second queue entry - otherwise
+    both payloads would reach the wall. A copy whose payload already
+    matches the fresh write is the tick claiming OUR file (root >
+    `processing/`): that is the single intended publish, not a
+    duplicate.
   - Reject > marks draft rejected, logs to `moderation.jsonl`
   - Edit > stores a pending-edit marker AND retracts a queued
     `queue/publish/<id>.json` immediately at button-press time (an

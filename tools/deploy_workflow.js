@@ -20,6 +20,9 @@
 //     "settings": {...} (optional),
 //     "triggers": [ {"node": "Webhook X", "path": "my-hook"} ]  (optional)
 //   }
+//   "active" is explicit opt-in: only `true` registers triggers and
+//   webhooks - absent or non-boolean values deploy INACTIVE (with a
+//   warning).
 //
 // Activation pointers (n8n 2.x): workflow_entity.activeVersionId,
 // workflow_published_version.publishedVersionId, plus for triggers:
@@ -112,7 +115,19 @@ if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
 const { name, nodes, connections } = spec;
 const settings = spec.settings ?? { executionOrder: 'v1' };
 const triggers = spec.triggers ?? [];
-const active = spec.active === false ? 0 : 1;
+// activation is explicit opt-in: only spec.active === true registers
+// triggers and webhooks. An absent field used to default to ACTIVE -
+// a spec that simply forgot the key silently published a workflow
+// with live webhook endpoints. Inactive is the safe default; warn on
+// absence so a forgotten key does not silently deploy dead either.
+const active = spec.active === true ? 1 : 0;
+if (spec.active === undefined) {
+  console.warn('warning: spec has no "active" field - deploying ' +
+    'INACTIVE (set "active": true to register triggers)');
+} else if (spec.active !== true && spec.active !== false) {
+  console.warn(`warning: spec "active" is ${JSON.stringify(spec.active)}, ` +
+    'not a boolean - deploying INACTIVE (use true to activate)');
+}
 
 if (typeof name !== 'string' || !name.trim()) {
   specFail('"name" must be a non-empty string');
