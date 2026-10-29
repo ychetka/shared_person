@@ -5,12 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Single job so the required check name stays exactly "unit-tests".
   # npm test in both services is a live smoke against a running server,
   # not a unit suite: it proves boot + endpoint reachability in CI
   # (llm-gateway /run returns a JSON error without GEMINI_API_KEY;
-  # rss-reader digest runs against a minimal FEEDS_FILE fixture).
+  # rss-reader digest runs against a localhost fixture feed so the
+  # required check does not depend on external services).
   unit-tests:
     runs-on: ubuntu-latest
     steps:
@@ -30,7 +35,9 @@ jobs:
         run: |
           npm ci
           npm run build
-          npm start &
+          node dist/server.js &
+          server=$!
+          trap 'kill $server 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
             curl -sf http://localhost:8787/health >/dev/null && break
             sleep 1
@@ -43,14 +50,26 @@ jobs:
         run: |
           npm ci
           npm run build
+          cat > /tmp/feed.xml <<XML
+          <?xml version="1.0" encoding="UTF-8"?>
+          <rss version="2.0"><channel>
+            <title>CI fixture</title><link>http://localhost/</link>
+            <item><title>ci smoke item</title><link>http://localhost/1</link>
+              <pubDate>$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S GMT')</pubDate></item>
+          </channel></rss>
+          XML
           cat > /tmp/feeds-ci.yaml <<'EOF'
           feeds:
-            - name: n8n Blog
-              url: https://blog.n8n.io/rss/
-              tags: [automation, n8n]
+            - name: CI fixture
+              url: http://localhost:8899/feed.xml
+              tags: [ci]
               weight: 0.9
           EOF
-          FEEDS_FILE=/tmp/feeds-ci.yaml npm start &
+          node -e "require('node:http').createServer((q,s)=>{s.setHeader('Content-Type','application/rss+xml');s.end(require('node:fs').readFileSync('/tmp/feed.xml'))}).listen(8899)" &
+          feed_server=$!
+          FEEDS_FILE=/tmp/feeds-ci.yaml node dist/server.js &
+          server=$!
+          trap 'kill $server $feed_server 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
             curl -sf http://localhost:8788/health >/dev/null && break
             sleep 1
