@@ -1,0 +1,59 @@
+name: unit-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Single job so the required check name stays exactly "unit-tests".
+  # npm test in both services is a live smoke against a running server,
+  # not a unit suite: it proves boot + endpoint reachability in CI
+  # (llm-gateway /run returns a JSON error without GEMINI_API_KEY;
+  # rss-reader digest runs against a minimal FEEDS_FILE fixture).
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            llm-gateway/package-lock.json
+            rss-reader/package-lock.json
+
+      - name: Smoke llm-gateway
+        working-directory: llm-gateway
+        run: |
+          npm ci
+          npm run build
+          npm start &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8787/health >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:8787/health
+          GATEWAY=http://localhost:8787 npm test
+
+      - name: Smoke rss-reader
+        working-directory: rss-reader
+        run: |
+          npm ci
+          npm run build
+          cat > /tmp/feeds-ci.yaml <<'EOF'
+          feeds:
+            - name: n8n Blog
+              url: https://blog.n8n.io/rss/
+              tags: [automation, n8n]
+              weight: 0.9
+          EOF
+          FEEDS_FILE=/tmp/feeds-ci.yaml npm start &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8788/health >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:8788/health
+          RSS=http://localhost:8788 npm test
