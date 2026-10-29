@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Alexandr Varenic / ychetka. All rights reserved.
-# Licensed under the Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0).
+# Licensed under the Creative Commons Attribution-NonCommercial 4.0
+# International License (CC BY-NC 4.0).
 # For commercial use, please contact the author.
 
 """Bridge a host-network listener into a child user-namespace-owned netns.
 Usage: port_fwd.py <listen_port> <target_port> <inner_netns_pid>
 Binds listen_port on the host netns, then setns() into the inner netns and
 relays every accepted connection to 127.0.0.1:target_port inside it."""
+
 import ctypes
 import os
 import socket

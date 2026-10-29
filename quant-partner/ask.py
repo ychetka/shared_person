@@ -8,7 +8,11 @@ Usage:
 
 Prints the partner's answer text to stdout.
 """
-import json, os, subprocess, sys
+
+import json
+import os
+import subprocess
+import sys
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
@@ -17,7 +21,9 @@ def call(requests):
     proc = subprocess.run(
         ["python3", os.path.join(BASE, "mcp_server.py")],
         input="\n".join(json.dumps(r, ensure_ascii=False) for r in requests),
-        capture_output=True, text=True, timeout=600,
+        capture_output=True,
+        text=True,
+        timeout=600,
         env={**os.environ},
     )
     for line in proc.stdout.splitlines():
@@ -39,17 +45,29 @@ def main():
         messages = json.load(open(args[1], encoding="utf-8"))
         reqs = [
             {"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": {}},
-            {"jsonrpc": "2.0", "id": "call", "method": "tools/call", "params": {
-                "name": "ask_quant_partner_dialog",
-                "arguments": {"messages": messages, "role": role}}},
+            {
+                "jsonrpc": "2.0",
+                "id": "call",
+                "method": "tools/call",
+                "params": {
+                    "name": "ask_quant_partner_dialog",
+                    "arguments": {"messages": messages, "role": role},
+                },
+            },
         ]
     else:
         question = args[0] if args else sys.stdin.read()
         reqs = [
             {"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": {}},
-            {"jsonrpc": "2.0", "id": "call", "method": "tools/call", "params": {
-                "name": "ask_quant_partner",
-                "arguments": {"question": question, "role": role}}},
+            {
+                "jsonrpc": "2.0",
+                "id": "call",
+                "method": "tools/call",
+                "params": {
+                    "name": "ask_quant_partner",
+                    "arguments": {"question": question, "role": role},
+                },
+            },
         ]
     print(call(reqs))
 

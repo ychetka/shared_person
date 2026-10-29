@@ -13,10 +13,10 @@ import type { Item } from "./feeds.js";
 // repeated /curate runs on the same window do not re-fetch pages.
 
 export interface Engagement {
-  views?: number;    // page views (habr reach)
+  views?: number; // page views (habr reach)
   comments?: number; // comment count
-  votes?: number;    // total votes / HN points
-  rating?: number;   // signed article score (habr)
+  votes?: number; // total votes / HN points
+  rating?: number; // signed article score (habr)
 }
 
 const TTL = 48 * 3600_000;
@@ -44,9 +44,7 @@ function saveCache(): void {
   if (!cache) return;
   fs.mkdirSync(config.stateDir, { recursive: true });
   const cutoff = Date.now() - TTL;
-  const pruned = Object.fromEntries(
-    Object.entries(cache).filter(([, v]) => v.ts > cutoff),
-  );
+  const pruned = Object.fromEntries(Object.entries(cache).filter(([, v]) => v.ts > cutoff));
   fs.writeFileSync(cacheFile(), JSON.stringify(pruned));
 }
 
@@ -59,8 +57,7 @@ const hnId = (i: Item): string | null => {
 };
 
 const isHn = (i: Item) =>
-  /news\.ycombinator\.com/.test(i.comments || "") ||
-  /news\.ycombinator\.com/.test(i.url);
+  /news\.ycombinator\.com/.test(i.comments || "") || /news\.ycombinator\.com/.test(i.url);
 
 async function habrMetrics(url: string): Promise<Engagement | null> {
   const res = await fetch(url, {
@@ -85,10 +82,9 @@ async function habrMetrics(url: string): Promise<Engagement | null> {
 }
 
 async function hnMetrics(id: string): Promise<Engagement | null> {
-  const res = await fetch(
-    `https://hn.algolia.com/api/v1/search?tags=story_${id}`,
-    { signal: AbortSignal.timeout(REQ_TIMEOUT) },
-  );
+  const res = await fetch(`https://hn.algolia.com/api/v1/search?tags=story_${id}`, {
+    signal: AbortSignal.timeout(REQ_TIMEOUT),
+  });
   if (!res.ok) return null;
   const data = (await res.json()) as {
     hits?: { points?: number; num_comments?: number }[];

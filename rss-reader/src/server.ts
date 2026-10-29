@@ -1,10 +1,10 @@
 import express from "express";
 import _ from "lodash";
 import { config } from "./config.js";
-import { fetchFeed, loadFeeds, saveFeeds, type Feed, type Item } from "./feeds.js";
-import { filterUnseen, markSeen } from "./store.js";
-import { attachEngagement } from "./metrics.js";
+import { type Feed, fetchFeed, type Item, loadFeeds, saveFeeds } from "./feeds.js";
 import { hypeScore } from "./hype.js";
+import { attachEngagement } from "./metrics.js";
+import { filterUnseen, markSeen } from "./store.js";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -100,7 +100,9 @@ app.get("/feeds", (_req, res) => res.json({ feeds: loadFeeds() }));
 app.put("/feeds", (req, res) => {
   const feeds = req.body?.feeds as Feed[] | undefined;
   if (!Array.isArray(feeds)) return res.status(400).json({ error: "feeds[] required" });
-  saveFeeds(feeds.map((f) => ({ name: f.name, url: f.url, tags: f.tags ?? [], weight: f.weight ?? 0.5 })));
+  saveFeeds(
+    feeds.map((f) => ({ name: f.name, url: f.url, tags: f.tags ?? [], weight: f.weight ?? 0.5 })),
+  );
   res.json({ ok: true, feeds: loadFeeds().length });
 });
 
