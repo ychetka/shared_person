@@ -1,12 +1,12 @@
-import express from "express";
-import _ from "lodash";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
 import { createRequire } from "node:module";
+import path from "node:path";
+import express from "express";
+import _ from "lodash";
+import { callImage, callLlm } from "./backends.js";
 import { config } from "./config.js";
 import { buildSystemPrompt, listRoles, loadRole } from "./manifest.js";
-import { callImage, callLlm } from "./backends.js";
 
 const Ajv = createRequire(import.meta.url)("ajv") as typeof import("ajv").default;
 const ajv = new Ajv();
@@ -23,9 +23,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.get("/roles", (_req, res) =>
   res.json(
-    listRoles().map((r) =>
-      _.pick(r, ["name", "description", "backend", "model", "temperature"]),
-    ),
+    listRoles().map((r) => _.pick(r, ["name", "description", "backend", "model", "temperature"])),
   ),
 );
 
@@ -57,7 +55,12 @@ app.post("/run", async (req, res) => {
         return res.status(422).json({ error: "schema validation failed", parsed });
       }
     }
-    return res.json({ role: manifest.name, model: result.model, backend: result.backend, json: parsed });
+    return res.json({
+      role: manifest.name,
+      model: result.model,
+      backend: result.backend,
+      json: parsed,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return res.status(500).json({ error: msg });
@@ -78,13 +81,13 @@ app.post("/image", async (req, res) => {
     // a random suffix is appended AFTER truncation so a long name (e.g.
     // a draft_id whose _0/_1 suffix would be sliced off) can never
     // collide with a sibling or an earlier request.
-    const base = String(name ?? crypto.randomUUID())
-      .replace(/[^A-Za-z0-9_-]/g, "_")
-      .slice(0, 60) || "img";
+    const base =
+      String(name ?? crypto.randomUUID())
+        .replace(/[^A-Za-z0-9_-]/g, "_")
+        .slice(0, 60) || "img";
     const safe = `${base}_${crypto.randomBytes(4).toString("hex")}`;
     const img = await callImage(prompt);
-    const ext = img.mime === "image/webp" ? "webp"
-      : img.mime === "image/jpeg" ? "jpg" : "png";
+    const ext = img.mime === "image/webp" ? "webp" : img.mime === "image/jpeg" ? "jpg" : "png";
     const fname = `${safe}.${ext}`;
     fs.mkdirSync(config.imageDir, { recursive: true });
     const abs = path.join(config.imageDir, fname);

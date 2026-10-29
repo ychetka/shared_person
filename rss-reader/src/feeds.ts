@@ -1,8 +1,8 @@
-import fs from "node:fs";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { XMLParser } from "fast-xml-parser";
-import YAML from "yaml";
 import _ from "lodash";
+import YAML from "yaml";
 import { config } from "./config.js";
 
 export interface Feed {
@@ -23,10 +23,10 @@ export interface Item {
   weight?: number; // feed weight from feeds.yaml
   comments?: string; // discussion URL when the feed provides one (e.g. HN)
   metrics?: import("./metrics.js").Engagement;
-  score?: number;   // LLM curator score 0-10
+  score?: number; // LLM curator score 0-10
   angle?: string | null;
   reason?: string;
-  hype?: number;    // 0-100, see hype.ts for the formula
+  hype?: number; // 0-100, see hype.ts for the formula
   hype_parts?: { theme: number; llm: number; weight: number; engagement: number };
 }
 
@@ -69,7 +69,9 @@ function findLink(link: unknown): string {
 
 // --- RSS 2.0 / Atom / RDF parsing ---
 
-function parseRss(doc: Record<string, unknown>): { title: string; link: string; date: string; summary: string; comments: string }[] {
+function parseRss(
+  doc: Record<string, unknown>,
+): { title: string; link: string; date: string; summary: string; comments: string }[] {
   const channel = doc?.rss ? (doc.rss as Record<string, unknown>).channel : doc?.["rdf:RDF"];
   const items = ((channel as Record<string, unknown>)?.item ?? []) as unknown[];
   return _.castArray(items).map((it) => {
@@ -84,7 +86,9 @@ function parseRss(doc: Record<string, unknown>): { title: string; link: string; 
   });
 }
 
-function parseAtom(doc: Record<string, unknown>): { title: string; link: string; date: string; summary: string }[] {
+function parseAtom(
+  doc: Record<string, unknown>,
+): { title: string; link: string; date: string; summary: string }[] {
   const feed = doc.feed as Record<string, unknown>;
   const entries = _.castArray(feed?.entry ?? []);
   return entries.map((e) => ({
@@ -116,19 +120,28 @@ function stripHtml(html: string): string {
 export async function fetchFeed(feed: Feed): Promise<Item[]> {
   const res = await fetch(feed.url, {
     signal: AbortSignal.timeout(config.fetchTimeoutMs),
-    headers: { "User-Agent": config.userAgent, Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*" },
+    headers: {
+      "User-Agent": config.userAgent,
+      Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+    },
   });
   if (!res.ok) throw new Error(`${feed.name}: HTTP ${res.status}`);
   const xml = await res.text();
-  return parseFeed(xml).map((p) => ({
-    id: crypto.createHash("sha1").update(feed.name + p.link + p.title).digest("hex").slice(0, 16),
-    source: feed.name,
-    title: p.title.trim(),
-    summary: stripHtml(p.summary),
-    url: p.link.trim(),
-    published: new Date(p.date).toISOString(),
-    tags: feed.tags,
-    weight: feed.weight,
-    comments: p.comments || undefined,
-  })).filter((i) => i.title && i.url);
+  return parseFeed(xml)
+    .map((p) => ({
+      id: crypto
+        .createHash("sha1")
+        .update(feed.name + p.link + p.title)
+        .digest("hex")
+        .slice(0, 16),
+      source: feed.name,
+      title: p.title.trim(),
+      summary: stripHtml(p.summary),
+      url: p.link.trim(),
+      published: new Date(p.date).toISOString(),
+      tags: feed.tags,
+      weight: feed.weight,
+      comments: p.comments || undefined,
+    }))
+    .filter((i) => i.title && i.url);
 }

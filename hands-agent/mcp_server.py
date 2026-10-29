@@ -19,9 +19,19 @@ consumes them into ./queue/{done,failed}/. Task = {"recipe": str, "params": {...
 ENV: DISPLAY, XAUTHORITY (auto-default to :1 + ~/.Xauthority).
 GEMINI_API_KEY (optional) - enables 'locate' via vision model.
 """
-import json, os, queue, socket, sys, threading, time, urllib.request, uuid
+
+import json
+import os
+import sys
+import threading
+import time
+import urllib.request
+import uuid
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import hands, vision, cdp
+import cdp
+import hands
+import vision
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 INBOX = os.path.join(BASE, "queue", "inbox")
@@ -32,8 +42,10 @@ for d in (INBOX, DONE, FAILED):
 
 TASKS = {}  # id -> {recipe, params, status, result}
 
+
 def log(*a):
     print(*a, file=sys.stderr, flush=True)
+
 
 def gemini_locate(description, hint=""):
     """Vision-model fallback: ask Gemini to find element coords on screenshot."""
@@ -42,31 +54,45 @@ def gemini_locate(description, hint=""):
         return {"error": "GEMINI_API_KEY not set; use find() with a template"}
     shot = vision.screenshot()
     import base64
+
     b64 = base64.b64encode(open(shot, "rb").read()).decode()
     payload = {
-        "contents": [{"role": "user", "parts": [
-            {"text": ("You are a screen element locator. The screenshot is "
-                      f"1400x1050. Return ONLY JSON {{\"x\":int,\"y\":int}} - the "
-                      f"center of: {description}. Hint: {hint}. If not visible, "
-                      "return {\"x\":-1,\"y\":-1}."),
-            },
-            {"inlineData": {"mimeType": "image/png", "data": b64}}]}],
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": (
+                            "You are a screen element locator. The screenshot is "
+                            f'1400x1050. Return ONLY JSON {{"x":int,"y":int}} - the '
+                            f"center of: {description}. Hint: {hint}. If not visible, "
+                            'return {"x":-1,"y":-1}.'
+                        ),
+                    },
+                    {"inlineData": {"mimeType": "image/png", "data": b64}},
+                ],
+            }
+        ],
         "generationConfig": {"temperature": 0, "maxOutputTokens": 64},
     }
     for model in ("gemini-3.5-flash", "gemini-flash-lite-latest", "gemini-3.1-flash-lite"):
         try:
-            url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-                   f"{model}:generateContent?key={key}")
-            req = urllib.request.Request(url, data=json.dumps(payload).encode(),
-                                         headers={"Content-Type": "application/json"})
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={key}"
+            )
+            req = urllib.request.Request(
+                url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}
+            )
             out = json.loads(urllib.request.urlopen(req, timeout=60).read())
             text = out["candidates"][0]["content"]["parts"][0]["text"].strip()
-            j = json.loads(text[text.index("{"):text.rindex("}") + 1])
+            j = json.loads(text[text.index("{") : text.rindex("}") + 1])
             if j.get("x", -1) >= 0:
                 return {"x": j["x"], "y": j["y"], "model": model}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - try every fallback model regardless of failure type
             log("locate fail", model, e)
     return {"x": -1, "y": -1}
+
 
 def run_recipe(name, params):
     """Execute recipes/<name>.yaml. Mini-DSL:
@@ -77,6 +103,7 @@ def run_recipe(name, params):
         return {"error": f"recipe {name} not found"}
     try:
         import yaml
+
         recipe = yaml.safe_load(open(path, encoding="utf-8"))
     except ImportError:
         return {"error": "python3-yaml not installed"}
@@ -96,15 +123,22 @@ def run_recipe(name, params):
             if cv in ("", "0", "false", "no"):
                 log_line.append(f"step{i} skipped (if -> {cv!r})")
                 continue
-        st = {k: (v.format(**ctx) if isinstance(v, str) and k != "if" else v)
-              for k, v in st.items() if k != "if"}
+        st = {
+            k: (v.format(**ctx) if isinstance(v, str) and k != "if" else v)
+            for k, v in st.items()
+            if k != "if"
+        }
         act = st.get("action")
         try:
             if act == "find":
                 hit = vision.find_on_screen(
-                    os.path.join(BASE, st["template"]), st.get("confidence", 0.85))
+                    os.path.join(BASE, st["template"]), st.get("confidence", 0.85)
+                )
                 if not hit:
-                    return {"error": f"step{i}: template {st['template']} not found", "log": log_line}
+                    return {
+                        "error": f"step{i}: template {st['template']} not found",
+                        "log": log_line,
+                    }
                 ctx[st.get("into", "pos")] = hit
             elif act == "locate":
                 r = gemini_locate(st["target"], st.get("hint", ""))
@@ -129,7 +163,10 @@ def run_recipe(name, params):
             elif act == "dom_find":
                 pos = cdp.dom_rect(st["url"], st["target"])
                 if not pos:
-                    return {"error": f"step{i}: dom target not found: {st['target']}", "log": log_line}
+                    return {
+                        "error": f"step{i}: dom target not found: {st['target']}",
+                        "log": log_line,
+                    }
                 ctx[st.get("into", "pos")] = (pos["x"], pos["y"])
                 log_line.append(f"step{i} dom '{st['target']}' -> {pos['found']}")
             elif act == "click_dom":
@@ -138,15 +175,17 @@ def run_recipe(name, params):
                     return {"error": f"step{i}: {r['error']}", "log": log_line}
                 log_line.append(f"step{i} click_dom '{st['target']}' -> {r['clicked']['found']}")
             elif act == "shot":
-                p = vision.screenshot(os.path.join(BASE, "queue", "done",
-                                                   st.get("name", f"step{i}.png")))
+                p = vision.screenshot(
+                    os.path.join(BASE, "queue", "done", st.get("name", f"step{i}.png"))
+                )
                 log_line.append(f"step{i} shot -> {p}")
             else:
                 return {"error": f"step{i}: unknown action {act}", "log": log_line}
             log_line.append(f"step{i} {act} ok")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a failed step must surface as recipe result, not crash the loop
             return {"error": f"step{i} {act}: {e}", "log": log_line}
     return {"ok": True, "log": log_line}
+
 
 def queue_worker():
     while True:
@@ -159,58 +198,131 @@ def queue_worker():
                 tid = fn[:-5]
                 TASKS[tid] = {"status": "running", "task": task}
                 res = run_recipe(task["recipe"], task.get("params", {}))
-                TASKS[tid].update(status="done" if res.get("ok") else "failed",
-                                  result=res)
+                TASKS[tid].update(status="done" if res.get("ok") else "failed", result=res)
                 dst = DONE if res.get("ok") else FAILED
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - queue boundary: mark the task failed, keep the worker alive
                 tid = fn[:-5]
                 TASKS[tid] = {"status": "failed", "result": {"error": str(e)}}
                 dst = FAILED
             os.replace(p, os.path.join(dst, fn))
         time.sleep(2)
 
+
 TOOLS = [
-    {"name": "screenshot", "description": "Full-screen PNG, returns path",
-     "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "click", "description": "Human-like click at screen coords",
-     "inputSchema": {"type": "object", "required": ["x", "y"],
-        "properties": {"x": {"type": "integer"}, "y": {"type": "integer"},
-                       "button": {"type": "integer", "default": 1}}}},
-    {"name": "move", "description": "Bezier mouse move",
-     "inputSchema": {"type": "object", "required": ["x", "y"],
-        "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}}},
-    {"name": "type_text", "description": "Type text with jitter",
-     "inputSchema": {"type": "object", "required": ["text"],
-        "properties": {"text": {"type": "string"}}}},
-    {"name": "key", "description": "Key combo e.g. ctrl+t, Return",
-     "inputSchema": {"type": "object", "required": ["keys"],
-        "properties": {"keys": {"type": "string"}}}},
-    {"name": "scroll", "description": "Mouse wheel scroll",
-     "inputSchema": {"type": "object", "properties": {
-        "amount": {"type": "integer", "default": 3},
-        "direction": {"type": "string", "enum": ["up", "down"], "default": "down"}}}},
-    {"name": "find", "description": "Template match on screen -> {x,y}",
-     "inputSchema": {"type": "object", "required": ["template"],
-        "properties": {"template": {"type": "string"},
-                       "confidence": {"type": "number", "default": 0.85}}}},
-    {"name": "locate", "description": "Vision-model locate element -> {x,y}",
-     "inputSchema": {"type": "object", "required": ["description"],
-        "properties": {"description": {"type": "string"},
-                       "hint": {"type": "string"}}}},
-    {"name": "run_recipe", "description": "Run recipes/<name>.yaml with params",
-     "inputSchema": {"type": "object", "required": ["name"],
-        "properties": {"name": {"type": "string"},
-                       "params": {"type": "object"}}}},
-    {"name": "dom_find", "description": "DOM-read element center -> screen {x,y} (read-only DOM, click via OS)",
-     "inputSchema": {"type": "object", "required": ["url", "target"],
-        "properties": {"url": {"type": "string", "description": "substring of tab URL"},
-                       "target": {"type": "string", "description": "visible text/aria-label substring"}}}},
-    {"name": "click_dom", "description": "Find element by text via DOM-read, then real OS click",
-     "inputSchema": {"type": "object", "required": ["url", "target"],
-        "properties": {"url": {"type": "string"}, "target": {"type": "string"}}}},
-    {"name": "task_status", "description": "Queue task status",
-     "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}}}},
+    {
+        "name": "screenshot",
+        "description": "Full-screen PNG, returns path",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "click",
+        "description": "Human-like click at screen coords",
+        "inputSchema": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": {
+                "x": {"type": "integer"},
+                "y": {"type": "integer"},
+                "button": {"type": "integer", "default": 1},
+            },
+        },
+    },
+    {
+        "name": "move",
+        "description": "Bezier mouse move",
+        "inputSchema": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
+        },
+    },
+    {
+        "name": "type_text",
+        "description": "Type text with jitter",
+        "inputSchema": {
+            "type": "object",
+            "required": ["text"],
+            "properties": {"text": {"type": "string"}},
+        },
+    },
+    {
+        "name": "key",
+        "description": "Key combo e.g. ctrl+t, Return",
+        "inputSchema": {
+            "type": "object",
+            "required": ["keys"],
+            "properties": {"keys": {"type": "string"}},
+        },
+    },
+    {
+        "name": "scroll",
+        "description": "Mouse wheel scroll",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "amount": {"type": "integer", "default": 3},
+                "direction": {"type": "string", "enum": ["up", "down"], "default": "down"},
+            },
+        },
+    },
+    {
+        "name": "find",
+        "description": "Template match on screen -> {x,y}",
+        "inputSchema": {
+            "type": "object",
+            "required": ["template"],
+            "properties": {
+                "template": {"type": "string"},
+                "confidence": {"type": "number", "default": 0.85},
+            },
+        },
+    },
+    {
+        "name": "locate",
+        "description": "Vision-model locate element -> {x,y}",
+        "inputSchema": {
+            "type": "object",
+            "required": ["description"],
+            "properties": {"description": {"type": "string"}, "hint": {"type": "string"}},
+        },
+    },
+    {
+        "name": "run_recipe",
+        "description": "Run recipes/<name>.yaml with params",
+        "inputSchema": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}, "params": {"type": "object"}},
+        },
+    },
+    {
+        "name": "dom_find",
+        "description": "DOM-read element center -> screen {x,y} (read-only DOM, click via OS)",
+        "inputSchema": {
+            "type": "object",
+            "required": ["url", "target"],
+            "properties": {
+                "url": {"type": "string", "description": "substring of tab URL"},
+                "target": {"type": "string", "description": "visible text/aria-label substring"},
+            },
+        },
+    },
+    {
+        "name": "click_dom",
+        "description": "Find element by text via DOM-read, then real OS click",
+        "inputSchema": {
+            "type": "object",
+            "required": ["url", "target"],
+            "properties": {"url": {"type": "string"}, "target": {"type": "string"}},
+        },
+    },
+    {
+        "name": "task_status",
+        "description": "Queue task status",
+        "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}}},
+    },
 ]
+
 
 def call_tool(name, args):
     if name == "screenshot":
@@ -249,14 +361,18 @@ def call_tool(name, args):
         return TASKS.get(tid) if tid else {"tasks": TASKS}
     return {"error": f"unknown tool {name}"}
 
+
 def reply(rid, result):
     sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}) + "\n")
     sys.stdout.flush()
 
+
 def reply_err(rid, msg):
-    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid,
-        "error": {"code": -32603, "message": msg}}) + "\n")
+    sys.stdout.write(
+        json.dumps({"jsonrpc": "2.0", "id": rid, "error": {"code": -32603, "message": msg}}) + "\n"
+    )
     sys.stdout.flush()
+
 
 def main():
     threading.Thread(target=queue_worker, daemon=True).start()
@@ -270,9 +386,14 @@ def main():
             continue
         rid, method = msg.get("id"), msg.get("method", "")
         if method == "initialize":
-            reply(rid, {"protocolVersion": msg.get("params", {}).get("protocolVersion", "2024-11-05"),
-                        "capabilities": {"tools": {}},
-                        "serverInfo": {"name": "hands-agent", "version": "1.0.0"}})
+            reply(
+                rid,
+                {
+                    "protocolVersion": msg.get("params", {}).get("protocolVersion", "2024-11-05"),
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "hands-agent", "version": "1.0.0"},
+                },
+            )
         elif method in ("notifications/initialized", "initialized"):
             pass
         elif method == "ping":
@@ -282,12 +403,24 @@ def main():
         elif method == "tools/call":
             p = msg.get("params", {})
             try:
-                reply(rid, {"content": [{"type": "text", "text":
-                    json.dumps(call_tool(p.get("name", ""), p.get("arguments", {}) or {}))}]})
-            except Exception as e:
+                reply(
+                    rid,
+                    {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": json.dumps(
+                                    call_tool(p.get("name", ""), p.get("arguments", {}) or {})
+                                ),
+                            }
+                        ]
+                    },
+                )
+            except Exception as e:  # noqa: BLE001 - JSON-RPC boundary: any tool failure answers an error reply
                 reply_err(rid, str(e))
         elif rid is not None:
             reply_err(rid, f"unsupported method {method}")
+
 
 if __name__ == "__main__":
     main()

@@ -4,30 +4,40 @@
 Requires: xdotool (X11). DISPLAY/XAUTHORITY must be set or detected.
 All movements include jitter so events look human, not scripted.
 """
-import math, os, random, subprocess, time
+
+import math
+import os
+import random
+import subprocess
+import time
 
 ENV = dict(os.environ)
 ENV["DISPLAY"] = os.environ.get("HANDS_DISPLAY", ":1")
 ENV["XAUTHORITY"] = os.environ.get("HANDS_XAUTHORITY", os.path.expanduser("~/.Xauthority"))
 
+
 def _xd(*args):
-    return subprocess.run(["xdotool", *[str(a) for a in args]],
-                          env=ENV, check=True, capture_output=True)
+    return subprocess.run(
+        ["xdotool", *[str(a) for a in args]], env=ENV, check=True, capture_output=True
+    )
+
 
 def mouse_pos():
     out = _xd("getmouselocation").stdout.decode()
     p = dict(t.split(":") for t in out.split() if ":" in t)
     return int(p["x"]), int(p["y"])
 
+
 def _bezier(p0, p1, p2, p3, n):
     pts = []
     for i in range(n + 1):
         t = i / n
         mt = 1 - t
-        x = mt**3*p0[0] + 3*mt*mt*t*p1[0] + 3*mt*t*t*p2[0] + t**3*p3[0]
-        y = mt**3*p0[1] + 3*mt*mt*t*p1[1] + 3*mt*t*t*p2[1] + t**3*p3[1]
+        x = mt**3 * p0[0] + 3 * mt * mt * t * p1[0] + 3 * mt * t * t * p2[0] + t**3 * p3[0]
+        y = mt**3 * p0[1] + 3 * mt * mt * t * p1[1] + 3 * mt * t * t * p2[1] + t**3 * p3[1]
         pts.append((x, y))
     return pts
+
 
 def move(x, y, duration=None):
     """Move mouse to (x,y) along a Bezier curve with human pacing."""
@@ -47,9 +57,9 @@ def move(x, y, duration=None):
     pts = _bezier((x0, y0), p1, p2, (x, y), max(10, int(dur * 60)))
     dt = dur / len(pts)
     for px, py in pts:
-        _xd("mousemove", int(px + random.uniform(-0.5, 0.5)),
-            int(py + random.uniform(-0.5, 0.5)))
+        _xd("mousemove", int(px + random.uniform(-0.5, 0.5)), int(py + random.uniform(-0.5, 0.5)))
         time.sleep(dt * random.uniform(0.6, 1.4))
+
 
 def click(x=None, y=None, button=1, pre_delay=(0.05, 0.2)):
     if x is not None:
@@ -58,10 +68,12 @@ def click(x=None, y=None, button=1, pre_delay=(0.05, 0.2)):
     _xd("click", button)
     time.sleep(random.uniform(0.05, 0.15))
 
+
 def double_click(x, y):
     move(x, y)
     time.sleep(random.uniform(0.05, 0.15))
     _xd("click", "1", "click", "1")
+
 
 def type_text(text, wpm_range=(30, 60)):
     """Type with per-char jitter; handles unicode via xdotool type."""
@@ -75,17 +87,20 @@ def type_text(text, wpm_range=(30, 60)):
         if random.random() < 0.03:  # occasional human pause
             time.sleep(random.uniform(0.15, 0.45))
 
+
 def key(*keys):
     _xd("key", *keys)
     time.sleep(random.uniform(0.05, 0.15))
 
+
 def scroll(amount=3, direction="down"):
-    _xd("click", "5" if direction == "down" else "4",
-        "--repeat", amount)
+    _xd("click", "5" if direction == "down" else "4", "--repeat", amount)
+
 
 def wait_for_image(template_path, timeout=10, confidence=0.85):
     """Poll the screen until template appears; returns (x,y) center or None."""
     from vision import find_on_screen
+
     deadline = time.time() + timeout
     while time.time() < deadline:
         hit = find_on_screen(template_path, confidence)
