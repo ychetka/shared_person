@@ -44,6 +44,7 @@ jobs:
           done
           curl -sf http://localhost:8787/health
           GATEWAY=http://localhost:8787 npm test
+          curl -sf http://localhost:8787/roles | grep -q extract-facts
 
       - name: Smoke rss-reader
         working-directory: rss-reader
@@ -76,3 +77,4 @@ jobs:
           done
           curl -sf http://localhost:8788/health
           RSS=http://localhost:8788 npm test
+          curl -sf "http://localhost:8788/digest?since=48h" | grep -q "ci smoke item"
