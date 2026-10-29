@@ -1,7 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.6.4/schema.json",
   "files": {
-    "includes": ["llm-gateway/**", "rss-reader/**", "tools/**/*.js", "!**/node_modules", "!**/dist"]
+    "includes": ["llm-gateway/**", "rss-reader/**", "tools/**/*", "!**/node_modules", "!**/dist"]
   },
   "formatter": {
     "enabled": true,
