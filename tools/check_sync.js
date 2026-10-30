@@ -30,10 +30,10 @@
 // bodies); exit 1 = drift, an unbalanced marker pair, a missing or
 // extra member, or a marker group with no config entry.
 
-const fs = require('fs');
-const path = require('path');
+const fs = require("node:fs");
+const path = require("node:path");
 
-const WF_DIR = path.join(__dirname, '..', 'n8n', 'workflows');
+const WF_DIR = path.join(__dirname, "..", "n8n", "workflows");
 
 // platform tokens the enabled-platforms members must agree on.
 // Whole-word matching keeps 'writer-fb' contributing 'fb' while
@@ -53,30 +53,30 @@ const GROUPS = {
   // plain tmp+rename writeJsonAtomic: Handle TG Update, Prepare Draft,
   // Compose Message (sp-tg-moderation), Generate Drafts
   // (sp-content-gen), Resolve Chat + Webhook (sp-tg-setup)
-  'write-json-atomic': { expect: 5 },
+  "write-json-atomic": { expect: 5 },
   // Publish Tick's copy is the hardened 0o600 variant - intentionally
   // different from the plain copies, tracked under its own group so
   // the marker itself stays accounted for
-  'write-json-atomic-hardened': { expect: 1 },
+  "write-json-atomic-hardened": { expect: 1 },
   // secretOk padded compare: Handle TG Update (WEBHOOK_SECRET),
   // Prepare Draft (DRAFT_SECRET) - both sp-tg-moderation - and
   // Generate Drafts' cgSecretOk (CG_SECRET, sp-content-gen)
-  'padded-compare': {
+  "padded-compare": {
     expect: 3,
     normalize: [
-      [/\bcgSecretOk\b/g, 'secretOk'],
-      [/\b(?:DRAFT_SECRET|WEBHOOK_SECRET|CG_SECRET)\b/g, 'SECRET']
-    ]
+      [/\bcgSecretOk\b/g, "secretOk"],
+      [/\b(?:DRAFT_SECRET|WEBHOOK_SECRET|CG_SECRET)\b/g, "SECRET"],
+    ],
   },
   // bounded-append counter: Handle TG Update's logCapped (ctrFile
   // param, events_seen field) and Generate Drafts' logReject
   // (REJECT_CTR const, rejects_seen field)
-  'bounded-append': {
+  "bounded-append": {
     expect: 2,
     normalize: [
-      [/\b(?:ctrFile|REJECT_CTR)\b/g, 'CTR'],
-      [/\b(?:events_seen|rejects_seen)\b/g, 'seen']
-    ]
+      [/\b(?:ctrFile|REJECT_CTR)\b/g, "CTR"],
+      [/\b(?:events_seen|rejects_seen)\b/g, "seen"],
+    ],
   },
   // the coupled platform list in its two shapes: the gate blocks
   // (ALL_PLATFORMS fan-out list, facebook->fb alias map, ENABLED
@@ -90,35 +90,35 @@ const GROUPS = {
   // shape must share - the platform list itself - so a platform
   // added to MAP but not to ALL_PLATFORMS fails the same way an
   // edited gate copy does
-  'enabled-platforms': {
+  "enabled-platforms": {
     expect: 3,
     maxClasses: 2,
-    tokenSet: PLATFORM_TOKEN_RE
+    tokenSet: PLATFORM_TOKEN_RE,
   },
   // REWRITE_WINDOW_MS const: Prepare Draft plus the 'ap' and 'ed'
   // refusal sites in Handle TG Update (all sp-tg-moderation) - the
   // copies sit at different nesting depths, so leading indentation
   // is stripped before comparing
-  'rewrite-window-ms': {
+  "rewrite-window-ms": {
     expect: 3,
-    normalize: [
-      [/^\s+/gm, '']
-    ]
+    normalize: [[/^\s+/gm, ""]],
   },
   // updateDraft guarded re-read+mutate: Handle TG Update and Prepare
   // Draft (both sp-tg-moderation). The load/save lines legitimately
   // differ (loadDraft/saveDraft wrappers vs inline
   // readFileSync/writeJsonAtomic) and normalize to LOAD/SAVE
   // placeholders; the guard/mutate contract must stay identical
-  'update-draft': {
+  "update-draft": {
     expect: 2,
     normalize: [
-      [/const cur = loadDraft\(id\);/, 'const cur = LOAD;'],
-      [/const cur = JSON\.parse\(\s*fs\.readFileSync\(DRAFTS \+ '\/' \+ id \+ '\.json', 'utf8'\)\);/,
-        'const cur = LOAD;'],
-      [/saveDraft\(cur\);/, 'SAVE;'],
-      [/writeJsonAtomic\(DRAFTS \+ '\/' \+ id \+ '\.json', cur\);/, 'SAVE;']
-    ]
+      [/const cur = loadDraft\(id\);/, "const cur = LOAD;"],
+      [
+        /const cur = JSON\.parse\(\s*fs\.readFileSync\(DRAFTS \+ '\/' \+ id \+ '\.json', 'utf8'\)\);/,
+        "const cur = LOAD;",
+      ],
+      [/saveDraft\(cur\);/, "SAVE;"],
+      [/writeJsonAtomic\(DRAFTS \+ '\/' \+ id \+ '\.json', cur\);/, "SAVE;"],
+    ],
   },
   // the guarded-write snapshot comparator: sameDraftSnapshot (an arrow
   // helper in Handle TG Update) vs the inline sameSnapshot const in
@@ -126,16 +126,16 @@ const GROUPS = {
   // line wraps, so identifiers fold to the HTU names, the arrow
   // signature is dropped and the whole block collapses to one
   // whitespace-normalized token stream
-  'draft-snapshot': {
+  "draft-snapshot": {
     expect: 2,
     normalize: [
-      [/\b(?:sameDraftSnapshot|sameSnapshot)\b/g, 'CMP'],
-      [/\bdraftCur\b/g, 'cur'],
-      [/\bdraft\b/g, 'd'],
-      [/\(cur, d\) =>/, ''],
-      [/\s+/g, ' '],
-      [/^\s+|\s+$/g, '']
-    ]
+      [/\b(?:sameDraftSnapshot|sameSnapshot)\b/g, "CMP"],
+      [/\bdraftCur\b/g, "cur"],
+      [/\bdraft\b/g, "d"],
+      [/\(cur, d\) =>/, ""],
+      [/\s+/g, " "],
+      [/^\s+|\s+$/g, ""],
+    ],
   },
   // scrubSecrets secret masking: Generate Drafts (sp-content-gen),
   // Handle TG Update (sp-tg-moderation) and Resolve Chat + Webhook
@@ -145,7 +145,7 @@ const GROUPS = {
   // scrub/KNOWN_TOKENS is INTENTIONALLY divergent (a dynamic token
   // set plus access_token= form masking) and must NOT get a fourth
   // copy here
-  'scrub-secrets': { expect: 3 },
+  "scrub-secrets": { expect: 3 },
   // mkdirErrs collection prelude: Handle TG Update, Prepare Draft
   // (both sp-tg-moderation), Resolve Chat + Webhook (sp-tg-setup)
   // and Generate Drafts (sp-content-gen). Only the dir list and the
@@ -153,12 +153,12 @@ const GROUPS = {
   // mkdirSync swallow is a different contract on purpose (a missing
   // dir surfaces through mv()/log() failures there, not per-item
   // refusals) and stays unmarked
-  'mkdir-collect': {
+  "mkdir-collect": {
     expect: 4,
     normalize: [
-      [/of \[[^\]]*\]/, 'of [DIRS]'],
-      [/\b(?:d0|d)\b/g, 'D']
-    ]
+      [/of \[[^\]]*\]/, "of [DIRS]"],
+      [/\b(?:d0|d)\b/g, "D"],
+    ],
   },
   // the api.telegram.org request contract shared by the four tg()
   // helpers (Publish Tick, Handle TG Update, Compose Message,
@@ -170,22 +170,21 @@ const GROUPS = {
   // an inline body and a literal /sendMessage URL, so it forms a
   // second normalized class (maxClasses: 2). tokenSet then polices
   // the contract tokens every copy must share on the RAW text
-  'tg-timeout': {
+  "tg-timeout": {
     expect: 5,
     maxClasses: 2,
-    tokenSet:
-      /api\.telegram\.org|method: 'POST'|json: true|timeout: [0-9]+/g,
+    tokenSet: /api\.telegram\.org|method: 'POST'|json: true|timeout: [0-9]+/g,
     normalize: [
       // whole-line comments differ per node (each explains its own
       // stall consequence) - drop them with their newline
-      [/^[ \t]*\/\/[^\n]*(?:\n|$)/gm, ''],
+      [/^[ \t]*\/\/[^\n]*(?:\n|$)/gm, ""],
       // collapse the call-opening line (return await / return /
       // await + differing receivers)
-      [/^.*httpRequest.*$/m, 'REQ('],
+      [/^.*httpRequest.*$/m, "REQ("],
       // leading indentation differs by nesting depth
-      [/^[ \t]+/gm, '']
-    ]
-  }
+      [/^[ \t]+/gm, ""],
+    ],
+  },
 };
 
 const BEGIN = /^\s*\/\/\s*SYNC-BEGIN:\s*([A-Za-z0-9_-]+)\s*$/;
@@ -194,35 +193,40 @@ const END = /^\s*\/\/\s*SYNC-END:\s*([A-Za-z0-9_-]+)\s*$/;
 // collect every marked block: [{group, where, lines}]
 const blocks = [];
 let bad = 0;
-for (const file of fs.readdirSync(WF_DIR).filter((f) =>
-  f.endsWith('.json')).sort()) {
+for (const file of fs
+  .readdirSync(WF_DIR)
+  .filter((f) => f.endsWith(".json"))
+  .sort()) {
   let doc;
   try {
-    doc = JSON.parse(fs.readFileSync(path.join(WF_DIR, file), 'utf8'));
+    doc = JSON.parse(fs.readFileSync(path.join(WF_DIR, file), "utf8"));
   } catch (e) {
-    console.log('FAIL %s: unreadable JSON (%s)', file, e.message);
+    console.log("FAIL %s: unreadable JSON (%s)", file, e.message);
     bad++;
     continue;
   }
   for (const node of doc.nodes || []) {
-    const code = node.parameters && node.parameters.jsCode;
+    const code = node.parameters?.jsCode;
     if (!code) continue;
-    const where = file + ' / ' + node.name;
+    const where = `${file} / ${node.name}`;
     let open = null;
-    code.split('\n').forEach((line, i) => {
+    code.split("\n").forEach((line, i) => {
       const b = BEGIN.exec(line);
       const e = END.exec(line);
       if (b) {
         if (open) {
-          console.log('FAIL %s:%d: SYNC-BEGIN inside open block %s',
-            where, i + 1, open.group);
+          console.log("FAIL %s:%d: SYNC-BEGIN inside open block %s", where, i + 1, open.group);
           bad++;
         }
-        open = { group: b[1], where: where + ':' + (i + 1), lines: [] };
+        open = { group: b[1], where: `${where}:${i + 1}`, lines: [] };
       } else if (e) {
         if (!open || open.group !== e[1]) {
-          console.log('FAIL %s:%d: SYNC-END %s without matching ' +
-            'SYNC-BEGIN', where, i + 1, e[1]);
+          console.log(
+            "FAIL %s:%d: SYNC-END %s without matching " + "SYNC-BEGIN",
+            where,
+            i + 1,
+            e[1],
+          );
           bad++;
         } else {
           blocks.push(open);
@@ -233,16 +237,15 @@ for (const file of fs.readdirSync(WF_DIR).filter((f) =>
       }
     });
     if (open) {
-      console.log('FAIL %s: SYNC-BEGIN %s never closed', where,
-        open.group);
+      console.log("FAIL %s: SYNC-BEGIN %s never closed", where, open.group);
       bad++;
     }
   }
 }
 
 const normalize = (group, lines) => {
-  let text = lines.join('\n');
-  for (const [re, rep] of (GROUPS[group].normalize || [])) {
+  let text = lines.join("\n");
+  for (const [re, rep] of GROUPS[group].normalize || []) {
     text = text.replace(re, rep);
   }
   return text;
@@ -251,9 +254,13 @@ const normalize = (group, lines) => {
 for (const [group, cfg] of Object.entries(GROUPS)) {
   const members = blocks.filter((b) => b.group === group);
   if (members.length !== cfg.expect) {
-    console.log('FAIL %s: expected %d copies, found %d (%s)', group,
-      cfg.expect, members.length,
-      members.map((m) => m.where).join(', ') || 'none');
+    console.log(
+      "FAIL %s: expected %d copies, found %d (%s)",
+      group,
+      cfg.expect,
+      members.length,
+      members.map((m) => m.where).join(", ") || "none",
+    );
     bad++;
     continue;
   }
@@ -273,14 +280,21 @@ for (const [group, cfg] of Object.entries(GROUPS)) {
     // first-difference report between the first members of the first
     // two classes, enough to locate the drift by hand
     const [ca, cb] = [...classes.values()];
-    const a = [...classes.keys()][0].split('\n');
-    const b = [...classes.keys()][1].split('\n');
+    const a = [...classes.keys()][0].split("\n");
+    const b = [...classes.keys()][1].split("\n");
     let i = 0;
     while (i < a.length && i < b.length && a[i] === b[i]) i++;
-    console.log('FAIL %s: %s differs from %s at line %d\n' +
-      '    %s: %s\n    %s: %s', group, cb[0].where, ca[0].where,
-      i + 1, ca[0].where, a[i] || '<eof>', cb[0].where,
-      b[i] || '<eof>');
+    console.log(
+      "FAIL %s: %s differs from %s at line %d\n" + "    %s: %s\n    %s: %s",
+      group,
+      cb[0].where,
+      ca[0].where,
+      i + 1,
+      ca[0].where,
+      a[i] || "<eof>",
+      cb[0].where,
+      b[i] || "<eof>",
+    );
     bad++;
     continue;
   }
@@ -290,27 +304,36 @@ for (const [group, cfg] of Object.entries(GROUPS)) {
   // rewrites identifiers, the tokens must come from the real text)
   if (cfg.tokenSet) {
     const sets = members.map((m) =>
-      [...new Set(m.lines.join('\n').match(cfg.tokenSet) || [])]
-        .sort().join(','));
+      [...new Set(m.lines.join("\n").match(cfg.tokenSet) || [])].sort().join(","),
+    );
     if (!sets.every((s) => s === sets[0])) {
-      console.log('FAIL %s: token sets differ (%s)', group,
-        members.map((m, i) => m.where + ' -> ' + sets[i]).join('; '));
+      console.log(
+        "FAIL %s: token sets differ (%s)",
+        group,
+        members.map((m, i) => `${m.where} -> ${sets[i]}`).join("; "),
+      );
       bad++;
       continue;
     }
   }
-  console.log('ok   %s: %d copies%s (%s)', group, members.length,
-    classes.size === 1 ? ' identical'
-      : ' in ' + classes.size + ' shapes, token sets equal',
-    members.map((m) => m.where).join(', '));
+  console.log(
+    "ok   %s: %d copies%s (%s)",
+    group,
+    members.length,
+    classes.size === 1 ? " identical" : ` in ${classes.size} shapes, token sets equal`,
+    members.map((m) => m.where).join(", "),
+  );
 }
 
 // a marker group with no GROUPS entry would silently go unchecked -
 // treat it as a failure so new helpers must be registered here
 for (const b of blocks) {
   if (!GROUPS[b.group]) {
-    console.log('FAIL %s: unknown SYNC group %s - add it to GROUPS ' +
-      'in tools/check_sync.js', b.where, b.group);
+    console.log(
+      "FAIL %s: unknown SYNC group %s - add it to GROUPS " + "in tools/check_sync.js",
+      b.where,
+      b.group,
+    );
     bad++;
   }
 }

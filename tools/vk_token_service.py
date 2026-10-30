@@ -137,6 +137,7 @@ VK_API = "https://api.vk.com/method/{m}"
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """Refuse every redirect - see vk_check."""
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
@@ -262,7 +263,8 @@ def _log(msg):
     with _LOG_LOCK:
         sys.stderr.write(
             f"{time.strftime('%Y-%m-%dT%H:%M:%S')} vk_token_service: "
-            f"{_edge_mask(_scrub(msg, *secrets), secrets)}\n")
+            f"{_edge_mask(_scrub(msg, *secrets), secrets)}\n"
+        )
         sys.stderr.flush()
 
 
@@ -279,8 +281,7 @@ def _share(deadline, n_left, cap):
 
 
 def _targets(deadline=None):
-    timeout = 10 if deadline is None else min(10, max(0.5,
-                                                    _remaining(deadline)))
+    timeout = 10 if deadline is None else min(10, max(0.5, _remaining(deadline)))
     # _NO_REDIRECT, not plain urlopen - the same redirect-refusing
     # opener vk_check uses: a redirected /json/list could serve
     # attacker page targets (bounded - tokens are still verified
@@ -300,8 +301,7 @@ def _cdp_reachable(timeout=1.5):
     try:
         # _NO_REDIRECT like _targets above - a 3xx answer surfaces as
         # HTTPError and lands in the same 'unreachable' verdict
-        with _NO_REDIRECT.open(f"{CDP}/json/version",
-                               timeout=timeout) as r:
+        with _NO_REDIRECT.open(f"{CDP}/json/version", timeout=timeout) as r:
             r.read(1024)
         return True
     except Exception:  # noqa: BLE001 - any failure means unreachable
@@ -322,8 +322,7 @@ _cdp_probe_state = {"ts": 0.0, "reachable": False}
 
 def _cdp_reachable_cached():
     with _cdp_probe_lock:
-        if (time.monotonic() - _cdp_probe_state["ts"]
-                < _CDP_PROBE_TTL):
+        if time.monotonic() - _cdp_probe_state["ts"] < _CDP_PROBE_TTL:
             return _cdp_probe_state["reachable"]
         reachable = _cdp_reachable()
         _cdp_probe_state["ts"] = time.monotonic()
@@ -345,9 +344,11 @@ def _health_status():
     not fire a real probe per call."""
     secret_set = bool(SECRET)
     cdp_reachable = _cdp_reachable_cached()
-    return {"ok": secret_set and cdp_reachable,
-            "secret_set": secret_set,
-            "cdp_reachable": cdp_reachable}
+    return {
+        "ok": secret_set and cdp_reachable,
+        "secret_set": secret_set,
+        "cdp_reachable": cdp_reachable,
+    }
 
 
 def _is_vk_url(url):
@@ -358,31 +359,31 @@ def _is_vk_url(url):
         host = urllib.parse.urlparse(url).hostname or ""
     except ValueError:
         return False
-    return (
-        host in ("vk.ru", "vk.com")
-        or host.endswith(".vk.ru")
-        or host.endswith(".vk.com")
-    )
+    return host in ("vk.ru", "vk.com") or host.endswith(".vk.ru") or host.endswith(".vk.com")
 
 
 def find_vk_pages(deadline=None):
     """All open VK tabs - a logged-out first tab must not hide a valid
     session in another one."""
     return [
-        t for t in _targets(deadline)
-        if t.get("type") == "page" and _is_vk_url(t.get("url", ""))
+        t for t in _targets(deadline) if t.get("type") == "page" and _is_vk_url(t.get("url", ""))
     ]
 
 
 def ws_eval(ws_url, expr, timeout=45):
     import websocket  # websocket-client, resolved by uv
 
-    ws = websocket.create_connection(ws_url, timeout=timeout,
-                                     suppress_origin=True)
+    ws = websocket.create_connection(ws_url, timeout=timeout, suppress_origin=True)
     try:
-        ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate",
-                            "params": {"expression": expr,
-                                       "returnByValue": True}}))
+        ws.send(
+            json.dumps(
+                {
+                    "id": 1,
+                    "method": "Runtime.evaluate",
+                    "params": {"expression": expr, "returnByValue": True},
+                }
+            )
+        )
         deadline = time.time() + timeout
         while time.time() < deadline:
             # recv() can block for the full socket timeout - pin it to
@@ -422,11 +423,9 @@ def extract_token(deadline=None, per_tab_timeout=45):
             _log("global deadline hit during token extract")
             return None, "global deadline hit during token extract"
         try:
-            tok = ws_eval(page["webSocketDebuggerUrl"], TOKEN_EXPR,
-                          timeout=budget)
+            tok = ws_eval(page["webSocketDebuggerUrl"], TOKEN_EXPR, timeout=budget)
         except Exception as e:  # noqa: BLE001 - dead tab, try the next
-            _log(f"token eval failed on tab "
-                 f"{str(page.get('url', '?'))[:60]}: {e}")
+            _log(f"token eval failed on tab {str(page.get('url', '?'))[:60]}: {e}")
             continue
         if tok:
             return tok, None
@@ -443,16 +442,17 @@ def reload_vk_tab(deadline=None, per_tab_timeout=8):
         if deadline is not None and _remaining(deadline) <= 0:
             break
         try:
-            ws_eval(page["webSocketDebuggerUrl"], "location.reload(); 'r'",
-                    timeout=_share(deadline, len(pages) - i,
-                                   per_tab_timeout))
+            ws_eval(
+                page["webSocketDebuggerUrl"],
+                "location.reload(); 'r'",
+                timeout=_share(deadline, len(pages) - i, per_tab_timeout),
+            )
         except Exception:  # noqa: BLE001 - dead tab, reload the rest
             continue
     return pages
 
 
-def reload_and_extract(stale=None, deadline=None, max_wait=20.0,
-                       poll=0.5):
+def reload_and_extract(stale=None, deadline=None, max_wait=20.0, poll=0.5):
     """Reload the VK tabs once, then poll localStorage for the token.
 
     `stale` is the token value vk_check just rejected (if any): a poll
@@ -471,8 +471,7 @@ def reload_and_extract(stale=None, deadline=None, max_wait=20.0,
     # bound the reload phase itself: by the shared get_token()
     # deadline when there is one, else by max_wait so an unbounded
     # call cannot hang on many slow tabs
-    reload_vk_tab(deadline=deadline if deadline is not None
-                  else time.time() + max_wait)
+    reload_vk_tab(deadline=deadline if deadline is not None else time.time() + max_wait)
     # start the poll window only AFTER the reload returns: max_wait is
     # the ceiling for the post-reload observation window, so a slow
     # reload (several tabs at up to ~8s each) must not consume it -
@@ -513,10 +512,8 @@ def vk_check(token, deadline=None):
     re-approve. The dict marker lets _check_result classify it as
     retryable instead - a momentary api.vk.com outage is transient by
     definition."""
-    timeout = 15 if deadline is None else min(15, max(0.5,
-                                                    _remaining(deadline)))
-    body = urllib.parse.urlencode(
-        {"v": "5.199", "access_token": token}).encode()
+    timeout = 15 if deadline is None else min(15, max(0.5, _remaining(deadline)))
+    body = urllib.parse.urlencode({"v": "5.199", "access_token": token}).encode()
     req = urllib.request.Request(VK_API.format(m="users.get"), data=body)
     try:
         with _NO_REDIRECT.open(req, timeout=timeout) as r:
@@ -529,14 +526,12 @@ def vk_check(token, deadline=None):
     # verdict: file it under the same retryable marker so it keeps
     # the {transport} classification and structured logging
     if not isinstance(resp, dict):
-        return {"transport": "non-object JSON body: "
-                             f"{type(resp).__name__}"}
+        return {"transport": f"non-object JSON body: {type(resp).__name__}"}
     err = resp.get("error")
     if err is None:
         return None
     if not isinstance(err, dict):
-        return {"transport": "non-object error field: "
-                             f"{str(err)[:120]}"}
+        return {"transport": f"non-object error field: {str(err)[:120]}"}
     # an error object whose error_code is absent (or null) is still an
     # error ANSWER: resp carried an 'error' field, so VK refused the
     # call - returning err.get() -> None used to drop it into the
@@ -546,8 +541,7 @@ def vk_check(token, deadline=None):
     # above - /vk-token answers 503 and the tick requeues.
     code = err.get("error_code")
     if code is None:
-        return {"transport": "error object without error_code: "
-                             f"{str(err)[:120]}"}
+        return {"transport": f"error object without error_code: {str(err)[:120]}"}
     return code
 
 
@@ -571,11 +565,12 @@ def _check_result(code, ctx):
         return None
     if isinstance(code, dict):
         _log(f"vk_check transport failure{ctx}: {code['transport']}")
-        return {"ok": False,
-                "error": "vk check transport failure: " +
-                         _scrub_capped(code["transport"], 200,
-                                       *_secrets_snapshot()),
-                "retryable": True}
+        return {
+            "ok": False,
+            "error": "vk check transport failure: "
+            + _scrub_capped(code["transport"], 200, *_secrets_snapshot()),
+            "retryable": True,
+        }
     _log(f"vk_check failed{ctx}: {code}")
     # the schema promises an integer error_code, but a proxy or shim
     # in front of api.vk.com can answer it as a string ("5"): a raw
@@ -590,10 +585,8 @@ def _check_result(code, ctx):
     except (TypeError, ValueError):
         code_num = None
     if code_num == 5:
-        return {"ok": False, "error": "vk check failed: 5 "
-                                      "(token rejected)"}
-    return {"ok": False, "error": f"vk check failed: {code}",
-            "retryable": True}
+        return {"ok": False, "error": "vk check failed: 5 (token rejected)"}
+    return {"ok": False, "error": f"vk check failed: {code}", "retryable": True}
 
 
 def get_token(budget=TOTAL_BUDGET):
@@ -610,13 +603,9 @@ def get_token(budget=TOTAL_BUDGET):
     'busy' instead of queueing a full run and then burning a second
     budget - two back-to-back runs would blow the caller's 60s."""
     deadline = time.time() + budget
-    if not _GET_TOKEN_LOCK.acquire(
-            timeout=max(0.0, deadline - time.time())):
-        _log("token request busy - another get_token() outlasted "
-             "this call's budget")
-        return {"ok": False,
-                "error": "busy - another token request in flight",
-                "retryable": True}
+    if not _GET_TOKEN_LOCK.acquire(timeout=max(0.0, deadline - time.time())):
+        _log("token request busy - another get_token() outlasted this call's budget")
+        return {"ok": False, "error": "busy - another token request in flight", "retryable": True}
     try:
         # the serialized run gets only what the lock wait left of the
         # global budget - the caller's total wait never exceeds it
@@ -634,10 +623,11 @@ def _get_token(budget):
         # the tab comes back), not a token rejection - retryable so
         # the publish tick requeues instead of filing under failed/
         _log(f"token extract raised: {e}")
-        return {"ok": False,
-                "error": "token extract failed: " +
-                         _scrub_capped(e, 200, *_secrets_snapshot()),
-                "retryable": True}
+        return {
+            "ok": False,
+            "error": "token extract failed: " + _scrub_capped(e, 200, *_secrets_snapshot()),
+            "retryable": True,
+        }
     _remember_secret(tok)
     refreshed = False
     if tok:
@@ -657,19 +647,18 @@ def _get_token(budget):
         except (TypeError, ValueError):
             code_num = None
         if code_num == 5:
-            _log("vk_check rejected the token (error 5) - "
-                 "reloading vk tabs for a fresh one")
+            _log("vk_check rejected the token (error 5) - reloading vk tabs for a fresh one")
             stale = tok
             try:
-                tok, err = reload_and_extract(stale=stale,
-                                              deadline=deadline)
+                tok, err = reload_and_extract(stale=stale, deadline=deadline)
             except Exception as e:  # noqa: BLE001 - CDP died mid-reload
                 _log(f"token reload raised: {e}")
-                return {"ok": False,
-                        "error": "token reload failed: " +
-                                 _scrub_capped(e, 200, stale,
-                                               *_secrets_snapshot()),
-                        "retryable": True}
+                return {
+                    "ok": False,
+                    "error": "token reload failed: "
+                    + _scrub_capped(e, 200, stale, *_secrets_snapshot()),
+                    "retryable": True,
+                }
             _remember_secret(tok)
             refreshed = True
             if not tok:
@@ -681,12 +670,13 @@ def _get_token(budget):
                 # Scrub first: exception text may echo the stale token.
                 # retryable: a deadline hit or a slow reload is
                 # transient - the tick requeues for the next run.
-                reason = _scrub_capped(err, 200, stale,
-                                       *_secrets_snapshot()) \
-                    if err else "no token after tab reload"
+                reason = (
+                    _scrub_capped(err, 200, stale, *_secrets_snapshot())
+                    if err
+                    else "no token after tab reload"
+                )
                 _log(f"no token after tab reload: {reason}")
-                return {"ok": False, "error": reason,
-                        "retryable": True}
+                return {"ok": False, "error": reason, "retryable": True}
             code = vk_check(tok, deadline=deadline)
             # the second vk_check runs AFTER the tab reload - mark the
             # journal line so pre- and post-reload failures read apart
@@ -702,10 +692,11 @@ def _get_token(budget):
             tok, err = reload_and_extract(deadline=deadline)
         except Exception as e:  # noqa: BLE001 - CDP died mid-reload
             _log(f"token reload raised: {e}")
-            return {"ok": False,
-                    "error": "token reload failed: " +
-                             _scrub_capped(e, 200, *_secrets_snapshot()),
-                    "retryable": True}
+            return {
+                "ok": False,
+                "error": "token reload failed: " + _scrub_capped(e, 200, *_secrets_snapshot()),
+                "retryable": True,
+            }
         _remember_secret(tok)
         refreshed = True
         if not tok:
@@ -713,16 +704,13 @@ def _get_token(budget):
             # token did not rotate. All are environmental/transient,
             # not a token rejection: retryable so the tick requeues.
             _log(f"no token after tab reload: {err}")
-            return {"ok": False, "error": err or "no token",
-                    "retryable": True}
-        bad = _check_result(vk_check(tok, deadline=deadline),
-                            " after reload")
+            return {"ok": False, "error": err or "no token", "retryable": True}
+        bad = _check_result(vk_check(tok, deadline=deadline), " after reload")
         if bad:
             return bad
     # every path above either returns early on a falsy tok or proceeds
     # with a truthy one - tok is always set at this point
-    return {"ok": True, "access_token": tok, "source": "cdp",
-            "refreshed_tab": refreshed}
+    return {"ok": True, "access_token": tok, "source": "cdp", "refreshed_tab": refreshed}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -742,8 +730,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_one_request(self):
         try:
             super().handle_one_request()
-        except (socket.timeout, TimeoutError, ConnectionError,
-                ssl.SSLError):
+        except (TimeoutError, ConnectionError, ssl.SSLError):
             # routine-disconnect outcomes, all ending the same way -
             # the connection is dead, so close it quietly:
             # - socket.timeout/TimeoutError: a stalled client hit the
@@ -795,8 +782,7 @@ class Handler(BaseHTTPRequestHandler):
             # absolute-form URI, stray port text) makes urlsplit raise
             # ValueError - answer 400 instead of dropping the request
             # thread on an unhandled exception
-            self._send(400, {"ok": False,
-                             "error": "malformed request target"})
+            self._send(400, {"ok": False, "error": "malformed request target"})
             return
         if path == "/health":
             st = _health_status()
@@ -811,11 +797,9 @@ class Handler(BaseHTTPRequestHandler):
                 n401 = _auth_401_seen()
                 if n401:
                     self.log_message(
-                        "/vk-token -> 401 missing/invalid "
-                        "X-Shared-Token (seen %d)", n401)
-                self._send(401, {"ok": False,
-                                 "error": "missing or invalid "
-                                          "X-Shared-Token header"})
+                        "/vk-token -> 401 missing/invalid X-Shared-Token (seen %d)", n401
+                    )
+                self._send(401, {"ok": False, "error": "missing or invalid X-Shared-Token header"})
                 return
             try:
                 res = get_token()
@@ -828,8 +812,7 @@ class Handler(BaseHTTPRequestHandler):
                 # the queue file in failed/ permanently over a
                 # transient edge; retryable answers 503 and the file
                 # comes back next tick
-                res = {"ok": False, "error": str(e),
-                       "retryable": True}
+                res = {"ok": False, "error": str(e), "retryable": True}
             # scrub every error surface before the journal or the HTTP
             # body sees it: exception text (the catch-all above) and
             # upstream error strings can echo a live token or the
@@ -840,18 +823,18 @@ class Handler(BaseHTTPRequestHandler):
                 # _remember_secret while this handler thread is outside
                 # _GET_TOKEN_LOCK - iterating the live set could raise
                 # RuntimeError and kill the connection
-                res["error"] = _scrub_capped(
-                    res["error"], 300, SECRET, *_secrets_snapshot())
+                res["error"] = _scrub_capped(res["error"], 300, SECRET, *_secrets_snapshot())
             if res.get("ok"):
                 # masked token only - the journal must never hold a
                 # live wall-scope credential
                 self.log_message(
-                    "/vk-token -> ok source=%s refreshed_tab=%s "
-                    "token=%s", res.get("source"),
-                    res.get("refreshed_tab"), _mask(res["access_token"]))
+                    "/vk-token -> ok source=%s refreshed_tab=%s token=%s",
+                    res.get("source"),
+                    res.get("refreshed_tab"),
+                    _mask(res["access_token"]),
+                )
             else:
-                self.log_message("/vk-token -> failed: %s",
-                                 res.get("error"))
+                self.log_message("/vk-token -> failed: %s", res.get("error"))
             # 503 (not a flat 502) for retryable results: get_token()
             # answers {"ok": False, "retryable": True} on lock
             # contention ('busy - another token request in flight',
@@ -860,8 +843,7 @@ class Handler(BaseHTTPRequestHandler):
             # treats a busy answer as transient and returns the queue
             # file to the root for the next tick - a momentary overlap
             # must not permanently fail a publish into failed/.
-            self._send(200 if res.get("ok")
-                       else 503 if res.get("retryable") else 502, res)
+            self._send(200 if res.get("ok") else 503 if res.get("retryable") else 502, res)
         else:
             self._send(404, {"ok": False, "error": "not found"})
 
@@ -960,18 +942,19 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     # Keeping the body a fixed constant (no dynamic fields) is the
     # safety property: nothing on the accept thread may run a probe.
     _HEALTH_BODY = b'{"ok": true, "liveness_only": true}'
-    _BUSY_BODY = (b'{"ok": false, "error": "server busy", '
-                  b'"retryable": true}')
+    _BUSY_BODY = b'{"ok": false, "error": "server busy", "retryable": true}'
     _HEALTH_RESP = (
         b"HTTP/1.0 200 OK\r\n"
         b"Content-Type: application/json\r\n"
         b"Content-Length: " + str(len(_HEALTH_BODY)).encode() + b"\r\n"
-        b"Connection: close\r\n\r\n" + _HEALTH_BODY)
+        b"Connection: close\r\n\r\n" + _HEALTH_BODY
+    )
     _BUSY_RESP = (
         b"HTTP/1.0 503 Service Unavailable\r\n"
         b"Content-Type: application/json\r\n"
         b"Content-Length: " + str(len(_BUSY_BODY)).encode() + b"\r\n"
-        b"Connection: close\r\n\r\n" + _BUSY_BODY)
+        b"Connection: close\r\n\r\n" + _BUSY_BODY
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1031,8 +1014,7 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
                 try:
                     # same query-stripping as do_GET, so /health?x
                     # also qualifies for the inline answer
-                    path = urllib.parse.urlsplit(
-                        parts[1].decode("latin-1")).path
+                    path = urllib.parse.urlsplit(parts[1].decode("latin-1")).path
                 except ValueError:
                     path = ""
             if parts[0] == b"GET" and path == "/health":
@@ -1153,16 +1135,14 @@ def _edge_mask(s, secrets):
         # longest tail that is a proper prefix of the secret: k is
         # capped at len(sec) - 1 because a full occurrence was already
         # replaced by _scrub and needs no edge pass
-        for k in range(min(len(s), len(sec) - 1),
-                       _MIN_SCRUB_LEN - 1, -1):
+        for k in range(min(len(s), len(sec) - 1), _MIN_SCRUB_LEN - 1, -1):
             if s.endswith(sec[:k]):
-                s = s[:len(s) - k] + "***"
+                s = s[: len(s) - k] + "***"
                 break
         # longest head that is a proper suffix of the secret - covers
         # a raw message clipped on the left before it reached _scrub
-        for k in range(min(len(s), len(sec) - 1),
-                       _MIN_SCRUB_LEN - 1, -1):
-            if s.startswith(sec[len(sec) - k:]):
+        for k in range(min(len(s), len(sec) - 1), _MIN_SCRUB_LEN - 1, -1):
+            if s.startswith(sec[len(sec) - k :]):
                 s = "***" + s[k:]
                 break
     return s
@@ -1205,78 +1185,76 @@ def _selftest():
     check("_mask short -> ***", _mask("abc") == "***")
     check("_mask none -> ***", _mask(None) == "***")
     masked = _mask(tok)
-    check("_mask long prefix-only",
-          masked == tok[:4] + "***" and tok[4:] not in masked)
+    check("_mask long prefix-only", masked == tok[:4] + "***" and tok[4:] not in masked)
     s = _scrub(f"err {tok} mid {tok} end", tok)
-    check("_scrub masks every occurrence",
-          tok not in s and s.count("***") == 2)
-    check("_scrub sub-8-char secret skipped",
-          _scrub("a b c", "b") == "a b c")
-    check("_scrub empty/None secrets ignored",
-          _scrub("plain", None, "") == "plain")
+    check("_scrub masks every occurrence", tok not in s and s.count("***") == 2)
+    check("_scrub sub-8-char secret skipped", _scrub("a b c", "b") == "a b c")
+    check("_scrub empty/None secrets ignored", _scrub("plain", None, "") == "plain")
     check("_scrub non-str msg", _scrub(12345, tok) == "12345")
     # _scrub_capped: a full secret straddling the cap is replaced
     # before the cut, and a partial secret left on a boundary (the
     # cap itself, or a raw message already clipped mid-secret) is
     # edge-masked instead of leaking a live-token prefix
     capped = _scrub_capped("x" * 295 + tok + " tail", 300, tok)
-    check("_scrub_capped secret straddling cap stays masked",
-          "t" * 8 not in capped and len(capped) <= 300)
+    check(
+        "_scrub_capped secret straddling cap stays masked",
+        "t" * 8 not in capped and len(capped) <= 300,
+    )
     tail = _scrub_capped("boom: " + tok[:40], 300, tok)
-    check("_scrub_capped masks tail-edge secret prefix",
-          tok[:40] not in tail and tail.endswith("***"))
+    check(
+        "_scrub_capped masks tail-edge secret prefix", tok[:40] not in tail and tail.endswith("***")
+    )
     head = _scrub_capped(tok[30:] + " failed", 300, tok)
-    check("_scrub_capped masks head-edge secret suffix",
-          not head.startswith("t") and head.startswith("***"))
-    check("_scrub_capped plain text untouched",
-          _scrub_capped("plain error", 300, tok) == "plain error")
-    check("_edge_mask below-length-floor prefix kept",
-          _edge_mask("ends " + tok[:5], (tok,)) ==
-          "ends " + tok[:5])
-    check("_check_result None -> accept",
-          _check_result(None, "") is None)
+    check(
+        "_scrub_capped masks head-edge secret suffix",
+        not head.startswith("t") and head.startswith("***"),
+    )
+    check(
+        "_scrub_capped plain text untouched",
+        _scrub_capped("plain error", 300, tok) == "plain error",
+    )
+    check(
+        "_edge_mask below-length-floor prefix kept",
+        _edge_mask("ends " + tok[:5], (tok,)) == "ends " + tok[:5],
+    )
+    check("_check_result None -> accept", _check_result(None, "") is None)
     r5 = _check_result(5, "")
-    check("_check_result 5 -> terminal",
-          r5 is not None and r5.get("ok") is False and
-          "retryable" not in r5)
+    check(
+        "_check_result 5 -> terminal",
+        r5 is not None and r5.get("ok") is False and "retryable" not in r5,
+    )
     r6 = _check_result(6, "")
-    check("_check_result non-5 -> retryable",
-          r6 is not None and r6.get("retryable") is True)
+    check("_check_result non-5 -> retryable", r6 is not None and r6.get("retryable") is True)
     # transport-error masking goes through the secrets registry, not
     # the value under check - _get_token() always _remember_secret's
     # the token before vk_check, so register it the same way here
     _remember_secret(tok)
     rt = _check_result({"transport": f"reset by peer {tok}"}, "")
-    check("_check_result transport -> retryable",
-          rt is not None and rt.get("retryable") is True)
-    check("_check_result transport scrubbed",
-          rt is not None and tok not in rt.get("error", ""))
-    check("_is_vk_url vk hosts",
-          _is_vk_url("https://vk.ru/feed") and
-          _is_vk_url("https://m.vk.com/x") and
-          not _is_vk_url("https://vk.ru.evil.example/") and
-          not _is_vk_url("https://example.com/") and
-          not _is_vk_url("not a url"))
+    check("_check_result transport -> retryable", rt is not None and rt.get("retryable") is True)
+    check("_check_result transport scrubbed", rt is not None and tok not in rt.get("error", ""))
+    check(
+        "_is_vk_url vk hosts",
+        _is_vk_url("https://vk.ru/feed")
+        and _is_vk_url("https://m.vk.com/x")
+        and not _is_vk_url("https://vk.ru.evil.example/")
+        and not _is_vk_url("https://example.com/")
+        and not _is_vk_url("not a url"),
+    )
     # _authorized's shared-secret gate: stub `self` with a headers
     # dict, patch the module SECRET - the real code path runs.
     import types
+
     saved = SECRET
     try:
         SECRET = "selftest-shared-secret"
-        good = types.SimpleNamespace(
-            headers={"X-Shared-Token": "selftest-shared-secret"})
-        bad = types.SimpleNamespace(
-            headers={"X-Shared-Token": "wrong"})
+        good = types.SimpleNamespace(headers={"X-Shared-Token": "selftest-shared-secret"})
+        bad = types.SimpleNamespace(headers={"X-Shared-Token": "wrong"})
         none_hdr = types.SimpleNamespace(headers={})
-        check("_authorized valid secret",
-              Handler._authorized(good) is True)
-        check("_authorized wrong secret",
-              Handler._authorized(bad) is False)
-        check("_authorized missing header",
-              Handler._authorized(none_hdr) is False)
+        check("_authorized valid secret", Handler._authorized(good) is True)
+        check("_authorized wrong secret", Handler._authorized(bad) is False)
+        check("_authorized missing header", Handler._authorized(none_hdr) is False)
         SECRET = ""
-        check("_authorized fails closed on empty SECRET",
-              Handler._authorized(good) is False)
+        check("_authorized fails closed on empty SECRET", Handler._authorized(good) is False)
     finally:
         SECRET = saved
     # _auth_401_seen rate-limits the /vk-token 401 journal line: the
@@ -1288,9 +1266,10 @@ def _selftest():
         _AUTH_401_COUNT = 0
         verbatim = [_auth_401_seen() for _ in range(5)]
         suppressed = all(_auth_401_seen() == 0 for _ in range(94))
-        check("_auth_401_seen first-5 verbatim then 100th",
-              verbatim == [1, 2, 3, 4, 5] and suppressed and
-              _auth_401_seen() == 100)
+        check(
+            "_auth_401_seen first-5 verbatim then 100th",
+            verbatim == [1, 2, 3, 4, 5] and suppressed and _auth_401_seen() == 100,
+        )
     finally:
         _AUTH_401_COUNT = saved401
     # _health_status: secret_set mirrors the SECRET global and ok
@@ -1303,25 +1282,27 @@ def _selftest():
     try:
         SECRET = "selftest-shared-secret"
         hs = _health_status()
-        check("_health_status secret_set + ok formula",
-              hs.get("secret_set") is True and
-              isinstance(hs.get("cdp_reachable"), bool) and
-              hs.get("ok") ==
-              (hs["secret_set"] and hs["cdp_reachable"]))
+        check(
+            "_health_status secret_set + ok formula",
+            hs.get("secret_set") is True
+            and isinstance(hs.get("cdp_reachable"), bool)
+            and hs.get("ok") == (hs["secret_set"] and hs["cdp_reachable"]),
+        )
         probe_ts = _cdp_probe_state["ts"]
         hs2 = _health_status()
-        check("_health_status cdp probe cached inside TTL",
-              _cdp_probe_state["ts"] == probe_ts and
-              hs2["cdp_reachable"] == hs["cdp_reachable"])
+        check(
+            "_health_status cdp probe cached inside TTL",
+            _cdp_probe_state["ts"] == probe_ts and hs2["cdp_reachable"] == hs["cdp_reachable"],
+        )
         SECRET = ""
-        check("_health_status degraded without secret",
-              _health_status()["ok"] is False and
-              _health_status()["secret_set"] is False)
+        check(
+            "_health_status degraded without secret",
+            _health_status()["ok"] is False and _health_status()["secret_set"] is False,
+        )
     finally:
         SECRET = saved
     if failures:
-        print(f"selftest: {len(failures)} failure(s): "
-              + ", ".join(failures))
+        print(f"selftest: {len(failures)} failure(s): " + ", ".join(failures))
         return 1
     print("selftest: all checks passed")
     return 0
@@ -1331,14 +1312,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8792)
     ap.add_argument("--once", action="store_true")
-    ap.add_argument("--selftest", action="store_true",
-                    help="run offline unit checks for the pure "
-                         "helpers (_mask/_scrub/_check_result/"
-                         "_is_vk_url/_authorized/_health_status) "
-                         "and exit")
-    ap.add_argument("--show-token", action="store_true",
-                    help="print the raw access_token with --once "
-                         "(default: masked)")
+    ap.add_argument(
+        "--selftest",
+        action="store_true",
+        help="run offline unit checks for the pure "
+        "helpers (_mask/_scrub/_check_result/"
+        "_is_vk_url/_authorized/_health_status) "
+        "and exit",
+    )
+    ap.add_argument(
+        "--show-token",
+        action="store_true",
+        help="print the raw access_token with --once (default: masked)",
+    )
     args = ap.parse_args()
     if args.selftest:
         sys.exit(_selftest())
@@ -1352,8 +1338,7 @@ def main():
         # (here the run is single-threaded, but the shapes stay
         # identical so a future shared call site stays safe)
         if res.get("error"):
-            res["error"] = _scrub_capped(res["error"], 300, SECRET,
-                                         *_secrets_snapshot())
+            res["error"] = _scrub_capped(res["error"], 300, SECRET, *_secrets_snapshot())
         if not args.show_token and res.get("access_token"):
             res["access_token"] = _mask(res["access_token"])
         print(json.dumps(res))
@@ -1366,10 +1351,11 @@ def main():
     # not stall concurrent /health or other /vk-token callers, but the
     # thread count stays capped so a loopback connection flood cannot
     # exhaust the process
-    _log(f"serving on 127.0.0.1:{args.port} cdp={CDP} "
-         f"shared_secret={'set' if SECRET else 'MISSING - /vk-token fails closed'}")
-    BoundedThreadingHTTPServer(("127.0.0.1", args.port),
-                               Handler).serve_forever()
+    _log(
+        f"serving on 127.0.0.1:{args.port} cdp={CDP} "
+        f"shared_secret={'set' if SECRET else 'MISSING - /vk-token fails closed'}"
+    )
+    BoundedThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
 
 
 if __name__ == "__main__":
