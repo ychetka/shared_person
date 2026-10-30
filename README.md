@@ -54,6 +54,42 @@ All project secrets/config live in `../ENV` (not part of this repo):
 `VK_ACCESS_TOKEN`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`,
 `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN`.
 
+**Required secrets (breaking):** `docker-compose.yml` declares seven
+vars with `${VAR:?}` guards - `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`,
+`VK_USER_ID` and the four generated secrets listed below - so
+`docker compose up` FAILS until the compose environment provides them
+(via `--env-file
+../ENV` or exported vars) - previously an unset value was injected
+empty and the runtime gate failed closed in silence. The guards are
+evaluated for EVERY compose subcommand, not only `up`: `down`,
+`stop`, `ps`, `logs`, `exec` all fail in a shell without the vars,
+so keep `--env-file ../ENV` on every `docker compose` call. If
+`../ENV` is unavailable and the stack must be stopped,
+`docker stop <container>` works directly (every service has a pinned
+`container_name`).
+Generate each of the four below with `openssl rand -hex 32` and add
+to `../ENV` before `compose up`:
+
+- `TG_WEBHOOK_SECRET` - signs Telegram webhook deliveries
+  (X-Telegram-Bot-Api-Secret-Token); re-register with
+  `tools/tg_webhook_setup.sh` after adding/rotating.
+- `DRAFT_WEBHOOK_SECRET` - shared secret on the moderation-draft
+  webhook (draft delivery).
+- `CONTENT_GEN_WEBHOOK_SECRET` - shared secret on the content-gen
+  webhook (draft generation).
+- `VK_TOKEN_SECRET` - shared secret on the host vk-token service
+  (`tools/vk_token_service.py`, X-Shared-Token header).
+
+`TELEGRAM_CHAT_ID` is deliberately NOT behind `${VAR:?}`: the setup
+flow (sp-tg-setup) can legitimately discover the operator chat id and
+persist it into `state/tg.json` on first run, so a fresh install must
+still boot without it. The cost is a silent dead-end: with NEITHER
+`TELEGRAM_CHAT_ID` NOR a populated `tg.json`, the OPERATOR_CHAT gate
+in sp-tg-moderation drops every signed update and the bot looks dead
+- nothing works until `tg.json` is populated (or the env var is set).
+Set `TELEGRAM_CHAT_ID` in `../ENV` to pin the operator chat from the
+start.
+
 ## Platform access
 
 See `PLATFORM_ACCESS.md` - how VK/LinkedIn credentials were obtained

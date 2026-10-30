@@ -3,6 +3,13 @@
 # images must be flattened imports (see n8n-local / docs/deploy.md).
 # Build steps (npm install, tsc) run on the HOST - containers only COPY
 # prebuilt artifacts, so no network is needed inside `docker build`.
+#
+# Operational caveat: the ${VAR:?} guards below are evaluated for EVERY
+# compose subcommand, not just `up` - `down`, `stop`, `ps`, `logs`,
+# `exec` all fail in a shell without the vars. Keep `--env-file ../ENV`
+# on every `docker compose` call. If ../ENV is unavailable and the
+# stack must be stopped, `docker stop <container>` works directly
+# (container_name is pinned for every service).
 
 name: shared-person
 
@@ -40,11 +47,80 @@ services:
       - N8N_SECURE_COOKIE=false
       # Webhooks published at https://shared-person.opticode.su (edge proxy).
       - WEBHOOK_URL=https://shared-person.opticode.su:8443/
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      # platform tokens for the publish workflow (optional - drivers
-      # fall back to the hands-agent queue when a token is absent)
+      # required like the webhook secrets below: every Code node TG
+      # call reads this via $env, and an empty value only surfaces as
+      # silent 404s from api.telegram.org at runtime - ${VAR:?} fails
+      # `docker compose up` loudly instead
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:?required - set in ../ENV}
+      # Telegram webhook authenticity: setWebhook registers this as
+      # secret_token; Telegram then signs every delivery with the
+      # X-Telegram-Bot-Api-Secret-Token header, which sp-tg-moderation
+      # verifies before touching any update (tools/tg_webhook_setup.sh
+      # re-registers the webhook). Required - ${VAR:?} makes an unset
+      # secret fail `docker compose up` loudly instead of injecting an
+      # empty value that leaves the gate closed at runtime (a dead
+      # pipeline that still looks deployed). The runtime fail-closed
+      # check stays as the second layer.
+      - TG_WEBHOOK_SECRET=${TG_WEBHOOK_SECRET:?TG_WEBHOOK_SECRET is required - set it in the compose environment}
+      # operator chat is pinned config, not learned from updates - a
+      # forged message used to rewrite state/tg.json and hijack every
+      # preview. tg.json (written by sp-tg-setup) stays as fallback.
+      # Intentionally NOT ${VAR:?}: the setup flow resolves the chat id
+      # into tg.json on first run, so compose must still start without
+      # it - but with NEITHER set the OPERATOR_CHAT gate drops every
+      # update silently (see README).
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      # moderation-draft webhook shared secret: the public draft
+      # endpoint requires an X-Shared-Token or X-TG-Draft-Secret header
+      # matching this (fails closed when unset); the content-gen
+      # workflow sends it on its internal draft dispatch. Required for
+      # draft delivery - generate with `openssl rand -hex 32`.
+      # ${VAR:?} like TG_WEBHOOK_SECRET: fail at compose-up time, not
+      # silently at runtime.
+      - DRAFT_WEBHOOK_SECRET=${DRAFT_WEBHOOK_SECRET:?DRAFT_WEBHOOK_SECRET is required - set it in the compose environment}
+      # content-gen webhook shared secret: this endpoint is public via
+      # the edge proxy too, and a forged POST makes the workflow itself
+      # dispatch attacker text to moderation-draft with the valid
+      # DRAFT_WEBHOOK_SECRET - a live Approve button in the operator
+      # chat plus free LLM spend. Requires an X-Content-Gen-Secret
+      # header matching this (fails closed when unset); the internal
+      # callers in sp-tg-moderation (post N, edit rewrite) send it.
+      # Required for generation - generate with `openssl rand -hex 32`.
+      # ${VAR:?} like TG_WEBHOOK_SECRET: fail at compose-up time, not
+      # silently at runtime.
+      - CONTENT_GEN_WEBHOOK_SECRET=${CONTENT_GEN_WEBHOOK_SECRET:?CONTENT_GEN_WEBHOOK_SECRET is required - set it in the compose environment}
+      # enabled publish platforms, comma-separated - single source for
+      # the ENABLED gates in sp-publish (Publish Tick) and
+      # sp-tg-moderation (Handle TG Update); both read $env via
+      # PUBLISH_PLATFORMS so the two cannot drift. 'all' is valid and
+      # expands to every writer platform (linkedin/facebook/fb/vk),
+      # matching content-gen's MAP.all fan-out. Default keeps VK
+      # only; non-enabled platforms land in queue skipped/
+      - PUBLISH_PLATFORMS=${PUBLISH_PLATFORMS:-vk}
+      # rewrite-overwrite window (ms) - single source for the two
+      # REWRITE_WINDOW_MS readers in sp-tg-moderation: Prepare Draft
+      # (how long a 'rewrite' draft may be overwritten through the
+      # public webhook) and Handle TG Update (how long Approve
+      # refuses while a rewrite is in flight). Both Code nodes fall
+      # back to 900000 (15min) when this is unset/empty.
+      - REWRITE_WINDOW_MS=${REWRITE_WINDOW_MS:-}
+      # platform tokens for the publish workflow (optional - VK can run
+      # on the refresh-service token; non-VK platforms go to skipped/)
       - VK_ACCESS_TOKEN=${VK_ACCESS_TOKEN:-}
-      - VK_USER_ID=${VK_USER_ID:-}
+      # required by the VK publish driver: publishVk uses it as the
+      # wall owner_id for wall.post, wall.getById and the orphan
+      # probe, and vk is the only enabled driver - ${VAR:?} fails
+      # compose up loudly instead of a runtime 'VK_USER_ID not set'
+      # throw on the first approved draft
+      - VK_USER_ID=${VK_USER_ID:?VK_USER_ID is required - set it in the compose environment}
+      # host-side token refresh service (tools/vk_token_service.py):
+      # the URL override only works if it is passed through here, and
+      # /vk-token requires the shared-secret header
+      - VK_TOKEN_REFRESH_URL=${VK_TOKEN_REFRESH_URL:-}
+      # required like the webhook secrets above: ${VAR:?} fails
+      # compose up loudly instead of injecting an empty value that
+      # leaves the /vk-token gate closed at runtime
+      - VK_TOKEN_SECRET=${VK_TOKEN_SECRET:?VK_TOKEN_SECRET is required - set it in the compose environment}
       - LINKEDIN_ACCESS_TOKEN=${LINKEDIN_ACCESS_TOKEN:-}
       - LINKEDIN_PERSON_URN=${LINKEDIN_PERSON_URN:-}
     volumes:
@@ -67,7 +143,11 @@ services:
       - apparmor=unconfined
     environment:
       - LLM_GATEWAY_PORT=8787
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # required for the LLM pipeline (llm-gateway /run and /image both
+      # call Gemini): ${VAR:?} fails `docker compose up` loudly instead
+      # of injecting an empty key that only surfaces as silent LLM
+      # failures at runtime
+      - GEMINI_API_KEY=${GEMINI_API_KEY:?GEMINI_API_KEY is required - set it in the compose environment}
       - ROLES_DIR=/app/code/roles
       - PROMPTS_DIR=/app/code/prompts
       - CONTEXT_DIR=/app/code/context

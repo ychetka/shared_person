@@ -1,0 +1,79 @@
+# systemd --user unit for tools/vk_token_service.py (VK token provider,
+# required dependency of the sp-publish n8n workflow).
+#
+# Install:
+#   # parse ENV through tools/env_val.sh - the same env_val()
+#   # semantics tg_webhook_setup.sh uses (optional 'export ', last
+#   # assignment wins, one quote pair stripped, ' # comment' tail
+#   # removed). A bare grep|sed would leave quote chars and comment
+#   # tails inside the value systemd exports.
+#   # Guard on empty: a missing key in ../ENV resolves to '' and the
+#   # env file would carry a blank VK_TOKEN_SECRET - the service then
+#   # fails closed on 401 with no obvious cause. Fail loudly here.
+#   sec="$(tools/env_val.sh VK_TOKEN_SECRET)" && [ -n "$sec" ] \
+#     || { echo "VK_TOKEN_SECRET missing or empty in ../ENV" >&2; exit 1; }
+#   printf 'VK_TOKEN_SECRET=%s\n' "$sec" > deploy/vk-token.env
+#   chmod 600 deploy/vk-token.env
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/vk-token.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vk-token.service
+#   loginctl enable-linger "$USER"   # start at boot without a login
+#
+# %h resolves to the installing user's home - adjust WorkingDirectory
+# and EnvironmentFile if the checkout lives somewhere else.
+[Unit]
+Description=VK access-token service for shared_person sp-publish (tools/vk_token_service.py)
+# needs the operator's Chrome on CDP :9223; ordering vs a browser unit
+# is impossible in a user manager, so dependency is restart-driven
+After=default.target
+# cap the Restart=always loop below: without a start limit a broken
+# service (e.g. Chrome never opens :9223, or a bad deploy) restarts
+# every 5s forever. 5 starts inside 5min marks the unit failed until
+# `systemctl --user reset-failed vk-token.service` + start - loud in
+# `systemctl --user status` instead of an infinite silent flap loop.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/shared_person/code
+# Dedicated env file holding ONLY VK_TOKEN_SECRET (the shared-secret
+# gate for /vk-token) - do NOT point this at the project ENV: its ~18
+# secrets (TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, VK_ACCESS_TOKEN, ...)
+# would all land in `systemctl --user show -p Environment` and
+# /proc/<pid>/environ of a daemon that needs exactly one. Generate it
+# from the project ENV at install (see header; the file is gitignored).
+# Missing file is tolerated so a fresh checkout still starts - the
+# service then fails closed on 401. Extra overrides (VK_CDP_URL) can
+# be appended to deploy/vk-token.env if ever needed.
+EnvironmentFile=-%h/projects/shared_person/code/deploy/vk-token.env
+# resolve uv through PATH instead of a hardcoded absolute path - the
+# default installer puts it in ~/.local/bin, but ~/.cargo/bin and
+# /usr/local/bin are common too (`which uv`). Extend the list if a
+# host keeps uv somewhere else.
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+# `uv run` needs its package cache warm: on a cold cache it resolves
+# the PEP 723 deps against the package index, so a boot with no
+# network yet makes every start fail on the resolver - and with a
+# short RestartSec all 5 StartLimitBurst starts burn inside the same
+# offline window and the unit flaps to failed before the network is
+# even up. RestartSec=30 spreads the retries: each restart is a fresh
+# chance to catch the index once egress appears, and a still-online
+# cold cache resolves on the first try anyway. If boots are routinely
+# offline, warm the cache once while online (`uv run
+# tools/vk_token_service.py --once` or `uv sync` in this checkout) or
+# raise this further.
+ExecStart=/usr/bin/env uv run tools/vk_token_service.py --port 8792
+Restart=always
+RestartSec=30
+# egress is required: vk_check() calls api.vk.com over HTTPS and the
+# extractor reaches the operator Chrome CDP port (default
+# 127.0.0.1:9223) - do NOT add network restrictions to this unit.
+# Only the HTTP listener is loopback-bound (:8792); keep it that way
+# and never expose the port beyond loopback - it serves live tokens.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
