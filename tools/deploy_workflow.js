@@ -104,7 +104,9 @@ if (dbFlagGiven && !DB) {
 if (!DB) {
   console.error(
     "could not resolve the n8n DB from docker volume " +
-      "shared-person_n8n_storage - pass --db <path>/database.sqlite",
+      "shared-person_n8n_storage - is docker reachable? With rootless " +
+      "docker set DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock, " +
+      "or pass --db <path>/database.sqlite",
   );
   process.exit(1);
 }
