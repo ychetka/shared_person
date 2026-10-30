@@ -1,0 +1,11 @@
+target-version = "py310"
+line-length = 100
+
+extend-exclude = [
+    "hands-agent/queue",
+    "n8n",
+    "n8n-workflows",
+]
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "BLE", "RUF"]

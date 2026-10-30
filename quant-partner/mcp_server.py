@@ -19,31 +19,49 @@ script (kept OUTSIDE the repo).
 POST to generativelanguage.googleapis.com goes strictly over IPv4
 (IPv6 routing to Google AI breaks POST sessions with 0 bytes - diagnosed).
 """
-import json, os, socket, sys, urllib.request
+
+import json
+import os
+import socket
+import sys
+import urllib.request
 
 import yaml
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(BASE, ".."))
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
-DEFAULT_MODELS = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash",
-                  "gemini-flash-lite-latest", "gemini-flash-latest"]
+DEFAULT_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-flash-lite-latest",
+    "gemini-flash-latest",
+]
 TIMEOUT = 240
+
 
 def log(*a):
     print(*a, file=sys.stderr, flush=True)
 
+
 # --- IPv4-only DNS (IPv6 POST to Google AI hangs) ---
 _orig = socket.getaddrinfo
+
+
 def _v4(host, port, *a, **k):
     return [x for x in _orig(host, port, *a, **k) if x[0] == socket.AF_INET]
+
+
 socket.getaddrinfo = _v4
+
 
 def _read(p):
     try:
         return open(p, encoding="utf-8").read().strip()
     except OSError:
         return ""
+
 
 def load_manifest(role=None):
     """Return role manifest dict from ../roles/<role>.yaml (default: strategist)."""
@@ -58,23 +76,23 @@ def load_manifest(role=None):
     doc.setdefault("prompt", safe)
     return doc
 
+
 def system_prompt(manifest):
     parts = []
     for slot in manifest.get("context_slots") or []:
-        body = _read(os.path.join(ROOT, "context", f"{slot}.md")) or \
-               _read(os.path.join(ROOT, "context", f"{slot}.txt"))
+        body = _read(os.path.join(ROOT, "context", f"{slot}.md")) or _read(
+            os.path.join(ROOT, "context", f"{slot}.txt")
+        )
         if body:
             parts.append(f'<context name="{slot}">\n{body}\n</context>')
-    parts.append(_read(os.path.join(ROOT, "prompts",
-                                    f"{manifest['prompt']}.txt")))
+    parts.append(_read(os.path.join(ROOT, "prompts", f"{manifest['prompt']}.txt")))
     p = "\n\n".join(x for x in parts if x)
-    ctx_file = os.environ.get(
-        "QUANT_CONTEXT_FILE",
-        os.path.join(ROOT, "..", "client_context.md"))
+    ctx_file = os.environ.get("QUANT_CONTEXT_FILE", os.path.join(ROOT, "..", "client_context.md"))
     ctx = _read(ctx_file)
     if ctx and "client_context" not in (manifest.get("context_slots") or []):
         p += "\n\n## Client context\n" + ctx
     return p
+
 
 def gemini(contents, role=None):
     manifest = load_manifest(role)
@@ -95,10 +113,13 @@ def gemini(contents, role=None):
         if not model:
             continue
         try:
-            url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-                   f"{model}:generateContent?key={API_KEY}")
-            req = urllib.request.Request(url, data=json.dumps(payload).encode(),
-                                         headers={"Content-Type": "application/json"})
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={API_KEY}"
+            )
+            req = urllib.request.Request(
+                url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}
+            )
             out = json.loads(urllib.request.urlopen(req, timeout=TIMEOUT).read())
             parts = out["candidates"][0]["content"]["parts"]
             text = "".join(p.get("text", "") for p in parts).strip()
@@ -106,36 +127,46 @@ def gemini(contents, role=None):
                 log(f"gemini ok: {model}")
                 return text
             last_err = f"{model}: empty response"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - try every fallback model regardless of failure type
             last_err = f"{model}: {e}"
             log(f"gemini fail: {last_err}")
     return f"ERROR: partner unreachable ({last_err})"
 
+
 TOOLS = [
     {
         "name": "ask_quant_partner",
-        "description": ("Ask the strategy partner (Gemini, role: Personal "
-                        "Brand Strategist / Tech Media Architect). Single "
-                        "question-answer, no memory between calls - pass all "
-                        "needed context in question/context."),
+        "description": (
+            "Ask the strategy partner (Gemini, role: Personal "
+            "Brand Strategist / Tech Media Architect). Single "
+            "question-answer, no memory between calls - pass all "
+            "needed context in question/context."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "question": {"type": "string",
-                             "description": "Question or hypothesis to analyze"},
-                "context": {"type": "string",
-                            "description": "Optional: data/stats related to the question"},
-                "role": {"type": "string",
-                         "description": "Optional: role manifest name from roles/<role>.yaml (default: strategist)"},
+                "question": {"type": "string", "description": "Question or hypothesis to analyze"},
+                "context": {
+                    "type": "string",
+                    "description": "Optional: data/stats related to the question",
+                },
+                "role": {
+                    "type": "string",
+                    "description": (
+                        "Optional: role manifest name from roles/<role>.yaml (default: strategist)"
+                    ),
+                },
             },
             "required": ["question"],
         },
     },
     {
         "name": "ask_quant_partner_dialog",
-        "description": ("Continue a dialog with the strategy partner: pass message "
-                        "history [{role:'user'|'model', text:'...'}] - for "
-                        "multi-turn hypothesis discussion."),
+        "description": (
+            "Continue a dialog with the strategy partner: pass message "
+            "history [{role:'user'|'model', text:'...'}] - for "
+            "multi-turn hypothesis discussion."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -150,36 +181,45 @@ TOOLS = [
                         "required": ["role", "text"],
                     },
                 },
-                "role": {"type": "string",
-                         "description": "Optional: role manifest name from roles/<role>.yaml (default: strategist)"},
+                "role": {
+                    "type": "string",
+                    "description": (
+                        "Optional: role manifest name from roles/<role>.yaml (default: strategist)"
+                    ),
+                },
             },
             "required": ["messages"],
         },
     },
 ]
 
+
 def call_tool(name, args):
     role = args.get("role")
     if name == "ask_quant_partner":
         q = args["question"]
         ctx = args.get("context", "")
-        text = gemini([{"role": "user", "parts": [{"text": q + ("\n\n" + ctx if ctx else "")}]}], role)
+        text = gemini(
+            [{"role": "user", "parts": [{"text": q + ("\n\n" + ctx if ctx else "")}]}], role
+        )
         return text
     if name == "ask_quant_partner_dialog":
-        contents = [{"role": m["role"], "parts": [{"text": m["text"]}]}
-                    for m in args["messages"]]
+        contents = [{"role": m["role"], "parts": [{"text": m["text"]}]} for m in args["messages"]]
         return gemini(contents, role)
     return f"ERROR: unknown tool {name}"
 
+
 def reply(rid, result):
-    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid,
-                                 "result": result}) + "\n")
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}) + "\n")
     sys.stdout.flush()
 
+
 def reply_err(rid, msg):
-    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "error":
-                                 {"code": -32603, "message": msg}}) + "\n")
+    sys.stdout.write(
+        json.dumps({"jsonrpc": "2.0", "id": rid, "error": {"code": -32603, "message": msg}}) + "\n"
+    )
     sys.stdout.flush()
+
 
 def main():
     if not API_KEY:
@@ -195,12 +235,14 @@ def main():
         rid = msg.get("id")
         method = msg.get("method", "")
         if method == "initialize":
-            reply(rid, {
-                "protocolVersion": msg.get("params", {}).get(
-                    "protocolVersion", "2024-11-05"),
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "quant-partner", "version": "1.0.0"},
-            })
+            reply(
+                rid,
+                {
+                    "protocolVersion": msg.get("params", {}).get("protocolVersion", "2024-11-05"),
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "quant-partner", "version": "1.0.0"},
+                },
+            )
         elif method in ("notifications/initialized", "initialized"):
             pass
         elif method == "ping":
@@ -212,10 +254,11 @@ def main():
             try:
                 text = call_tool(p.get("name", ""), p.get("arguments", {}) or {})
                 reply(rid, {"content": [{"type": "text", "text": text}]})
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - JSON-RPC boundary: any tool failure answers an error reply
                 reply_err(rid, str(e))
         elif rid is not None:
             reply_err(rid, f"unsupported method {method}")
+
 
 if __name__ == "__main__":
     main()

@@ -7,11 +7,7 @@ export interface LlmResult {
   backend: string;
 }
 
-async function callGemini(
-  role: RoleManifest,
-  system: string,
-  input: string,
-): Promise<LlmResult> {
+async function callGemini(role: RoleManifest, system: string, input: string): Promise<LlmResult> {
   if (!config.geminiKey) throw new Error("GEMINI_API_KEY not set");
   const wantsJson = role.output?.type === "json";
   const url =
@@ -93,14 +89,12 @@ export async function callImage(prompt: string): Promise<ImageResult> {
     if (remaining <= 0) {
       lastErr = new Error(
         `image deadline exceeded (${config.imageTotalTimeoutMs}ms total); ` +
-        `last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+          `last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
       );
       break;
     }
     try {
-      return await callGeminiImage(
-        model, prompt, Math.min(config.requestTimeoutMs, remaining),
-      );
+      return await callGeminiImage(model, prompt, Math.min(config.requestTimeoutMs, remaining));
     } catch (e) {
       lastErr = e;
     }

@@ -52,7 +52,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
 # --- style -----------------------------------------------------------------
 
@@ -66,21 +66,23 @@ GOOD = "#3fb950"
 BAD = "#f85149"
 SERIES_COLORS = ["#58a6ff", "#3fb950", "#d29922", "#f85149", "#bc8cff"]
 
-plt.rcParams.update({
-    "figure.facecolor": BG,
-    "axes.facecolor": PANEL,
-    "savefig.facecolor": BG,
-    "text.color": FG,
-    "axes.edgecolor": EDGE,
-    "axes.labelcolor": FG,
-    "xtick.color": MUTED,
-    "ytick.color": MUTED,
-    "axes.grid": True,
-    "grid.color": EDGE,
-    "grid.linewidth": 0.6,
-    "font.family": "DejaVu Sans",
-    "font.size": 11,
-})
+plt.rcParams.update(
+    {
+        "figure.facecolor": BG,
+        "axes.facecolor": PANEL,
+        "savefig.facecolor": BG,
+        "text.color": FG,
+        "axes.edgecolor": EDGE,
+        "axes.labelcolor": FG,
+        "xtick.color": MUTED,
+        "ytick.color": MUTED,
+        "axes.grid": True,
+        "grid.color": EDGE,
+        "grid.linewidth": 0.6,
+        "font.family": "DejaVu Sans",
+        "font.size": 11,
+    }
+)
 
 # default output: <project>/materials/viz (repo root = parents[1] of tools/)
 DEFAULT_OUT = Path(__file__).resolve().parents[2] / "materials" / "viz"
@@ -89,6 +91,7 @@ MAX_SPECS = 2
 
 
 # --- helpers ----------------------------------------------------------------
+
 
 def fmt_num(v):
     """Compact human number: 2593 -> '2,593', -1.06 -> '-1.06'."""
@@ -118,8 +121,9 @@ def new_fig(w=8.0, h=4.5):
 
 def finish(fig, title, out):
     if title:
-        fig.suptitle(textwrap.fill(str(title), 60), color=FG,
-                     fontsize=13, fontweight="bold", y=0.98)
+        fig.suptitle(
+            textwrap.fill(str(title), 60), color=FG, fontsize=13, fontweight="bold", y=0.98
+        )
     fig.savefig(out, bbox_inches="tight", pad_inches=0.25)
     plt.close(fig)
 
@@ -127,13 +131,13 @@ def finish(fig, title, out):
 def signed_colors(values):
     vals = [v for v in values if isinstance(v, (int, float))]
     if vals and any(v < 0 for v in vals):
-        return [BAD if (isinstance(v, (int, float)) and v < 0) else GOOD
-                for v in values]
+        return [BAD if (isinstance(v, (int, float)) and v < 0) else GOOD for v in values]
     return [ACCENT] * len(values)
 
 
 # --- chart renderers ---------------------------------------------------------
 # Each takes (spec, dataset, out_path). Return True on success.
+
 
 def chart_stat_cards(spec, ds, out):
     items = (ds.get("data") or {}).get("items") or []
@@ -152,15 +156,36 @@ def chart_stat_cards(spec, ds, out):
     for k, it in enumerate(items):
         r, c = divmod(k, cols)
         y = rows - 1 - r
-        card = FancyBboxPatch((c + 0.06, y + 0.08), 0.88, 0.84,
-                              boxstyle="round,pad=0.02,rounding_size=0.08",
-                              facecolor=PANEL, edgecolor=EDGE, linewidth=1)
+        card = FancyBboxPatch(
+            (c + 0.06, y + 0.08),
+            0.88,
+            0.84,
+            boxstyle="round,pad=0.02,rounding_size=0.08",
+            facecolor=PANEL,
+            edgecolor=EDGE,
+            linewidth=1,
+        )
         ax.add_patch(card)
         val = fmt_num(it["value"]) + (f" {unit}" if unit else "")
-        ax.text(c + 0.5, y + 0.56, val, ha="center", va="center",
-                fontsize=22, fontweight="bold", color=ACCENT)
-        ax.text(c + 0.5, y + 0.24, wrap(it.get("label", ""), 22),
-                ha="center", va="center", fontsize=10, color=MUTED)
+        ax.text(
+            c + 0.5,
+            y + 0.56,
+            val,
+            ha="center",
+            va="center",
+            fontsize=22,
+            fontweight="bold",
+            color=ACCENT,
+        )
+        ax.text(
+            c + 0.5,
+            y + 0.24,
+            wrap(it.get("label", ""), 22),
+            ha="center",
+            va="center",
+            fontsize=10,
+            color=MUTED,
+        )
     finish(fig, spec.get("title") or ds.get("title"), out)
     return True
 
@@ -169,12 +194,16 @@ def _series_parts(data):
     """Normalize series/stats/distribution payloads to (labels, named_series)."""
     if "items" in data:  # stats -> single unnamed series
         items = data["items"] or []
-        return ([str(i.get("label", "")) for i in items],
-                [("value", [i.get("value") for i in items])])
+        return (
+            [str(i.get("label", "")) for i in items],
+            [("value", [i.get("value") for i in items])],
+        )
     if "series" in data:
         x = [str(v) for v in (data.get("x") or [])]
-        sers = [(str(s.get("name", f"s{i}")), list(s.get("data") or []))
-                for i, s in enumerate(data["series"] or [])]
+        sers = [
+            (str(s.get("name", f"s{i}")), list(s.get("data") or []))
+            for i, s in enumerate(data["series"] or [])
+        ]
         if not x and sers:
             x = [str(i + 1) for i in range(len(sers[0][1]))]
         return x, sers
@@ -207,20 +236,27 @@ def chart_bar(spec, ds, out):
         return False
     fig = new_fig()
     ax = fig.add_subplot(111)
-    name, vals = sers[0]
-    vals = vals[:len(labels)]
-    labels = labels[:len(vals)]
+    _, vals = sers[0]
+    vals = vals[: len(labels)]
+    labels = labels[: len(vals)]
     colors = signed_colors(vals)
-    wl = [wrap(l, 10) for l in labels]
-    if opts.get("horizontal") or max((len(str(l)) for l in labels), default=0) > 12:
+    wl = [wrap(lb, 10) for lb in labels]
+    if opts.get("horizontal") or max((len(str(lb)) for lb in labels), default=0) > 12:
         ax.barh(range(len(vals)), vals, color=colors, height=0.62)
         ax.set_yticks(range(len(vals)))
-        ax.set_yticklabels([wrap(l, 24) for l in labels], fontsize=9)
+        ax.set_yticklabels([wrap(lb, 24) for lb in labels], fontsize=9)
         ax.invert_yaxis()
         for i, v in enumerate(vals):
             if isinstance(v, (int, float)):
-                ax.text(v, i, " " + fmt_num(v), va="center",
-                        ha="left" if v >= 0 else "right", fontsize=9, color=FG)
+                ax.text(
+                    v,
+                    i,
+                    " " + fmt_num(v),
+                    va="center",
+                    ha="left" if v >= 0 else "right",
+                    fontsize=9,
+                    color=FG,
+                )
         if ds.get("unit"):
             ax.set_xlabel(ds["unit"])
         ax.grid(axis="y", visible=False)
@@ -230,8 +266,15 @@ def chart_bar(spec, ds, out):
         ax.set_xticklabels(wl, fontsize=9)
         for i, v in enumerate(vals):
             if isinstance(v, (int, float)):
-                ax.text(i, v, fmt_num(v), ha="center",
-                        va="bottom" if v >= 0 else "top", fontsize=9, color=FG)
+                ax.text(
+                    i,
+                    v,
+                    fmt_num(v),
+                    ha="center",
+                    va="bottom" if v >= 0 else "top",
+                    fontsize=9,
+                    color=FG,
+                )
         if ds.get("unit"):
             ax.set_ylabel(ds["unit"])
         ax.grid(axis="x", visible=False)
@@ -254,15 +297,22 @@ def chart_line(spec, ds, out):
     multi = len(sers) > 1
     for i, (name, vals) in enumerate(sers[:4]):
         xs = range(len(vals))
-        ax.plot(xs, vals, marker="o", markersize=4, linewidth=1.8,
-                color=SERIES_COLORS[i % len(SERIES_COLORS)],
-                label=name if multi else None)
+        ax.plot(
+            xs,
+            vals,
+            marker="o",
+            markersize=4,
+            linewidth=1.8,
+            color=SERIES_COLORS[i % len(SERIES_COLORS)],
+            label=name if multi else None,
+        )
     n = max(len(s[1]) for s in sers)
     if labels and len(labels) == n:
         step = max(1, n // 8)
         ax.set_xticks(range(0, n, step))
-        ax.set_xticklabels([str(labels[i]) for i in range(0, n, step)],
-                           fontsize=8, rotation=30, ha="right")
+        ax.set_xticklabels(
+            [str(labels[i]) for i in range(0, n, step)], fontsize=8, rotation=30, ha="right"
+        )
     if multi:
         ax.legend(facecolor=PANEL, edgecolor=EDGE, labelcolor=FG, fontsize=9)
     if ds.get("unit"):
@@ -300,26 +350,30 @@ def _layers(nodes, edges):
 
 def chart_pipeline(spec, ds, out):
     data = ds.get("data") or {}
-    nodes = {n["id"]: str(n.get("label") or n["id"])
-             for n in (data.get("nodes") or []) if isinstance(n, dict) and "id" in n}
-    edges = [e for e in (data.get("edges") or [])
-             if e.get("from") in nodes and e.get("to") in nodes]
+    nodes = {
+        n["id"]: str(n.get("label") or n["id"])
+        for n in (data.get("nodes") or [])
+        if isinstance(n, dict) and "id" in n
+    }
+    edges = [
+        e for e in (data.get("edges") or []) if e.get("from") in nodes and e.get("to") in nodes
+    ]
     if not nodes:
         return False
     lay = _layers(list(nodes), edges)
     max_l = max(lay.values())
     by_layer = {}
-    for n, l in lay.items():
-        by_layer.setdefault(l, []).append(n)
+    for n, lv in lay.items():
+        by_layer.setdefault(lv, []).append(n)
 
     fig = new_fig(max(7.0, 2.4 * (max_l + 1)), 4.5)
     ax = fig.add_axes([0, 0, 1, 1])
     ax.axis("off")
     pos = {}
-    for l, ns in by_layer.items():
+    for lv, ns in by_layer.items():
         ns.sort()
         for j, n in enumerate(ns):
-            x = l / max(max_l, 1)
+            x = lv / max(max_l, 1)
             y = 1 - (j + 1) / (len(ns) + 1)
             pos[n] = (x, y)
 
@@ -327,23 +381,43 @@ def chart_pipeline(spec, ds, out):
     for e in edges:
         x1, y1 = pos[e["from"]]
         x2, y2 = pos[e["to"]]
-        arr = FancyArrowPatch((x1 + BW / 2, y1), (x2 - BW / 2, y2),
-                              arrowstyle="-|>", mutation_scale=14,
-                              color=MUTED, linewidth=1.4,
-                              connectionstyle="arc3,rad=-0.15", zorder=1)
+        arr = FancyArrowPatch(
+            (x1 + BW / 2, y1),
+            (x2 - BW / 2, y2),
+            arrowstyle="-|>",
+            mutation_scale=14,
+            color=MUTED,
+            linewidth=1.4,
+            connectionstyle="arc3,rad=-0.15",
+            zorder=1,
+        )
         ax.add_patch(arr)
         if e.get("label"):
-            ax.text((x1 + x2) / 2, (y1 + y2) / 2 + 0.05,
-                    wrap(e["label"], 20), fontsize=7.5, color=MUTED,
-                    ha="center", va="bottom", zorder=3)
+            ax.text(
+                (x1 + x2) / 2,
+                (y1 + y2) / 2 + 0.05,
+                wrap(e["label"], 20),
+                fontsize=7.5,
+                color=MUTED,
+                ha="center",
+                va="bottom",
+                zorder=3,
+            )
     for n, (x, y) in pos.items():
-        box = FancyBboxPatch((x - BW / 2, y - BH / 2), BW, BH,
-                             boxstyle="round,pad=0.02,rounding_size=0.04",
-                             facecolor=PANEL, edgecolor=ACCENT,
-                             linewidth=1.4, zorder=2)
+        box = FancyBboxPatch(
+            (x - BW / 2, y - BH / 2),
+            BW,
+            BH,
+            boxstyle="round,pad=0.02,rounding_size=0.04",
+            facecolor=PANEL,
+            edgecolor=ACCENT,
+            linewidth=1.4,
+            zorder=2,
+        )
         ax.add_patch(box)
-        ax.text(x, y, wrap(nodes[n], 16), ha="center", va="center",
-                fontsize=9.5, color=FG, zorder=3)
+        ax.text(
+            x, y, wrap(nodes[n], 16), ha="center", va="center", fontsize=9.5, color=FG, zorder=3
+        )
     ax.set_xlim(-0.06, 1.06)
     ax.set_ylim(-0.06, 1.06)
     finish(fig, spec.get("title") or ds.get("title"), out)
@@ -360,13 +434,17 @@ RENDERERS = {
 
 # --- driver ------------------------------------------------------------------
 
+
 def render_request(payload, out_dir):
     """Render all specs in a request payload. Returns result dict."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     draft = slugify(payload.get("draft_id") or "viz")
-    datasets = {d.get("id"): d for d in (payload.get("viz_data") or [])
-                if isinstance(d, dict) and d.get("id")}
+    datasets = {
+        d.get("id"): d
+        for d in (payload.get("viz_data") or [])
+        if isinstance(d, dict) and d.get("id")
+    }
     paths, skipped = [], []
     for i, spec in enumerate((payload.get("specs") or [])[:MAX_SPECS]):
         if not isinstance(spec, dict):
@@ -385,7 +463,7 @@ def render_request(payload, out_dir):
         out = out_dir / fname
         try:
             ok = fn(spec, ds, out)
-        except Exception as e:  # keep one bad chart from killing the batch
+        except Exception as e:  # noqa: BLE001 - keep one bad chart from killing the batch
             skipped.append({"viz_id": spec.get("viz_id"), "reason": f"render-error:{e}"})
             continue
         if ok and out.exists():
@@ -423,7 +501,7 @@ def serve(host, port, out_dir):
                 n = int(self.headers.get("Content-Length") or 0)
                 payload = json.loads(self.rfile.read(n) or b"{}")
                 self._send(200, render_request(payload, out_dir))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - a bad request must answer 400, not kill the connection
                 self._send(400, {"ok": False, "error": str(e)})
 
         def log_message(self, fmt, *args):
@@ -437,8 +515,11 @@ def serve(host, port, out_dir):
 def main():
     ap = argparse.ArgumentParser(description="render viz_data chart specs to PNG")
     ap.add_argument("spec", nargs="?", help="spec JSON file (default: stdin)")
-    ap.add_argument("--out", default=str(DEFAULT_OUT),
-                    help="output dir for PNGs (default: <project>/materials/viz)")
+    ap.add_argument(
+        "--out",
+        default=str(DEFAULT_OUT),
+        help="output dir for PNGs (default: <project>/materials/viz)",
+    )
     ap.add_argument("--serve", action="store_true", help="run HTTP daemon")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8791)
