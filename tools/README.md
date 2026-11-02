@@ -126,7 +126,12 @@ prefers the canonical `*:web_token:login:auth` key shape; the generic
 6287487 (the VK web client app id) - `users.get` accepts any live
 token, so a web_token minted for a different VK app would pass the
 validity check yet fail every `wall.post`. On VK error 5 the service
-reloads the tabs once and re-extracts.
+reloads the tabs once and re-extracts. Self-heal: a tab whose
+WebSocket accepts `Runtime.evaluate` but never answers it (wedged
+below the page - reload cannot reach it either) is recycled via
+`PUT /json/new` on the same URL + `/json/close` on the dead target,
+and freshly opened tabs get one bounded eval pass inside the shared
+get_token() budget.
 
 ```bash
 uv run tools/vk_token_service.py --port 8792          # daemon
