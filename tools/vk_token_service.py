@@ -373,7 +373,15 @@ def find_vk_pages(deadline=None):
 def ws_eval(ws_url, expr, timeout=45):
     import websocket  # websocket-client, resolved by uv
 
-    ws = websocket.create_connection(ws_url, timeout=timeout, suppress_origin=True)
+    try:
+        ws = websocket.create_connection(ws_url, timeout=timeout, suppress_origin=True)
+    except (TimeoutError, websocket.WebSocketTimeoutException) as e:
+        # a handshake timeout is NOT the wedge signature: a freshly
+        # opened tab can still be booting and would be re-recycled on
+        # every poll round if this surfaced as builtin TimeoutError.
+        # Report it as a plain connect failure - callers skip, and the
+        # tab gets another chance on the next pass
+        raise ConnectionError(f"ws handshake timed out: {e}") from e
     try:
         ws.send(
             json.dumps(
@@ -571,6 +579,7 @@ def reload_vk_tab(deadline=None, per_tab_timeout=8):
             # reopen it so the NEXT pass finds a live target. Only the
             # hang signature recycles: attach refusals and dead sockets
             # must not kill a live tab
+            _log(f"reload eval hung on tab {str(page.get('url', '?'))[:60]} - recycling")
             recycle_tab(page, deadline=deadline)
             continue
         except Exception:  # noqa: BLE001 - dead tab, reload the rest
@@ -1488,6 +1497,59 @@ def _selftest():
     finally:
         _NO_REDIRECT = saved_op
         _pending_close.clear()
+    # ws_eval hang signature: the recv loop must surface builtin
+    # TimeoutError both when the socket times out mid-eval and when it
+    # keeps answering with non-id=1 frames until the deadline. A
+    # handshake timeout must NOT be that signature - it surfaces as
+    # ConnectionError so a still-booting tab is skipped, not recycled.
+    import websocket
+
+    class _Ws:
+        def __init__(self, mode):
+            self.mode = mode
+
+        def send(self, _):
+            pass
+
+        def settimeout(self, _):
+            pass
+
+        def recv(self):
+            if self.mode == "timeout":
+                raise websocket.WebSocketTimeoutException("timed out")
+            return json.dumps({"method": "Page.frameNavigated", "params": {}})
+
+        def close(self):
+            pass
+
+    saved_cc = websocket.create_connection
+    try:
+        websocket.create_connection = lambda *a, **k: _Ws("timeout")
+        try:
+            ws_eval("ws://x", "1", timeout=1)
+            check("ws_eval recv timeout -> TimeoutError", False)
+        except TimeoutError:
+            check("ws_eval recv timeout -> TimeoutError", True)
+        websocket.create_connection = lambda *a, **k: _Ws("events")
+        try:
+            ws_eval("ws://x", "1", timeout=0.3)
+            check("ws_eval silent id=1 -> TimeoutError", False)
+        except TimeoutError:
+            check("ws_eval silent id=1 -> TimeoutError", True)
+
+        def _handshake_timeout(*a, **k):
+            raise websocket.WebSocketTimeoutException("handshake timed out")
+
+        websocket.create_connection = _handshake_timeout
+        try:
+            ws_eval("ws://x", "1", timeout=1)
+            check("ws_eval handshake timeout -> ConnectionError", False)
+        except ConnectionError:
+            check("ws_eval handshake timeout -> ConnectionError", True)
+        except TimeoutError:
+            check("ws_eval handshake timeout -> ConnectionError", False)
+    finally:
+        websocket.create_connection = saved_cc
     if failures:
         print(f"selftest: {len(failures)} failure(s): " + ", ".join(failures))
         return 1
