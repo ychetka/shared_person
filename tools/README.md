@@ -111,6 +111,20 @@ unrelated project's docker dir); override with `--db <path>` or
 all gated on the spec's `active` flag - an inactive spec instead clears
 those registry rows, mirroring an n8n deactivate.
 
+## verify_workflows.js
+
+Drift check for the "git is the source of truth" policy (issue #13):
+deep-compares every `n8n/workflows/*.json` spec against the
+`workflow_published_version` snapshot the live DB actually executes,
+reporting per-workflow `ok`/`FAIL` (with the differing node names),
+workflows missing from the DB, and DB workflows with no repo spec.
+Read-only (`DatabaseSync` with `readOnly: true`) - safe while n8n runs.
+Same `--db`/docker-volume resolution as `deploy_workflow.js`.
+Exit 0 = everything in DB matches git; 1 = drift (reconcile with
+`deploy_workflow.js --update`, never by editing git backwards).
+Usage and the wipe-and-restore procedure: `n8n/README.md` section
+"Git is the source of truth; the volume is a cache".
+
 ## vk_token_service.py - VK token provider for sp-publish
 
 The VK wall.post driver needs a working access token; the standalone
