@@ -80,9 +80,10 @@ Event schema (`schema_v: 1`):
   timestamp: an n8n retry recomputes `ts` and a ts-keyed event_id
   would defeat dedup. Same transition firing twice collapses to one
   event; a genuine repeat transition (e.g. approve > edit > approve)
-  also collapses, which is acceptable - the folded status is still
-  correct and the rare repeated-transition nuance is visible in the
-  writer's own logs/*.jsonl.
+  also collapses - and dedup is LAST-OCCURRENCE-WINS, so the fold
+  still lands on the correct terminal status and a probe-recovered
+  `failed` event's `external_ids`/`maybe_live` overwrite the first
+  failure's empty fields rather than being dropped.
 - `maybe_live` - orthogonal flag on `status=failed` publish events
   (mirrors today's ledger: transport loss where the post may have
   landed). `external_ids` carries the recovered id when the orphan
@@ -110,10 +111,10 @@ buys a stale-cache failure mode for zero users.
 
 | writer | moment | event |
 |---|---|---|
-| content-gen | draft file written per platform | `stage=draft, status=pending` (+post_id into draft json) |
-| tg-moderation | Approve | `stage=moderation, status=approved` |
-| tg-moderation | Reject | `stage=moderation, status=rejected` |
-| tg-moderation | Edit dispatch / rewrite landed | `stage=moderation, status=edited` |
+| sp-content-gen | draft file written per platform | `stage=draft, status=pending` (+post_id into draft json) |
+| sp-tg-moderation | Approve | `stage=moderation, status=approved` |
+| sp-tg-moderation | Reject | `stage=moderation, status=rejected` |
+| sp-tg-moderation | Edit dispatch / rewrite landed | `stage=moderation, status=edited` |
 | sp-publish | wall.post success | `stage=publish, status=published, external_ids, published_at` |
 | sp-publish | definite failure | `stage=publish, status=failed, error` |
 | sp-publish | transport loss, probe found it | `stage=publish, status=failed, maybe_live=true, external_ids` (no external_ids when probe empty) |
@@ -156,10 +157,10 @@ post_report.py orphans                # queue files / drafts with no
 ```
 
 - `orphans` join key: tg-moderation stamps `post_id` into the queue
-  payload at Approve time (queue files already carry `draft_id`;
-  `post_id` is added next to it), so orphans joins queue files and
+  payload at Approve time (queue files already carry `id` (the draft id);
+  `post_id` is added next to `id`), so orphans joins queue files and
   drafts to events directly on `post_id`. Pre-registry queue files
-  have no `post_id` and resolve via `draft_id -> draft.post_id`;
+  have no `post_id` and resolve via `id -> draft.post_id`;
   a queue file whose draft also lacks `post_id` is reported as
   pre-registry, not an error.
 - MVP includes printing `post_id` in TG moderation previews/notifications
@@ -168,8 +169,8 @@ post_report.py orphans                # queue files / drafts with no
   id never reaches the operator's surface).
 
 - Folds `events.jsonl` live (the fold is ~15 lines: dedup by
-  event_id, last-writer-per-(platform,stage,status-field) merge, sort
-  by ts). Single code path = no stale-snapshot mode to test.
+  event_id last-occurrence-wins, merge per (platform,stage) into
+  services[], sort by ts). Single code path = no stale-snapshot mode to test.
 - Corrupt-line tolerance: unparseable lines are skipped with a warning
   to stderr (a killed process can leave a torn tail line; it must not
   kill triage).
@@ -179,11 +180,14 @@ post_report.py orphans                # queue files / drafts with no
 ## Concurrency notes
 
 - Append is the only shared mutation; O_APPEND keeps each write intact
-  under concurrent writers only while a line fits PIPE_BUF (4KB). The
-  `registryEvent` helper enforces this instead of assuming it: if the
-  serialized event exceeds ~3.5KB it truncates `error` first, then
-  drops optional fields (`maybe_live`, `published_at` are never
-  dropped - `external_ids` shrinks to its first element) and logs a
+  under concurrent writers only while a line fits PIPE_BUF (4KB -
+  strictly the pipe/FIFO guarantee, applied here to the regular file
+  as a conservative cap). The `registryEvent` helper enforces this
+  instead of assuming it: required fields (`schema_v`, `event_id`,
+  `post_id`, `draft_id`, `platform`, `stage`, `status`, `ts`,
+  `writer`) are never dropped; if the serialized event exceeds ~3.5KB
+  it truncates `error` first, then `external_ids` shrinks to its first
+  element, then `published_at`/`maybe_live` are dropped, logging a
   `registry_event_oversized` line to the writer's own log.
 - Draft files keep their existing updateDraft/sameDraftSnapshot
   discipline - the registry does not touch draft write paths beyond
