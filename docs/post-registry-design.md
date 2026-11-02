@@ -60,22 +60,36 @@ Event schema (`schema_v: 1`):
 ```json
 {
   "schema_v": 1,
-  "event_id": "sha1:<post_id>:<platform>:<stage>:<status>:<ts_ms>:<writer>",
+  "event_id": "sha1:<post_id>:<platform>:<stage>:<status>:<writer>",
   "post_id": "p_1730640000_k4f2qa",
   "draft_id": "dabc123",
   "platform": "vk",
   "stage": "draft|moderation|publish",
-  "status": "pending|approved|rejected|edited|published|failed|maybe-live|test-deleted",
+  "status": "pending|approved|rejected|edited|published|failed|skipped|test-deleted",
   "ts": "2026-11-02T15:04:05.123Z",
-  "writer": "content-gen|tg-moderation|sp-publish",
+  "writer": "sp-content-gen|sp-tg-moderation|sp-publish",
   "error": "optional, scrubbed, <=300 chars",
+  "maybe_live": false,
   "external_ids": ["12345_678"],
   "published_at": "2026-11-02T15:09:00.000Z"
 }
 ```
 
-- `event_id` - deterministic dedup key. n8n retries and double-fires
-  happen; readers fold events and drop exact `event_id` duplicates.
+- `event_id` - deterministic dedup key over the TRANSITION identity
+  (`post_id+platform+stage+status+writer`), deliberately NOT the
+  timestamp: an n8n retry recomputes `ts` and a ts-keyed event_id
+  would defeat dedup. Same transition firing twice collapses to one
+  event; a genuine repeat transition (e.g. approve > edit > approve)
+  also collapses, which is acceptable - the folded status is still
+  correct and the rare repeated-transition nuance is visible in the
+  writer's own logs/*.jsonl.
+- `maybe_live` - orthogonal flag on `status=failed` publish events
+  (mirrors today's ledger: transport loss where the post may have
+  landed). `external_ids` carries the recovered id when the orphan
+  probe found the post; absent when the probe came back empty.
+- `skipped` - service parked for a disabled platform (queue file lands
+  in `queue/publish/skipped/` today); without it a disabled-platform
+  service would sit at `draft/pending` forever.
 - `external_ids` - array from day one (VK single id = 1-element array;
   future thread-posts append).
 - `published_at` - written once on the `published` event and never
@@ -102,11 +116,14 @@ buys a stale-cache failure mode for zero users.
 | tg-moderation | Edit dispatch / rewrite landed | `stage=moderation, status=edited` |
 | sp-publish | wall.post success | `stage=publish, status=published, external_ids, published_at` |
 | sp-publish | definite failure | `stage=publish, status=failed, error` |
-| sp-publish | transport loss, probe found it | `stage=publish, status=maybe-live, external_ids` |
+| sp-publish | transport loss, probe found it | `stage=publish, status=failed, maybe_live=true, external_ids` (no external_ids when probe empty) |
+| sp-publish | disabled-platform queue file parked | `stage=publish, status=skipped, error="platform disabled"` |
 | sp-publish | test post verified+deleted | `stage=publish, status=test-deleted` |
 
 Write semantics: each writer appends ONE event at the transition and
-moves on. Registry failures are swallowed and logged to the writer's
+moves on. `writer` uses the real workflow names (`sp-content-gen`,
+`sp-tg-moderation`, `sp-publish`) so events grep-join to the workflows
+that emitted them. Registry failures are swallowed and logged to the writer's
 own `logs/*.jsonl` (`registry_append_failed`) - the publish/moderation
 flow never retries, never throws on registry errors. Registry is
 observability, not a gate.
@@ -138,6 +155,18 @@ post_report.py orphans                # queue files / drafts with no
                                       # matching registry post_id
 ```
 
+- `orphans` join key: tg-moderation stamps `post_id` into the queue
+  payload at Approve time (queue files already carry `draft_id`;
+  `post_id` is added next to it), so orphans joins queue files and
+  drafts to events directly on `post_id`. Pre-registry queue files
+  have no `post_id` and resolve via `draft_id -> draft.post_id`;
+  a queue file whose draft also lacks `post_id` is reported as
+  pre-registry, not an error.
+- MVP includes printing `post_id` in TG moderation previews/notifications
+  so the operator can paste it into the CLI (it was tempting to defer
+  this with the `/post` command, but the read path is useless if the
+  id never reaches the operator's surface).
+
 - Folds `events.jsonl` live (the fold is ~15 lines: dedup by
   event_id, last-writer-per-(platform,stage,status-field) merge, sort
   by ts). Single code path = no stale-snapshot mode to test.
@@ -149,8 +178,13 @@ post_report.py orphans                # queue files / drafts with no
 
 ## Concurrency notes
 
-- Append is the only shared mutation; JSONL lines stay under PIPE_BUF
-  (4KB) so O_APPEND keeps each event intact under concurrent writers.
+- Append is the only shared mutation; O_APPEND keeps each write intact
+  under concurrent writers only while a line fits PIPE_BUF (4KB). The
+  `registryEvent` helper enforces this instead of assuming it: if the
+  serialized event exceeds ~3.5KB it truncates `error` first, then
+  drops optional fields (`maybe_live`, `published_at` are never
+  dropped - `external_ids` shrinks to its first element) and logs a
+  `registry_event_oversized` line to the writer's own log.
 - Draft files keep their existing updateDraft/sameDraftSnapshot
   discipline - the registry does not touch draft write paths beyond
   content-gen adding one field.
@@ -163,8 +197,7 @@ post_report.py orphans                # queue files / drafts with no
 - `posts/<post_id>.json` snapshot + reconciler (build when a second
   low-latency reader exists).
 - TG `/post <id>` command (build when phone triage is actually felt;
-  meanwhile `post_id` is printed in moderation notifications so it can
-  be pasted into the CLI).
+  `post_id` in moderation notifications is MVP, see Read path).
 - `events.jsonl` compaction/archival (review at ~50k lines; quarterly
   manual shard at most).
 - Retroactive migration of `published.jsonl`/old drafts (only if #8
