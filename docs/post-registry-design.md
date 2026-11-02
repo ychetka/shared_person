@@ -29,7 +29,7 @@ Non-goals (deferred, see Deferred):
 ## Identity model
 
 - `post_id` - minted by content-gen when a brief fans out to N
-  platform writers (`p_<epoch>_<rand6>`, e.g. `p_1762128000_k4f2qa`).
+  platform writers (`p_<epoch>_<rand6>`, e.g. `p_1793577600_k4f2qa`).
   This is the only point where "these drafts belong together" is
   known; deriving grouping later from timestamps/brief hash is fragile
   under retries.
@@ -61,7 +61,7 @@ Event schema (`schema_v: 1`):
 {
   "schema_v": 1,
   "event_id": "<sha1 hex of post_id|platform|stage|status|writer>",
-  "post_id": "p_1762128000_k4f2qa",
+  "post_id": "p_1793577600_k4f2qa",
   "draft_id": "dabc123",
   "platform": "vk",
   "stage": "draft|moderation|publish",
@@ -172,8 +172,11 @@ post_report.py orphans                # queue files / drafts with no
 
 - Folds `events.jsonl` live (the fold is ~15 lines: dedup by
   event_id last-occurrence-wins, then one services[] entry per
-  platform - the platform's latest event by ts wins its fields -
-  with the event list itself sorted by ts for the timeline view). Single code path = no stale-snapshot mode to test.
+  platform: the platform's latest event by ts wins stage/status/ts/
+  error, while published_at and external_ids are set-once fields
+  (first non-empty value wins, never overwritten) - a published-then-
+  failed sequence keeps its published_at. The event list itself is
+  sorted by ts for the timeline view). Single code path = no stale-snapshot mode to test.
 - Corrupt-line tolerance: unparseable lines are skipped with a warning
   to stderr (a killed process can leave a torn tail line; it must not
   kill triage).
