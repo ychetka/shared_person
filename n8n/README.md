@@ -434,6 +434,16 @@ Processed files move to `done/` or `failed/` and are logged to
 `published` / `test-published-deleted` / `test-delete-failed`, not a
 flat `published` for test drafts); results are summarized to Telegram.
 
+Housekeeping runs inside the same tick: stale `processing/` claims and
+orphaned `*.tmp-*` staging files are pruned, terminal dirs drop records
+older than 30 days, and a stale-draft GC rejects `state/drafts/` files
+stuck in `pending` or `delivering` longer than `STALE_DRAFT_MS`
+(default 7 days). A stale draft's preview keyboard is disarmed via
+`editMessageReplyMarkup` before the status flip so no live Approve
+button survives on an old preview; the draft lands in `rejected`
+(which is REWRITABLE, so the draft_id frees up) and the tick report
+notes `stale draft auto-rejected`.
+
 ## Secrets
 
 All tokens come from container env (`../ENV` via compose
