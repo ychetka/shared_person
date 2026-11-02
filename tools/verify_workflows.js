@@ -8,16 +8,19 @@
 // silently overwrite anyway.
 //
 // Run:  node tools/verify_workflows.js [--db=path|--db path]
-// Exit: 0 = every repo spec matches its published DB version;
-//       1 = drift, missing workflow, or unreadable DB.
-// The n8n container does NOT need to be stopped (read-only open).
+// Exit: 0 = every repo spec matches its live DB state; 1 = drift or
+//       unreadable DB. The n8n container does NOT need to be stopped
+//       (read-only open).
 //
 // What is compared: for each spec, the workflow_published_version row
 // (the snapshot n8n actually executes) -> workflow_history.nodes and
 // .connections are deep-compared to spec.nodes/spec.connections after
-// canonicalization (object keys sorted). The entity's activeVersionId
-// is also reported when it differs from the published snapshot -
-// that is a half-applied deploy, not drift.
+// canonicalization (object keys sorted). Specs with active != true are
+// expected to have NO published row - the deployer mirrors an n8n
+// deactivate by deleting it - so an inactive spec with no published
+// row is `ok`, and an inactive spec WITH a live published row is
+// reverse drift. The entity's activeVersionId is also reported when it
+// differs from the published snapshot - a half-applied deploy.
 
 const { DatabaseSync } = require("node:sqlite");
 const { execSync } = require("node:child_process");
@@ -86,18 +89,40 @@ const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 const db = new DatabaseSync(DB, { readOnly: true });
 const tableHas = (t) =>
   db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(t) !== undefined;
+const colHas = (t, c) =>
+  db
+    .prepare(`PRAGMA table_info(${t})`)
+    .all()
+    .some((r) => r.name === c);
 const hasPublished = tableHas("workflow_published_version");
+const hasHistory = tableHas("workflow_history");
+const hasActiveVer = colHas("workflow_entity", "activeVersionId");
+const hasArchived = colHas("workflow_entity", "isArchived");
+if (!hasPublished || !hasHistory) {
+  console.error(
+    "DB schema predates published-version tables " +
+      "(workflow_published_version/workflow_history missing) - " +
+      "cannot compare live snapshots on this n8n version",
+  );
+  process.exit(1);
+}
 
-const rows = db.prepare("SELECT id, name, activeVersionId FROM workflow_entity").all();
-const byName = new Map(rows.map((r) => [r.name, r]));
-const pubOf = hasPublished
-  ? new Map(
-      db
-        .prepare("SELECT workflowId, publishedVersionId FROM workflow_published_version")
-        .all()
-        .map((r) => [r.workflowId, r.publishedVersionId]),
-    )
-  : new Map();
+const entCols = `id, name${hasActiveVer ? ", activeVersionId" : ""}${hasArchived ? ", isArchived" : ""}`;
+const rows = db.prepare(`SELECT ${entCols} FROM workflow_entity`).all();
+// name -> [rows]: duplicate names are a data error deploy_workflow.js
+// refuses on write; collapsing them here would report drift against an
+// arbitrary row, so they get their own explicit FAIL below
+const byName = new Map();
+for (const r of rows) {
+  if (!byName.has(r.name)) byName.set(r.name, []);
+  byName.get(r.name).push(r);
+}
+const pubOf = new Map(
+  db
+    .prepare("SELECT workflowId, publishedVersionId FROM workflow_published_version")
+    .all()
+    .map((r) => [r.workflowId, r.publishedVersionId]),
+);
 const histGet = db.prepare("SELECT nodes, connections FROM workflow_history WHERE versionId = ?");
 
 let fails = 0;
@@ -111,17 +136,58 @@ for (const f of specFiles) {
     fails++;
     continue;
   }
+  // spec-shape guard: a malformed spec must FAIL its own line, not
+  // crash the run mid-loop (same contract as deploy_workflow.js's
+  // specFail, read-only side)
+  if (
+    !spec ||
+    typeof spec !== "object" ||
+    typeof spec.name !== "string" ||
+    !spec.name.trim() ||
+    !Array.isArray(spec.nodes) ||
+    !spec.nodes.length ||
+    !spec.nodes.every((n) => n && typeof n.name === "string")
+  ) {
+    console.log(`FAIL ${f}: spec shape invalid (needs name + non-empty nodes[] with names)`);
+    fails++;
+    continue;
+  }
   specNames.add(spec.name);
-  const ent = byName.get(spec.name);
+  const specActive = spec.active === true;
+  const ents = byName.get(spec.name) || [];
+  if (ents.length > 1) {
+    console.log(
+      `FAIL ${f} (${spec.name}): ${ents.length} workflow_entity rows share ` +
+        "this name - ambiguous, deploy_workflow.js refuses this too; " +
+        "deduplicate in the DB first",
+    );
+    fails++;
+    continue;
+  }
+  const ent = ents[0];
   if (!ent) {
     console.log(`FAIL ${f} (${spec.name}): not present in live DB`);
     fails++;
     continue;
   }
   const pubId = pubOf.get(ent.id);
+  if (!specActive) {
+    // inactive spec: no published row is the correct mirrored state
+    if (!pubId) {
+      console.log(`ok   ${f} (${spec.name}) [inactive by spec]`);
+    } else {
+      console.log(
+        `FAIL ${f} (${spec.name}): spec is inactive but the DB still ` +
+          "has a published version - deploy with --update to mirror the deactivate",
+      );
+      fails++;
+    }
+    continue;
+  }
   if (!pubId) {
     console.log(
-      `FAIL ${f} (${spec.name}): no published version in DB (never deployed or deactivated)`,
+      `FAIL ${f} (${spec.name}): active spec but no published version ` +
+        "in DB (never deployed or deactivated)",
     );
     fails++;
     continue;
@@ -132,11 +198,23 @@ for (const f of specFiles) {
     fails++;
     continue;
   }
-  const liveNodes = JSON.parse(hist.nodes);
-  const liveConn = JSON.parse(hist.connections || "{}");
+  let liveNodes, liveConn;
+  try {
+    liveNodes = JSON.parse(hist.nodes);
+    liveConn = JSON.parse(hist.connections || "{}");
+  } catch (e) {
+    console.log(`FAIL ${f} (${spec.name}): history row does not parse - ${e.message}`);
+    fails++;
+    continue;
+  }
+  if (!Array.isArray(liveNodes)) {
+    console.log(`FAIL ${f} (${spec.name}): history nodes is not an array`);
+    fails++;
+    continue;
+  }
   const diffs = [];
   if (!same(liveNodes, spec.nodes)) {
-    const liveNames = new Set(liveNodes.map((n) => n.name));
+    const liveNames = new Set(liveNodes.map((n) => n?.name));
     const specNames2 = new Set(spec.nodes.map((n) => n.name));
     const missing = [...specNames2].filter((n) => !liveNames.has(n));
     const extra = [...liveNames].filter((n) => !specNames2.has(n));
@@ -145,7 +223,7 @@ for (const f of specFiles) {
         liveNames.has(n.name) &&
         !same(
           n,
-          liveNodes.find((m) => m.name === n.name),
+          liveNodes.find((m) => m && m.name === n.name),
         ),
     );
     diffs.push(
@@ -158,7 +236,7 @@ for (const f of specFiles) {
     diffs.push("connections differ");
   }
   const staleActive =
-    ent.activeVersionId && ent.activeVersionId !== pubId
+    hasActiveVer && ent.activeVersionId && ent.activeVersionId !== pubId
       ? ` [note: activeVersionId ${ent.activeVersionId} != published ${pubId}]`
       : "";
   if (diffs.length) {
@@ -169,6 +247,7 @@ for (const f of specFiles) {
   }
 }
 for (const r of rows) {
+  if (hasArchived && r.isArchived) continue;
   if (!specNames.has(r.name)) {
     console.log(
       `WARN DB workflow "${r.name}" has no repo spec - ` +
@@ -176,5 +255,6 @@ for (const r of rows) {
     );
   }
 }
+db.close();
 console.log(fails ? `verify: ${fails} workflow(s) drifted` : "verify: all workflows match repo");
-process.exit(fails ? 1 : 0);
+process.exitCode = fails ? 1 : 0;

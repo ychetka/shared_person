@@ -42,8 +42,20 @@ prefer `docker volume rm` only after copying those dirs out if they
 matter. Then:
 
 ```bash
+docker compose --env-file ../../ENV rm -sf n8n      # container must go first -
+                                                  # docker refuses to remove a
+                                                  # volume still in use
 docker volume rm shared-person_n8n_storage          # optional: only on real loss
 docker compose --env-file ../../ENV up -d n8n       # creates a fresh volume + DB schema
+```
+
+Now open the n8n UI once and complete the owner setup: on a fresh
+volume the `project` row (the personal project every `shared_workflow`
+row binds to) does not exist until first login, and deploying before
+it would skip the owner binding - restored workflows would exist but
+stay invisible in the UI, and sp-tg-setup could not be run at all.
+
+```bash
 docker stop shared-person-n8n                        # deployer needs n8n stopped
 for f in workflows/*.json; do
   node ../tools/deploy_workflow.js "$f"
