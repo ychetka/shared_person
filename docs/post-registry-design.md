@@ -29,7 +29,7 @@ Non-goals (deferred, see Deferred):
 ## Identity model
 
 - `post_id` - minted by content-gen when a brief fans out to N
-  platform writers (`p_<epoch>_<rand6>`, e.g. `p_1730640000_k4f2qa`).
+  platform writers (`p_<epoch>_<rand6>`, e.g. `p_1762128000_k4f2qa`).
   This is the only point where "these drafts belong together" is
   known; deriving grouping later from timestamps/brief hash is fragile
   under retries.
@@ -60,8 +60,8 @@ Event schema (`schema_v: 1`):
 ```json
 {
   "schema_v": 1,
-  "event_id": "sha1:<post_id>:<platform>:<stage>:<status>:<writer>",
-  "post_id": "p_1730640000_k4f2qa",
+  "event_id": "<sha1 hex of post_id|platform|stage|status|writer>",
+  "post_id": "p_1762128000_k4f2qa",
   "draft_id": "dabc123",
   "platform": "vk",
   "stage": "draft|moderation|publish",
@@ -93,8 +93,10 @@ Event schema (`schema_v: 1`):
   service would sit at `draft/pending` forever.
 - `external_ids` - array from day one (VK single id = 1-element array;
   future thread-posts append).
-- `published_at` - written once on the `published` event and never
-  overwritten; later status changes keep the original stamp.
+- `published_at` - written only on the `status=published` event
+  (a distinct event_id, so last-occurrence-wins dedup never merges
+  it away) and never overwritten; later status changes keep the
+  original stamp.
 - Optional fields absent when empty (not `null`) so readers default,
   not branch.
 
@@ -169,8 +171,9 @@ post_report.py orphans                # queue files / drafts with no
   id never reaches the operator's surface).
 
 - Folds `events.jsonl` live (the fold is ~15 lines: dedup by
-  event_id last-occurrence-wins, merge per (platform,stage) into
-  services[], sort by ts). Single code path = no stale-snapshot mode to test.
+  event_id last-occurrence-wins, then one services[] entry per
+  platform - the platform's latest event by ts wins its fields -
+  with the event list itself sorted by ts for the timeline view). Single code path = no stale-snapshot mode to test.
 - Corrupt-line tolerance: unparseable lines are skipped with a warning
   to stderr (a killed process can leave a torn tail line; it must not
   kill triage).
@@ -185,9 +188,10 @@ post_report.py orphans                # queue files / drafts with no
   as a conservative cap). The `registryEvent` helper enforces this
   instead of assuming it: required fields (`schema_v`, `event_id`,
   `post_id`, `draft_id`, `platform`, `stage`, `status`, `ts`,
-  `writer`) are never dropped; if the serialized event exceeds ~3.5KB
+  `writer`) are never dropped, and neither is `published_at` - it is
+  the field issue #8 keys on; if the serialized event exceeds ~3.5KB
   it truncates `error` first, then `external_ids` shrinks to its first
-  element, then `published_at`/`maybe_live` are dropped, logging a
+  element, then `maybe_live` is dropped, logging a
   `registry_event_oversized` line to the writer's own log.
 - Draft files keep their existing updateDraft/sameDraftSnapshot
   discipline - the registry does not touch draft write paths beyond
