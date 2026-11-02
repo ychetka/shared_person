@@ -10,6 +10,65 @@ node ../tools/deploy_workflow.js workflows/<name>.json --update  # new version
 docker compose --env-file ../../ENV up -d n8n
 ```
 
+## Git is the source of truth; the volume is a cache
+
+Policy: `workflows/*.json` in this repo is the ONLY definition of the
+pipeline. The n8n volume (`shared-person_n8n_storage`) is disposable -
+its `database.sqlite` holds no state worth backing up for workflow
+definitions. Manual UI edits are drift: the next `--update` deploy
+overwrites them silently, so never treat the UI as editable
+production.
+
+### Drift check
+
+```bash
+node ../tools/verify_workflows.js           # repo vs live published versions
+```
+
+Deep-compares each spec's `nodes`/`connections` against the
+`workflow_published_version` snapshot the DB actually executes and
+reports `ok` / `FAIL <file>: nodes differ (changed: <node names>)` /
+missing workflows / foreign DB workflows with no repo spec. Exit 1 on
+drift. Read-only - safe with the container running. A `FAIL` means
+the live DB runs an older snapshot than git; reconcile with
+`deploy_workflow.js workflows/<name>.json --update` (container
+stopped), not by editing git backwards.
+
+### Restore on a fresh/wiped volume
+
+The volume also carries operational state (`state/`, `queue/`,
+`logs/`) - a wipe loses drafts, publish queue and audit trails, so
+prefer `docker volume rm` only after copying those dirs out if they
+matter. Then:
+
+```bash
+docker compose --env-file ../../ENV rm -sf n8n      # container must go first -
+                                                  # docker refuses to remove a
+                                                  # volume still in use
+docker volume rm shared-person_n8n_storage          # optional: only on real loss
+docker compose --env-file ../../ENV up -d n8n       # creates a fresh volume + DB schema
+```
+
+Now open the n8n UI once and complete the owner setup: on a fresh
+volume the `project` row (the personal project every `shared_workflow`
+row binds to) does not exist until first login, and deploying before
+it would skip the owner binding - restored workflows would exist but
+stay invisible in the UI, and sp-tg-setup could not be run at all.
+
+```bash
+docker stop shared-person-n8n                        # deployer needs n8n stopped
+for f in workflows/*.json; do
+  node ../tools/deploy_workflow.js "$f"
+done
+node ../tools/verify_workflows.js                    # expect: all ok
+docker compose --env-file ../../ENV up -d n8n
+```
+
+After the workflows are back, re-run the one-time setup: register the
+Telegram webhook (`../tools/tg_webhook_setup.sh`) and execute
+sp-tg-setup once (writes `state/tg.json`). Secrets come from `../../ENV`
+via compose as usual - they are not stored in the volume.
+
 All state files live inside the n8n storage volume under
 `/home/node/.n8n/` (container view; on the host it is the volume root,
 not the nested `.n8n/` that holds `database.sqlite`):
