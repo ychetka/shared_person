@@ -373,7 +373,15 @@ def find_vk_pages(deadline=None):
 def ws_eval(ws_url, expr, timeout=45):
     import websocket  # websocket-client, resolved by uv
 
-    ws = websocket.create_connection(ws_url, timeout=timeout, suppress_origin=True)
+    try:
+        ws = websocket.create_connection(ws_url, timeout=timeout, suppress_origin=True)
+    except (TimeoutError, websocket.WebSocketTimeoutException) as e:
+        # a handshake timeout is NOT the wedge signature: a freshly
+        # opened tab can still be booting and would be re-recycled on
+        # every poll round if this surfaced as builtin TimeoutError.
+        # Report it as a plain connect failure - callers skip, and the
+        # tab gets another chance on the next pass
+        raise ConnectionError(f"ws handshake timed out: {e}") from e
     try:
         ws.send(
             json.dumps(
@@ -390,15 +398,93 @@ def ws_eval(ws_url, expr, timeout=45):
             # what this call still owns so a hung tab eats only its
             # share of the global budget
             ws.settimeout(max(0.5, deadline - time.time()))
-            msg = json.loads(ws.recv())
+            try:
+                msg = json.loads(ws.recv())
+            except (TimeoutError, websocket.WebSocketTimeoutException) as e:
+                # socket timeout AND the websocket-client flavor both
+                # mean 'evaluate never came back' - normalize to builtin
+                # TimeoutError so callers can tell a wedged tab apart
+                # from attach refusals / dead sockets that must not
+                # trigger a recycle
+                raise TimeoutError("Runtime.evaluate: recv timed out") from e
             if msg.get("id") == 1:
                 res = msg.get("result", {})
                 if res.get("exceptionDetails"):
                     return None
                 return res.get("result", {}).get("value")
-        return None
+        # the socket kept answering but id=1 never came back - the tab
+        # wedged below the page (WS connects, Runtime.evaluate hangs):
+        # raising lets callers recycle the tab instead of treating it
+        # as a legit empty localStorage answer
+        raise TimeoutError("Runtime.evaluate: no response before deadline")
     finally:
         ws.close()
+
+
+# target ids a recycle already REPLACED but could not close - retried
+# (close only) on the next pass instead of opening yet another tab.
+# Without this, a persistent /json/close failure inside the
+# reload_and_extract poll loop would churn a new tab every poll.
+_pending_close = {}
+_PENDING_CLOSE_TTL = 300.0
+
+
+def _close_target(tid, timeout):
+    try:
+        with _NO_REDIRECT.open(f"{CDP}/json/close/{tid}", timeout=timeout) as r:
+            r.read()
+        return True
+    except Exception as e:  # noqa: BLE001 - dead target may already be gone
+        _log(f"tab recycle: /json/close failed for {tid}: {e}")
+        return False
+
+
+def recycle_tab(page, deadline=None, timeout=5):
+    """Recycle a hung CDP tab: open a fresh tab on the same URL, then
+    close the dead target.
+
+    The observed failure mode is a tab whose WebSocket accepts
+    Runtime.evaluate but never answers it - the browser wedged below
+    the page, so location.reload() cannot reach it either; only a
+    close+reopen recovers it. /json/new is PUT-only since Chrome
+    ~v111 (drive-by safety). The new tab is opened BEFORE the dead
+    one is closed so a VK page always survives the swap - even if
+    the close fails, the fresh target remains for the next pass, and
+    the dead id lands in _pending_close so later passes retry the
+    close instead of stacking more tabs. Every HTTP call is clamped
+    to what the shared get_token() deadline still owns - recycling
+    must not stretch TOTAL_BUDGET past its contract."""
+    url = page.get("url") or "https://vk.ru/feed"
+    tid = page.get("id")
+    now = time.monotonic()
+    for k, ts in list(_pending_close.items()):
+        if now - ts > _PENDING_CLOSE_TTL:
+            _pending_close.pop(k, None)
+    if deadline is not None and _remaining(deadline) <= 0:
+        return False
+
+    def _budget():
+        return timeout if deadline is None else min(timeout, max(0.5, _remaining(deadline)))
+
+    if tid in _pending_close:
+        # already replaced once - retry the close only, never stack
+        # another fresh tab on top of the first
+        if _close_target(tid, _budget()):
+            _pending_close.pop(tid, None)
+            return True
+        return False
+    try:
+        req = urllib.request.Request(
+            f"{CDP}/json/new?{urllib.parse.quote(url, safe='')}", method="PUT"
+        )
+        with _NO_REDIRECT.open(req, timeout=_budget()) as r:
+            r.read()
+    except Exception as e:  # noqa: BLE001 - report, next tick retries
+        _log(f"tab recycle: /json/new failed for {str(url)[:60]}: {e}")
+        return False
+    if tid and not _close_target(tid, _budget()):
+        _pending_close[tid] = now
+    return True
 
 
 def extract_token(deadline=None, per_tab_timeout=45):
@@ -406,7 +492,10 @@ def extract_token(deadline=None, per_tab_timeout=45):
 
     `deadline` is the shared get_token() deadline: whatever time is
     left is split across the tabs still to try, so N hung tabs cost
-    the remaining budget once, not N x per_tab_timeout."""
+    the remaining budget once, not N x per_tab_timeout. A tab that
+    fails eval (WS hang included - ws_eval raises on it) is recycled
+    via recycle_tab(), and freshly opened targets get one bounded
+    pass before the service declares itself unavailable."""
     try:
         pages = find_vk_pages(deadline)
     except Exception as e:
@@ -417,18 +506,56 @@ def extract_token(deadline=None, per_tab_timeout=45):
     if not pages:
         _log("token extract: no vk tab in CDP targets")
         return None, "no vk tab in CDP targets"
+    recycled = 0
+    seen_ids = set()
     for i, page in enumerate(pages):
+        seen_ids.add(page.get("id"))
         budget = _share(deadline, len(pages) - i, per_tab_timeout)
         if deadline is not None and _remaining(deadline) <= 0:
             _log("global deadline hit during token extract")
             return None, "global deadline hit during token extract"
         try:
             tok = ws_eval(page["webSocketDebuggerUrl"], TOKEN_EXPR, timeout=budget)
-        except Exception as e:  # noqa: BLE001 - dead tab, try the next
+        except TimeoutError as e:
+            # the hang signature ONLY: a tab that accepts evaluate but
+            # never answers is wedged below the page and needs a
+            # close+reopen. Other eval failures (attach refusal on a
+            # live tab, dead socket, malformed target) mean the tab is
+            # either fine or already gone - recycling would kill a
+            # healthy session or churn duplicates
+            _log(f"token eval hung on tab {str(page.get('url', '?'))[:60]}: {e} - recycling")
+            recycled += 1 if recycle_tab(page, deadline=deadline) else 0
+            continue
+        except Exception as e:  # noqa: BLE001 - dead/malformed tab, try the next
             _log(f"token eval failed on tab {str(page.get('url', '?'))[:60]}: {e}")
             continue
         if tok:
             return tok, None
+    # hung tabs were recycled - give freshly opened targets one bounded
+    # pass before declaring the service unavailable. A new tab needs a
+    # moment to boot the VK app before localStorage repopulates, so
+    # settle briefly first (clamped inside the shared deadline).
+    if recycled and deadline is not None and _remaining(deadline) > 2:
+        time.sleep(min(3.0, _remaining(deadline) / 3))
+        try:
+            fresh = [t for t in find_vk_pages(deadline) if t.get("id") not in seen_ids]
+        except Exception as e:  # noqa: BLE001 - rescan failed, report the original error
+            _log(f"tab rescan after recycle failed: {e}")
+            fresh = []
+        for i, page in enumerate(fresh):
+            if _remaining(deadline) <= 0:
+                break
+            try:
+                tok = ws_eval(
+                    page["webSocketDebuggerUrl"],
+                    TOKEN_EXPR,
+                    timeout=_share(deadline, len(fresh) - i, 10),
+                )
+            except Exception:  # noqa: BLE001 - fresh tab still booting
+                continue
+            if tok:
+                _log("token recovered on recycled tab")
+                return tok, None
     _log(f"token eval returned nothing on all {len(pages)} vk tabs")
     return None, "token eval returned nothing on all vk tabs"
 
@@ -447,6 +574,14 @@ def reload_vk_tab(deadline=None, per_tab_timeout=8):
                 "location.reload(); 'r'",
                 timeout=_share(deadline, len(pages) - i, per_tab_timeout),
             )
+        except TimeoutError:
+            # a wedged tab cannot receive the reload either - close and
+            # reopen it so the NEXT pass finds a live target. Only the
+            # hang signature recycles: attach refusals and dead sockets
+            # must not kill a live tab
+            _log(f"reload eval hung on tab {str(page.get('url', '?'))[:60]} - recycling")
+            recycle_tab(page, deadline=deadline)
+            continue
         except Exception:  # noqa: BLE001 - dead tab, reload the rest
             continue
     return pages
@@ -1172,6 +1307,7 @@ def _selftest():
     self)."""
     global SECRET  # patched below to exercise _authorized both ways
     global _AUTH_401_COUNT  # patched/reset around the rate-limit check
+    global _NO_REDIRECT  # stubbed around the recycle_tab churn checks
     failures = []
 
     def check(name, cond):
@@ -1301,6 +1437,119 @@ def _selftest():
         )
     finally:
         SECRET = saved
+    # recycle_tab churn guard: a target that was replaced but failed
+    # to close lands in _pending_close - the next pass must retry the
+    # CLOSE only, not stack another /json/new. _NO_REDIRECT.open is
+    # stubbed with a recorder; no real Chrome needed.
+    calls = []
+
+    class _Resp:
+        def read(self, *a):
+            return b"{}"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Op:
+        def __init__(self, fail_close):
+            self.fail_close = fail_close
+
+        def open(self, req, timeout=None):
+            url = getattr(req, "full_url", req)
+            calls.append(str(url))
+            if self.fail_close and "/json/close/" in str(url):
+                raise OSError("close refused")
+            return _Resp()
+
+    saved_op = _NO_REDIRECT
+    try:
+        _pending_close.clear()
+        page = {"url": "https://vk.ru/feed", "id": "T1"}
+        # pass 1: close fails -> id parked, tab still counted recycled
+        _NO_REDIRECT = _Op(fail_close=True)
+        check(
+            "recycle_tab opens+marks pending on close failure",
+            recycle_tab(page) is True
+            and "T1" in _pending_close
+            and any("/json/new" in c for c in calls)
+            and any("/json/close/T1" in c for c in calls),
+        )
+        # pass 2: same id -> close retry only, no second /json/new
+        calls.clear()
+        check(
+            "recycle_tab pending id retries close only",
+            recycle_tab(page) is False
+            and not any("/json/new" in c for c in calls)
+            and any("/json/close/T1" in c for c in calls),
+        )
+        # pass 3: close succeeds -> pending mark cleared
+        calls.clear()
+        _NO_REDIRECT = _Op(fail_close=False)
+        check(
+            "recycle_tab pending close success clears mark",
+            recycle_tab(page) is True
+            and "T1" not in _pending_close
+            and not any("/json/new" in c for c in calls),
+        )
+    finally:
+        _NO_REDIRECT = saved_op
+        _pending_close.clear()
+    # ws_eval hang signature: the recv loop must surface builtin
+    # TimeoutError both when the socket times out mid-eval and when it
+    # keeps answering with non-id=1 frames until the deadline. A
+    # handshake timeout must NOT be that signature - it surfaces as
+    # ConnectionError so a still-booting tab is skipped, not recycled.
+    import websocket
+
+    class _Ws:
+        def __init__(self, mode):
+            self.mode = mode
+
+        def send(self, _):
+            pass
+
+        def settimeout(self, _):
+            pass
+
+        def recv(self):
+            if self.mode == "timeout":
+                raise websocket.WebSocketTimeoutException("timed out")
+            return json.dumps({"method": "Page.frameNavigated", "params": {}})
+
+        def close(self):
+            pass
+
+    saved_cc = websocket.create_connection
+    try:
+        websocket.create_connection = lambda *a, **k: _Ws("timeout")
+        try:
+            ws_eval("ws://x", "1", timeout=1)
+            check("ws_eval recv timeout -> TimeoutError", False)
+        except TimeoutError:
+            check("ws_eval recv timeout -> TimeoutError", True)
+        websocket.create_connection = lambda *a, **k: _Ws("events")
+        try:
+            ws_eval("ws://x", "1", timeout=0.3)
+            check("ws_eval silent id=1 -> TimeoutError", False)
+        except TimeoutError:
+            check("ws_eval silent id=1 -> TimeoutError", True)
+
+        def _handshake_timeout(*a, **k):
+            raise websocket.WebSocketTimeoutException("handshake timed out")
+
+        websocket.create_connection = _handshake_timeout
+        try:
+            ws_eval("ws://x", "1", timeout=1)
+            check("ws_eval handshake timeout -> ConnectionError", False)
+        except ConnectionError:
+            check("ws_eval handshake timeout -> ConnectionError", True)
+        except TimeoutError:
+            check("ws_eval handshake timeout -> ConnectionError", False)
+    finally:
+        websocket.create_connection = saved_cc
     if failures:
         print(f"selftest: {len(failures)} failure(s): " + ", ".join(failures))
         return 1
