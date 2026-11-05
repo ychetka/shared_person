@@ -503,6 +503,49 @@ button survives on an old preview; the draft lands in `rejected`
 (which is REWRITABLE, so the draft_id frees up) and the tick report
 notes `stale draft auto-rejected`.
 
+### sp-analytics (schedule, every 6 h)
+
+Post-performance collector on top of the post registry (issue #8).
+Each tick folds `state/registry/events.jsonl` with the same contract
+as `tools/post_report.py` (event_id dedup last-wins, latest ts per
+post+platform, `error`/`maybe_live` transient, `published_at`/
+`external_ids` set-once; torn lines skipped) and picks services whose
+latest publish-stage verdict is `published` - or `failed` +
+`maybe_live` with recovered `external_ids`, since the recovered
+orphan may be live and tracking it answers the recovery question
+for free. `test-deleted` posts are excluded by definition.
+
+Collectors live behind a per-platform registry. `vk` is implemented:
+`wall.getById` batched at 100 posts/call returns views/likes/
+comments/reposts, a deleted post records `gone`. Platforms without a
+collector (`linkedin`, `fb`, ... - credentials pending on issues
+#2/#3) record `unsupported` rows instead of failing the tick.
+
+Every measurement appends to `state/analytics/metrics.jsonl`:
+`{schema_v, ts, post_id, platform, external_id, status,
+views, likes, comments, reposts, error}`. Two derived artifacts:
+
+- `state/analytics/perf_summary.json` - top-20 posts by engagement
+  (likes+comments+reposts, views tiebreak) inside
+  `ANALYTICS_WINDOW_DAYS` (default 30). This is the feedback-signal
+  file content-gen accents will read; the consumption side is a
+  later iteration.
+- `state/analytics/status.json` - last-tick counts for ops checks.
+
+Telegram digest: gated by `state/analytics/digest_cursor.json` - the
+6h tick collects, but a digest goes out only every
+`ANALYTICS_DIGEST_MS` (default 24h) and only when at least one post
+measured. Top-10 by engagement. The cursor advances ONLY after a
+confirmed `sendMessage`, so a TG failure retries next tick instead
+of silently dropping the digest. Chat resolution is the same as
+sp-publish: `TELEGRAM_CHAT_ID` env, `state/tg.json` fallback.
+
+VK credentials mirror sp-publish: cached `state/vk_token.json`,
+`VK_ACCESS_TOKEN` fallback, `vk_token_service` refresh through
+`VK_TOKEN_REFRESH_URL` gated by `VK_TOKEN_SECRET`. A refreshed token
+is kept in memory for the tick only - sp-publish owns the token file
+and its 0o600 write contract.
+
 ## Secrets
 
 All tokens come from container env (`../ENV` via compose
@@ -530,5 +573,8 @@ gates `POST /webhook/content-gen` (`X-Content-Gen-Secret` header; fails
 closed when unset) and the internal callers in sp-tg-moderation's
 Handle TG Update (`post N`, Edit rewrite) send it.
 `TELEGRAM_CHAT_ID` pins the
-operator chat (`state/tg.json` is the fallback). Code nodes need
+operator chat (`state/tg.json` is the fallback).
+`ANALYTICS_DIGEST_MS` and `ANALYTICS_WINDOW_DAYS` are optional
+sp-analytics knobs (digest interval and summary window; defaults
+24h and 30 days). Code nodes need
 `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (set in docker-compose.yml).

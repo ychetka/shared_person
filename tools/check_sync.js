@@ -52,8 +52,9 @@ const PLATFORM_TOKEN_RE =
 const GROUPS = {
   // plain tmp+rename writeJsonAtomic: Handle TG Update, Prepare Draft,
   // Compose Message (sp-tg-moderation), Generate Drafts
-  // (sp-content-gen), Resolve Chat + Webhook (sp-tg-setup)
-  "write-json-atomic": { expect: 5 },
+  // (sp-content-gen), Resolve Chat + Webhook (sp-tg-setup),
+  // Analytics Tick (sp-analytics)
+  "write-json-atomic": { expect: 6 },
   // Publish Tick's copy is the hardened 0o600 variant - intentionally
   // different from the plain copies, tracked under its own group so
   // the marker itself stays accounted for
@@ -138,14 +139,14 @@ const GROUPS = {
     ],
   },
   // scrubSecrets secret masking: Generate Drafts (sp-content-gen),
-  // Handle TG Update (sp-tg-moderation) and Resolve Chat + Webhook
-  // (sp-tg-setup). The >=8 length floor lives inside the loop in all
-  // three copies; SECRET_VALUES collection itself legitimately
-  // differs per node and stays outside the markers. Publish Tick's
-  // scrub/KNOWN_TOKENS is INTENTIONALLY divergent (a dynamic token
-  // set plus access_token= form masking) and must NOT get a fourth
-  // copy here
-  "scrub-secrets": { expect: 3 },
+  // Handle TG Update (sp-tg-moderation), Resolve Chat + Webhook
+  // (sp-tg-setup) and Analytics Tick (sp-analytics). The >=8 length
+  // floor lives inside the loop in all four copies; SECRET_VALUES
+  // collection itself legitimately differs per node and stays
+  // outside the markers. Publish Tick's scrub/KNOWN_TOKENS is
+  // INTENTIONALLY divergent (a dynamic token set plus access_token=
+  // form masking) and must NOT get a copy here
+  "scrub-secrets": { expect: 4 },
   // registryEvent append-only event writer (issue #12, the post
   // registry): identical copies in Generate Drafts (sp-content-gen),
   // Handle TG Update (sp-tg-moderation) and Publish Tick (sp-publish).
@@ -153,31 +154,33 @@ const GROUPS = {
   // any fix must replicate to all three or the event streams diverge
   "registry-event": { expect: 3 },
   // mkdirErrs collection prelude: Handle TG Update, Prepare Draft
-  // (both sp-tg-moderation), Resolve Chat + Webhook (sp-tg-setup)
-  // and Generate Drafts (sp-content-gen). Only the dir list and the
-  // loop variable name differ per node. Publish Tick's plain
-  // mkdirSync swallow is a different contract on purpose (a missing
-  // dir surfaces through mv()/log() failures there, not per-item
-  // refusals) and stays unmarked
+  // (both sp-tg-moderation), Resolve Chat + Webhook (sp-tg-setup),
+  // Generate Drafts (sp-content-gen) and Analytics Tick
+  // (sp-analytics). Only the dir list and the loop variable name
+  // differ per node. Publish Tick's plain mkdirSync swallow is a
+  // different contract on purpose (a missing dir surfaces through
+  // mv()/log() failures there, not per-item refusals) and stays
+  // unmarked
   "mkdir-collect": {
-    expect: 4,
+    expect: 5,
     normalize: [
       [/of \[[^\]]*\]/, "of [DIRS]"],
       [/\b(?:d0|d)\b/g, "D"],
     ],
   },
-  // the api.telegram.org request contract shared by the four tg()
+  // the api.telegram.org request contract shared by the five tg()
   // helpers (Publish Tick, Handle TG Update, Compose Message,
-  // Resolve Chat + Webhook) and Generate Drafts' notify()
-  // sendMessage: POST + bot-token URL + json:true + explicit 30s
-  // timeout - an unbounded httpRequest hangs the node behind it.
-  // Call-opening lines (return await / return / await) and per-node
-  // rationale comments legitimately differ; Generate Drafts carries
-  // an inline body and a literal /sendMessage URL, so it forms a
-  // second normalized class (maxClasses: 2). tokenSet then polices
-  // the contract tokens every copy must share on the RAW text
+  // Resolve Chat + Webhook, Analytics Tick) and Generate Drafts'
+  // notify() sendMessage: POST + bot-token URL + json:true +
+  // explicit 30s timeout - an unbounded httpRequest hangs the node
+  // behind it. Call-opening lines (return await / return / await)
+  // and per-node rationale comments legitimately differ; Generate
+  // Drafts carries an inline body and a literal /sendMessage URL,
+  // so it forms a second normalized class (maxClasses: 2). tokenSet
+  // then polices the contract tokens every copy must share on the
+  // RAW text
   "tg-timeout": {
-    expect: 5,
+    expect: 6,
     maxClasses: 2,
     tokenSet: /api\.telegram\.org|method: 'POST'|json: true|timeout: [0-9]+/g,
     normalize: [
