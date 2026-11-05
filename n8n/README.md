@@ -510,10 +510,11 @@ Each tick folds `state/registry/events.jsonl` with the same contract
 as `tools/post_report.py` (event_id dedup last-wins, latest ts per
 post+platform, `error`/`maybe_live` transient, `published_at`/
 `external_ids` set-once; torn lines skipped) and picks services whose
-latest publish-stage verdict is `published` - or `failed` +
-`maybe_live` with recovered `external_ids`, since the recovered
-orphan may be live and tracking it answers the recovery question
-for free. `test-deleted` posts are excluded by definition.
+latest publish-stage verdict is `published` with `external_ids`
+recorded - or `failed` + `maybe_live` with recovered `external_ids`,
+since the recovered orphan may be live and tracking it answers the
+recovery question for free. `test-deleted` posts are excluded by
+definition.
 
 Collectors live behind a per-platform registry. `vk` is implemented:
 `wall.getById` batched at 100 posts/call returns views/likes/
