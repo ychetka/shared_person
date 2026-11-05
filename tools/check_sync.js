@@ -146,6 +146,12 @@ const GROUPS = {
   // set plus access_token= form masking) and must NOT get a fourth
   // copy here
   "scrub-secrets": { expect: 3 },
+  // registryEvent append-only event writer (issue #12, the post
+  // registry): identical copies in Generate Drafts (sp-content-gen),
+  // Handle TG Update (sp-tg-moderation) and Publish Tick (sp-publish).
+  // The helper embeds an inline sha1 (Code nodes only require fs), so
+  // any fix must replicate to all three or the event streams diverge
+  "registry-event": { expect: 3 },
   // mkdirErrs collection prelude: Handle TG Update, Prepare Draft
   // (both sp-tg-moderation), Resolve Chat + Webhook (sp-tg-setup)
   // and Generate Drafts (sp-content-gen). Only the dir list and the

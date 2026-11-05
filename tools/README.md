@@ -125,6 +125,33 @@ Exit 0 = everything in DB matches git; 1 = drift (reconcile with
 Usage and the wipe-and-restore procedure: `n8n/README.md` section
 "Git is the source of truth; the volume is a cache".
 
+## post_report.py - post registry read path (issue #12)
+
+Folds `state/registry/events.jsonl` (append-only lifecycle events
+written by sp-content-gen / sp-tg-moderation / sp-publish via the
+SYNC'd `registryEvent` helper) into a per-post, per-platform
+timeline. Answers "what happened to post X on platform Y?" without
+grepping `drafts/`, `queue/publish/` and `published.jsonl`. Design:
+`docs/post-registry-design.md`.
+
+```bash
+# state dir resolves via `docker volume inspect
+# shared-person_n8n_storage` like deploy_workflow.js; --state
+# overrides for an offline copy or tests
+python3 tools/post_report.py get <post_id>            # services[] timeline
+python3 tools/post_report.py events <post_id>         # raw event stream
+python3 tools/post_report.py list [--status failed] [--since 7d]
+python3 tools/post_report.py orphans                  # drafts/queue files
+                                                      # with no registry events
+```
+
+The fold dedups by `event_id` last-occurrence-wins, then per platform
+keeps the latest event by `ts` for stage/status/ts/error while
+`published_at` and `external_ids` are set-once (a published-then-
+failed sequence keeps its stamp). Torn tail lines are skipped with a
+stderr warning. Exit codes: 0 ok, 1 post not found, 2 unreadable
+state dir. PEP 723 stdlib-only - runs under plain `python3` too.
+
 ## vk_token_service.py - VK token provider for sp-publish
 
 The VK wall.post driver needs a working access token; the standalone
