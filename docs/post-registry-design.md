@@ -5,7 +5,7 @@ current triage pain - state scattered across `state/drafts/*.json`,
 `queue/publish/` and `state/published.jsonl` - and lays the contract
 that issue #8 (analytics) and pr_manager (cadence/metrics) will read.
 
-Status: design, approved-in-review pending implementation.
+Status: implemented (issue #12 PR cycle, see git history).
 
 ## Goals / non-goals
 
