@@ -101,9 +101,12 @@ def fold(events):
     never overwritten - a published-then-failed sequence keeps its
     published_at)."""
     deduped = {}
+    warned_sv = set()
     for ev in events:
-        if ev.get("schema_v") != 1:
-            err(f"warning: schema_v={ev.get('schema_v')} - folding best-effort")
+        sv = ev.get("schema_v")
+        if sv != 1 and sv not in warned_sv:
+            warned_sv.add(sv)
+            err(f"warning: schema_v={sv} - folding best-effort")
         deduped[ev.get("event_id") or json.dumps(ev, sort_keys=True)] = ev
     posts = {}
     for ev in deduped.values():
@@ -121,6 +124,11 @@ def fold(events):
                 for k in ("stage", "status", "ts", "error", "draft_id", "maybe_live", "writer"):
                     if ev.get(k) is not None:
                         svc[k] = ev[k]
+                    elif k in ("error", "maybe_live"):
+                        # transient fields describe the winning
+                        # transition - a published-after-failed fold
+                        # must not keep the stale error/maybe_live
+                        svc.pop(k, None)
             # set-once fields: first non-empty value wins
             if ev.get("published_at") and not svc.get("published_at"):
                 svc["published_at"] = ev["published_at"]
@@ -225,7 +233,7 @@ def cmd_list(argv):
         except ValueError:
             n = 0
         days = n * {"d": 1, "w": 7, "h": 1 / 24}.get(unit, 0)
-        if not days:
+        if not days or n < 0:
             err(f"bad --since value: {since} (use e.g. 7d, 24h, 2w)")
             sys.exit(2)
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
