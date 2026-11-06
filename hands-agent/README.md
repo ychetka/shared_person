@@ -87,6 +87,31 @@ Poller consumes -> `queue/done/` or `queue/failed/` + in-memory `task_status`.
 - Per-recipe screenshots into `queue/done/` for moderation audit trail
 - Vision-model `locate` degrades gracefully to template `find`
 
+## OS-level input: long text + clipboard (survey, issue #3)
+
+Decision (developer): text insert for long bodies must be OS-level -
+no CDP `insertText`/`Input.dispatch`, so the target app cannot tell
+automation input from human input. Surveyed on this box (X11,
+DISPLAY :1):
+
+- `xdotool type` - present, trusted XTEST events, already used via
+  `type_text` jitter. Works for long bodies too (`--delay 5-15`),
+  just slow - the zero-dependency fallback.
+- `xclip` / `xsel` - NOT installed. The canonical clipboard path
+  (`xclip -sel clip` + ctrl+v); smallest possible new dep.
+- PyGObject (`python3-gi`, Gtk) - INSTALLED. `Gtk.Clipboard` can set
+  the X CLIPBOARD selection with zero new packages, so a
+  `set_clipboard` action is buildable today: set selection via GTK,
+  then recipe `key ctrl+v` pastes as a normal OS paste event.
+- `wl-copy`/`wl-paste` - absent and N/A (X11 session, not Wayland).
+- `/dev/uinput` / `ydotool` - kernel-level path, but `/dev/uinput`
+  is root-only (crw------- root:root) - needs a udev rule or group
+  membership; not worth it while XTEST covers the need.
+
+Recommendation: implement `set_clipboard` on the PyGObject path now,
+keep `type` as fallback; revisit xclip only if GTK clipboard proves
+flaky.
+
 ## UX rules (mandatory in recipes)
 
 - **Ad/popup dismissal**: before acting, check for blocking overlays (ads, cookie banners, upsell modals) and close them first: click_dom on "Close/X/Not now/Не сейчас" or Escape. Insert a dismiss step at recipe start and after navigations.

@@ -12,9 +12,20 @@ and how they were obtained. All secrets are in `../ENV` (never committed).
 - Why Kate Mobile: VK does not grant the `wall` scope to newly created
   standalone apps (restriction since ~2017). Well-known grandfathered
   client ids still receive `wall` on implicit flow.
-- `expires_in=0` — the token does not expire unless the user revokes the
-  app's access in VK settings.
-- To re-issue: open in the logged-in browser
+- Token TTL changed (observed 2026-11-06): newly issued `vk1.a.*`
+  tokens return `expires_in=86400` - VK ID moved standalone tokens
+  to a ~24h lifetime. The ENV token is therefore a short-lived
+  fallback; the resilient primary path is `vk_token_service.py`
+  (web-session extraction from the logged-in tab, see tools/README).
+- To re-issue (automated, issue #3): `uv run tools/vk_token_issue.py`
+  - opens the authorize URL in the audit Chrome (CDP :9223),
+    OS-clicks the VK ID "Продолжить" consent (DOM read-only for
+    coordinates, xdotool trusted click), harvests `access_token`
+    from the `blank.html#...` fragment, verifies `wall` scope via
+    `account.getAppPermissions`, and appends `VK_ACCESS_TOKEN=` to
+    `../ENV` (env_val.sh last-assignment-wins). Token never reaches
+    stdout.
+- Manual fallback: open in the logged-in browser
   `https://oauth.vk.ru/authorize?client_id=2685278&scope=wall%2Coffline&redirect_uri=https%3A%2F%2Foauth.vk.ru%2Fblank.html&display=page&response_type=token&v=5.199`
   → "Продолжить" → copy `access_token` from the `blank.html#...` fragment.
 - API host: `https://api.vk.com/method/<method>?access_token=...&v=5.199`.
