@@ -848,6 +848,219 @@ def _get_token(budget):
     return {"ok": True, "access_token": tok, "source": "cdp", "refreshed_tab": refreshed}
 
 
+# --- /vk-photo-upload (issue #36) --------------------------------------
+# The n8n Code node cannot send a real multipart body across the
+# task-runner proxy (the TG preview uses a dedicated HTTP node for
+# sendPhoto for the same reason), so the photo upload hop lives
+# host-side where the token already lives: the caller sends only a
+# materials-relative path behind the same X-Shared-Token gate, the
+# service reads the file from the same host dir the n8n materials
+# mount exposes read-only, mints a token itself, and returns the
+# photo<owner>_<id> attachment string for wall.post.
+#
+# materials root: the n8n container mounts ../materials at
+# /home/node/materials; this file sits in <repo>/code/tools/, so the
+# default resolves to <repo>/materials on the host. VK_MATERIALS_DIR
+# overrides it for other layouts.
+MATERIALS_DIR = os.environ.get("VK_MATERIALS_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "materials",
+)
+# per-file cap the n8n side mirrors (5MB preview cap stays tighter -
+# this one only bounds what the service will read into memory and
+# push upstream; VK's own wall-photo ceiling is higher)
+PHOTO_MAX_BYTES = 15 * 1024 * 1024
+PHOTO_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+# VK codes that are rate/flood transients, not verdicts - the same
+# family _check_result treats as retryable. Code 5 (token rejected)
+# is terminal for the attempt: the token was minted moments ago, so
+# a rejection means the web token lost the needed scope and a retry
+# mints the same thing.
+_UPLOAD_TRANSIENT = {6, 9, 10, 29, 601}
+
+
+def _resolve_media(rel):
+    """Resolve a materials-relative path to a host file under
+    MATERIALS_DIR, or return (None, error).
+
+    Fails closed on traversal, symlink escapes, non-files, unknown
+    extensions and oversize: the endpoint is authenticated, but the
+    rel string comes from a pipeline payload, not the operator - the
+    same under-root realpath discipline the n8n side's resolveMedia
+    applies inside its read-only mount."""
+    root = os.path.realpath(MATERIALS_DIR)
+    cand = os.path.realpath(os.path.join(root, str(rel or "")))
+    if cand != root and not cand.startswith(root + os.sep):
+        return None, "path escapes materials root"
+    if not os.path.isfile(cand):
+        return None, "not a file under materials/"
+    ext = os.path.splitext(cand)[1].lower()
+    if ext not in PHOTO_MIME:
+        return None, "unsupported extension " + (ext or "(none)")
+    try:
+        size = os.path.getsize(cand)
+    except OSError as e:
+        return None, f"stat failed: {e}"
+    if size <= 0:
+        return None, "empty file"
+    if size > PHOTO_MAX_BYTES:
+        return None, f"over the {PHOTO_MAX_BYTES // (1024 * 1024)}MB cap"
+    return cand, None
+
+
+def _vk_api(method, params, token, timeout=30):
+    """Form-encoded POST to api.vk.com - same contract as vk_check:
+    access_token in the body, never the URL; _NO_REDIRECT so a 307/308
+    cannot replay the token-bearing body at another host. Returns the
+    parsed body normalized to a dict."""
+    body = urllib.parse.urlencode({"v": "5.199", "access_token": token, **params}).encode()
+    req = urllib.request.Request(VK_API.format(m=method), data=body)
+    with _NO_REDIRECT.open(req, timeout=timeout) as r:
+        resp = json.loads(r.read())
+    return resp if isinstance(resp, dict) else {"response": resp}
+
+
+def _vk_err(res, where):
+    """Classify a VK error object from _vk_api into a result dict, or
+    None when the response carries no error."""
+    err = res.get("error")
+    if not err:
+        return None
+    try:
+        code = int(err.get("error_code"))
+    except (TypeError, ValueError, AttributeError):
+        code = None
+    return {
+        "ok": False,
+        "error": f"{where}: {err}",
+        "retryable": code in _UPLOAD_TRANSIENT,
+    }
+
+
+def upload_wall_photo(path, budget=60.0):
+    """photos.getWallUploadServer -> multipart POST -> saveWallPhoto.
+
+    Returns {ok, attachment, owner_id, photo_id} or
+    {ok: False, error, retryable}. The upload POST itself carries no
+    credentials - just the image bytes VK's upload_url asks for."""
+    deadline = time.time() + budget
+    # a token mint can take most of the budget (tab reload + poll);
+    # leave the upload legs at least 10s so a slow CDP path does not
+    # eat the whole window before the photo is even sent
+    tres = get_token(budget=max(5.0, _remaining(deadline) - 10))
+    if not tres.get("ok"):
+        return tres
+    token = tres["access_token"]
+    _remember_secret(token)
+    try:
+        srv = _vk_api(
+            "photos.getWallUploadServer",
+            {},
+            token,
+            timeout=_share(deadline, 3, 20),
+        )
+    except Exception as e:  # noqa: BLE001 - transport anomaly, retryable
+        return {"ok": False, "error": f"getWallUploadServer transport: {e}", "retryable": True}
+    bad = _vk_err(srv, "getWallUploadServer")
+    if bad:
+        return bad
+    upload_url = (srv.get("response") or {}).get("upload_url")
+    if not upload_url:
+        return {
+            "ok": False,
+            "error": "getWallUploadServer returned no upload_url",
+            "retryable": True,
+        }
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as e:
+        return {"ok": False, "error": f"read failed: {e}"}
+    # recheck the cap on the bytes actually read: _resolve_media's
+    # getsize ran before the open, and a swapped or still-growing
+    # file in between would otherwise sail past the limit
+    if len(data) > PHOTO_MAX_BYTES:
+        return {
+            "ok": False,
+            "error": f"over the {PHOTO_MAX_BYTES // (1024 * 1024)}MB cap",
+        }
+    # sanitize the basename for the Content-Disposition header: a
+    # quote, backslash or CR/LF inside it would corrupt the multipart
+    # part
+    fname = "".join(c for c in os.path.basename(path) if c not in '"\\\r\n' and ord(c) > 0x1F)
+    mime = PHOTO_MIME[os.path.splitext(fname)[1].lower()]
+    # stdlib has no multipart writer and requests is not a PEP 723
+    # dep of this script - build the single-field body by hand; the
+    # random boundary cannot collide with image bytes
+    boundary = "----vku" + os.urandom(12).hex()
+    body = (
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="photo"; filename="{fname}"\r\n'
+            f"Content-Type: {mime}\r\n\r\n"
+        ).encode()
+        + data
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
+    req = urllib.request.Request(
+        upload_url,
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        # plain urlopen for the upload hop, deliberately NOT
+        # _NO_REDIRECT: the body carries no credentials (image bytes
+        # only) and VK's upload hosts do legitimately redirect
+        # between regional frontends, so refusing would break uploads
+        # for zero secrecy gain
+        with urllib.request.urlopen(req, timeout=_share(deadline, 2, 60)) as r:
+            up = json.loads(r.read())
+    except Exception as e:  # noqa: BLE001 - transport anomaly, retryable
+        return {"ok": False, "error": f"photo upload transport: {e}", "retryable": True}
+    if not isinstance(up, dict) or not up.get("photo"):
+        return {
+            "ok": False,
+            "error": f"upload returned bad body: {str(up)[:150]}",
+            "retryable": True,
+        }
+    # saveWallPhoto needs all three fields - a missing one would
+    # serialize as the literal 'None' upstream instead of failing here
+    if any(up.get(k) is None for k in ("server", "photo", "hash")):
+        return {
+            "ok": False,
+            "error": f"upload body missing fields: {str(up)[:150]}",
+            "retryable": True,
+        }
+    try:
+        saved = _vk_api(
+            "photos.saveWallPhoto",
+            {"server": up["server"], "photo": up["photo"], "hash": up["hash"]},
+            token,
+            timeout=_share(deadline, 1, 20),
+        )
+    except Exception as e:  # noqa: BLE001 - transport anomaly, retryable
+        return {"ok": False, "error": f"saveWallPhoto transport: {e}", "retryable": True}
+    bad = _vk_err(saved, "saveWallPhoto")
+    if bad:
+        return bad
+    items = saved.get("response")
+    item = items[0] if isinstance(items, list) and items else None
+    if not item or "owner_id" not in item or "id" not in item:
+        return {"ok": False, "error": "saveWallPhoto returned no items", "retryable": True}
+    return {
+        "ok": True,
+        "attachment": f"photo{item['owner_id']}_{item['id']}",
+        "owner_id": item["owner_id"],
+        "photo_id": item["id"],
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
@@ -981,6 +1194,76 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200 if res.get("ok") else 503 if res.get("retryable") else 502, res)
         else:
             self._send(404, {"ok": False, "error": "not found"})
+
+    def do_POST(self):
+        # /vk-photo-upload is the only POST route - see the endpoint
+        # block above. The caller sends a small JSON with a
+        # materials-relative path; the image bytes and the VK token
+        # never cross the container boundary.
+        try:
+            path = urllib.parse.urlsplit(self.path).path
+        except ValueError:
+            self._send(400, {"ok": False, "error": "malformed request target"})
+            return
+        if path != "/vk-photo-upload":
+            self._send(404, {"ok": False, "error": "not found"})
+            return
+        if not self._authorized():
+            # same rate-limited journal line as /vk-token's 401s - the
+            # response itself still fires every time
+            n401 = _auth_401_seen()
+            if n401:
+                self.log_message(
+                    "/vk-photo-upload -> 401 missing/invalid X-Shared-Token (seen %d)",
+                    n401,
+                )
+            self._send(401, {"ok": False, "error": "missing or invalid X-Shared-Token header"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        # the body is a one-field JSON - cap it hard so a loopback
+        # caller cannot make a handler thread buffer a stream
+        if length <= 0 or length > 8192:
+            self._send(400, {"ok": False, "error": "bad request body length"})
+            return
+        try:
+            payload = json.loads(self.rfile.read(length))
+        except (ValueError, UnicodeDecodeError):
+            self._send(400, {"ok": False, "error": "body is not valid JSON"})
+            return
+        if not isinstance(payload, dict):
+            self._send(400, {"ok": False, "error": "body must be a JSON object"})
+            return
+        try:
+            cand, err = _resolve_media(payload.get("rel"))
+        except (ValueError, OSError):
+            # an embedded NUL or a realpath-level OS error in the rel
+            # string would otherwise kill the handler thread with no
+            # JSON answer at all - same fail-closed 400 as a bad path
+            cand, err = None, "unresolvable path"
+        if err:
+            # a bad path is a client error, not a service failure -
+            # 400 keeps it out of the publish tick's retryable buckets
+            self._send(400, {"ok": False, "error": err})
+            return
+        try:
+            res = upload_wall_photo(cand)
+        except Exception as e:  # noqa: BLE001
+            # same catch-all discipline as do_GET: an unclassified
+            # escape is environmental/transient, not a classified
+            # rejection - answer retryable
+            res = {"ok": False, "error": str(e), "retryable": True}
+        # scrub every error surface - exception text can echo the
+        # token get_token() just minted
+        if res.get("error"):
+            res["error"] = _scrub_capped(res["error"], 300, SECRET, *_secrets_snapshot())
+        if res.get("ok"):
+            self.log_message("/vk-photo-upload -> ok %s", res["attachment"])
+        else:
+            self.log_message("/vk-photo-upload -> failed: %s", res.get("error"))
+        self._send(200 if res.get("ok") else 503 if res.get("retryable") else 502, res)
 
     def log_request(self, code="-", size="-"):
         # send_response routes every request line through here into
@@ -1308,6 +1591,7 @@ def _selftest():
     global SECRET  # patched below to exercise _authorized both ways
     global _AUTH_401_COUNT  # patched/reset around the rate-limit check
     global _NO_REDIRECT  # stubbed around the recycle_tab churn checks
+    global MATERIALS_DIR  # patched around the _resolve_media checks
     failures = []
 
     def check(name, cond):
@@ -1550,6 +1834,46 @@ def _selftest():
             check("ws_eval handshake timeout -> ConnectionError", False)
     finally:
         websocket.create_connection = saved_cc
+    # _resolve_media: the under-root realpath guard must admit a file
+    # inside the root, refuse ../ traversal, a symlink pointing out,
+    # a non-image extension and an oversized file. MATERIALS_DIR is
+    # patched to a tmp dir - no VK or filesystem fixture needed
+    # beyond it.
+    import tempfile
+
+    saved_md = MATERIALS_DIR
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            root = os.path.join(td, "materials")
+            os.makedirs(os.path.join(root, "img"))
+            MATERIALS_DIR = root
+            good = os.path.join(root, "img", "a.png")
+            with open(good, "wb") as fh:
+                fh.write(b"\x89PNG" + b"\0" * 64)
+            outside = os.path.join(td, "secret.png")
+            with open(outside, "wb") as fh:
+                fh.write(b"x")
+            os.symlink(outside, os.path.join(root, "img", "link.png"))
+            cand, err = _resolve_media("img/a.png")
+            check(
+                "_resolve_media admits file under root",
+                cand == os.path.realpath(good) and err is None,
+            )
+            cand, err = _resolve_media("../secret.png")
+            check("_resolve_media refuses ../ traversal", cand is None and "escapes" in (err or ""))
+            cand, err = _resolve_media("img/link.png")
+            check("_resolve_media refuses symlink escape", cand is None and err is not None)
+            cand, err = _resolve_media("img/missing.png")
+            check("_resolve_media refuses missing file", cand is None and err is not None)
+            with open(os.path.join(root, "img", "b.txt"), "w") as fh:
+                fh.write("x")
+            cand, err = _resolve_media("img/b.txt")
+            check(
+                "_resolve_media refuses non-image ext",
+                cand is None and "extension" in (err or ""),
+            )
+    finally:
+        MATERIALS_DIR = saved_md
     if failures:
         print(f"selftest: {len(failures)} failure(s): " + ", ".join(failures))
         return 1

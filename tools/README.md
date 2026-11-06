@@ -180,9 +180,26 @@ uv run tools/vk_token_service.py --once                # print token JSON
 ```
 
 Endpoints: `GET /health`, `GET /vk-token` ->
-`{"ok": true, "access_token": "..."}`. Binds host loopback:8792; the n8n
+`{"ok": true, "access_token": "..."}`, and `POST /vk-photo-upload`
+(issue #36) -> `{"ok": true, "attachment": "photo<owner>_<id>"}`.
+Binds host loopback:8792; the n8n
 container reaches it through the slirp gateway as `http://10.0.2.2:8792`
 (same reachability quirk as the viz renderer).
+
+`/vk-photo-upload` is the wall-photo hop the n8n Code node cannot do
+itself (a real multipart body does not survive the task-runner proxy -
+the same reason the TG preview uses a dedicated HTTP node for
+sendPhoto). It takes the same `X-Shared-Token` gate as `/vk-token` and
+a JSON body `{"rel": "<materials-relative path>"}` - the caller never
+sends bytes or a token: the service resolves `rel` under
+`VK_MATERIALS_DIR` (default `<repo>/materials`, the same host dir the
+container mounts read-only at `/home/node/materials`) with a realpath
+under-root check, mints a token via the normal `get_token()` path, then
+runs `photos.getWallUploadServer` -> multipart POST ->
+`photos.saveWallPhoto` and returns the attachment string for
+`wall.post`. Bad paths are 400, transient VK/upload failures answer
+503 retryable like the token endpoint. Image extensions only
+(jpg/jpeg/png/gif/webp), 15MB cap.
 
 `/vk-token` serves a full wall-scope token, so it sits behind a
 shared-secret gate: callers must send the `X-Shared-Token` header
