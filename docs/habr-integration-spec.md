@@ -134,19 +134,27 @@ your own thoughts". Exceptions: AI-generated illustration images
 tolerated as a supplement inside a large technical article - the
 narrative core must still be human-written.
 
-Consequence for the factory: the generate -> humanize -> publish
-pipeline used for VK/TG MUST NOT feed Habr articles end-to-end.
-Rule-compliant operating mode:
+Consequence for the factory: an AI-drafted article can reach Habr
+only through a human decision. Operating mode (developer decision,
+2026-11-06):
 
-- content-gen produces research briefs, data artifacts and outlines
-  (e.g. VOLATILITY TICKER telemetry, registry/post metrics, real
-  project diffs) - raw material, not prose;
-- the human writes or substantively rewrites the article; the
-  writer-style skill's anti-slop rules double as a Habr-compliance
-  checklist (no AI-slop phrasing, concrete artifact-first content);
-- hands-agent then performs only the mechanical publish step on an
-  already-approved human text - which is exactly where browser
-  automation is safe and useful.
+- content-gen produces the full draft - research brief, data
+  artifacts AND the article text (e.g. VOLATILITY TICKER telemetry,
+  registry/post metrics, real project diffs turned into prose);
+- the human step is the Telegram moderation card BEFORE publish,
+  with four actions:
+  - ALLOW - post the draft as-is;
+  - EDIT - human edits inline, then post or send back for rework
+    with comments;
+  - REJECT+rework - send back to the pipeline with comments;
+  - REJECT+cancel - no publication;
+- the AI-ban analysis is WHY the card is mandatory, not decorative:
+  the moderator is accountable for whether the text reads as
+  authored work, and the writer-style skill's anti-slop rules double
+  as the Habr-compliance checklist for both the drafter and the
+  edit pass;
+- hands-agent publishes only text that passed the card - which is
+  exactly where browser automation is safe and useful.
 
 ### 1.5 Comment culture
 
@@ -167,15 +175,17 @@ commenting surface.
   naming/avatars - banned by rule #1). Company name only in the
   position field, contact links only in the designated field.
 - If the account starts ReadOnly: the first article goes through the
-  sandbox manually or semi-manually (human text + hands-agent
-  mechanics). Passing the sandbox is a one-time manual milestone.
+  sandbox as a supervised run - same TG moderation card, extra human
+  attention because a bounce is visible to staff. Passing the
+  sandbox is a one-time manual milestone.
 - Meanwhile: Q&A answers and comments (from Read&Comment) are the
   automation-friendly warmup path and also satisfy the
   "platform participation before promotion" cadence.
 
 ### 2.2 hands-agent automation map
 
-End-to-end automatable (after human text is approved in TG):
+End-to-end automatable (after the draft is approved on the TG
+moderation card):
 
 - `habr_post` recipe - publication mechanics:
   1. open habr.com (existing logged-in browser profile on the X11
@@ -209,7 +219,9 @@ End-to-end automatable (after human text is approved in TG):
 
 Explicitly manual / human-assist:
 
-- Article authorship (see 1.4) - human text, mandatory.
+- Human sign-off on every Habr-bound draft via the TG moderation
+  card (see 1.4) - mandatory; the pipeline drafts, the human
+  decides.
 - Sandbox first publication - human-supervised milestone.
 - CAPTCHA / verification interstitials - recipe aborts to
   `queue/failed/` and escalates to the operator; hands-agent never
@@ -260,8 +272,9 @@ Explicitly manual / human-assist:
 ## 3. Risks / open questions
 
 - Detection: Habr actively hunts AI text; even humanized output is a
-  risk if it reads generated. Mitigation = the artifact-first,
-  human-authored flow above, not a stronger humanizer.
+  risk if it reads generated. Mitigation = artifact-first content
+  plus the mandatory moderation card above, not a stronger
+  humanizer.
 - Composer DOM fragility: the hub multi-select and markdown editor
   are the most likely drift points; the recipe must use
   locate/verify loops, not fixed coordinates.
@@ -295,9 +308,10 @@ Then:
   interface.
 - No credential material in queue payloads, recipes, logs or the
   registry; CAPTCHA/verification aborts escalate to the operator.
-- Content-side: every Habr-bound draft carries a human-authorship
-  confirmation in the TG moderation payload (explicit flag, not
-  implied).
+- Content-side: every Habr-bound draft goes through the TG
+  moderation card and carries the recorded human decision
+  (ALLOW / EDIT / REJECT+rework / REJECT+cancel) in the moderation
+  payload - an explicit field, not an implied gate.
 
 ## 5. Sources
 
