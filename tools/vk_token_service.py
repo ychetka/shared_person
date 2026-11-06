@@ -982,7 +982,18 @@ def upload_wall_photo(path, budget=60.0):
             data = fh.read()
     except OSError as e:
         return {"ok": False, "error": f"read failed: {e}"}
-    fname = os.path.basename(path)
+    # recheck the cap on the bytes actually read: _resolve_media's
+    # getsize ran before the open, and a swapped or still-growing
+    # file in between would otherwise sail past the limit
+    if len(data) > PHOTO_MAX_BYTES:
+        return {
+            "ok": False,
+            "error": f"over the {PHOTO_MAX_BYTES // (1024 * 1024)}MB cap",
+        }
+    # sanitize the basename for the Content-Disposition header: a
+    # quote, backslash or CR/LF inside it would corrupt the multipart
+    # part
+    fname = "".join(c for c in os.path.basename(path) if c not in '"\\\r\n' and ord(c) > 0x1F)
     mime = PHOTO_MIME[os.path.splitext(fname)[1].lower()]
     # stdlib has no multipart writer and requests is not a PEP 723
     # dep of this script - build the single-field body by hand; the
@@ -1018,10 +1029,18 @@ def upload_wall_photo(path, budget=60.0):
             "error": f"upload returned bad body: {str(up)[:150]}",
             "retryable": True,
         }
+    # saveWallPhoto needs all three fields - a missing one would
+    # serialize as the literal 'None' upstream instead of failing here
+    if any(up.get(k) is None for k in ("server", "photo", "hash")):
+        return {
+            "ok": False,
+            "error": f"upload body missing fields: {str(up)[:150]}",
+            "retryable": True,
+        }
     try:
         saved = _vk_api(
             "photos.saveWallPhoto",
-            {"server": up.get("server"), "photo": up["photo"], "hash": up.get("hash")},
+            {"server": up["server"], "photo": up["photo"], "hash": up["hash"]},
             token,
             timeout=_share(deadline, 1, 20),
         )
@@ -1217,7 +1236,13 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             self._send(400, {"ok": False, "error": "body must be a JSON object"})
             return
-        cand, err = _resolve_media(payload.get("rel"))
+        try:
+            cand, err = _resolve_media(payload.get("rel"))
+        except (ValueError, OSError):
+            # an embedded NUL or a realpath-level OS error in the rel
+            # string would otherwise kill the handler thread with no
+            # JSON answer at all - same fail-closed 400 as a bad path
+            cand, err = None, "unresolvable path"
         if err:
             # a bad path is a client error, not a service failure -
             # 400 keeps it out of the publish tick's retryable buckets
