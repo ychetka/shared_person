@@ -244,6 +244,35 @@ on hosts that boot offline, warm the uv cache once while online
 (`uv run tools/vk_token_service.py --once`) so later starts never
 touch the index, or raise `RestartSec` further.
 
+## vk_token_issue.py - standalone-token re-issue (issue #3)
+
+Re-issues the VK standalone token documented in `../PLATFORM_ACCESS.md`
+by driving the implicit-flow authorize URL end-to-end in the
+operator's audit Chrome (CDP `VK_CDP_URL`, default
+`http://127.0.0.1:9223`): opens the oauth tab via `PUT /json/new`,
+locates the VK ID consent button by DOM-read and clicks it with a
+real OS input event (xdotool - the DOM is never written to, so the
+click is trusted), reads `access_token` back from the
+`oauth.vk.ru/blank.html` fragment, verifies `wall` scope via
+`account.getAppPermissions`, and appends `VK_ACCESS_TOKEN=` to the
+env file (env_val.sh semantics: last assignment wins, so append is
+the update). The token is never printed; output is masked to
+user_id/len/scope bits.
+
+```bash
+DISPLAY=:1 uv run tools/vk_token_issue.py --env ../ENV
+# optional: --cdp http://127.0.0.1:9223   (VK_CDP_URL env equivalent)
+```
+
+Exit codes: 0 stored, 1 no token inside the budget (consent needed a
+human step - rerun and click manually), 2 token lacks `wall` (not
+stored), 3 CDP unreachable. Verified end-to-end 2026-11-06:
+consent click + fresh `vk1.a.*` token stored.
+
+Note: VK ID now issues these tokens with `expires_in=86400` (~24h) -
+this script is the re-issue path, `vk_token_service.py` remains the
+primary provider for sp-publish.
+
 ## port_fwd.sh / port_fwd.py
 
 Host-to-rootless-netns port bridging - see `../README.md`.
