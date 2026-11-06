@@ -144,15 +144,19 @@ only through a human decision. Operating mode (developer decision,
 - the human step is the Telegram moderation card BEFORE publish,
   with four actions:
   - ALLOW - post the draft as-is;
-  - EDIT - human edits inline, then post or send back for rework
-    with comments;
+  - EDIT - human edits inline, then posts as the approved text;
+    if the human prefers to send it back with comments instead,
+    that is recorded as REJECT+rework;
   - REJECT+rework - send back to the pipeline with comments;
   - REJECT+cancel - no publication;
 - the AI-ban analysis is WHY the card is mandatory, not decorative:
   the moderator is accountable for whether the text reads as
   authored work, and the writer-style skill's anti-slop rules double
   as the Habr-compliance checklist for both the drafter and the
-  edit pass;
+  edit pass. The card assigns human accountability for the published
+  text; it does not by itself make a draft rule-compliant - Habr
+  moderators may still flag it, which is why artifact-first
+  substance and the checklist matter;
 - hands-agent publishes only text that passed the card - which is
   exactly where browser automation is safe and useful.
 
