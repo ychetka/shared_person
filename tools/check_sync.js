@@ -147,6 +147,15 @@ const GROUPS = {
   // INTENTIONALLY divergent (a dynamic token set plus access_token=
   // form masking) and must NOT get a copy here
   "scrub-secrets": { expect: 4 },
+  // media path resolution against the read-only materials mount
+  // (issue #36): identical copies in Prepare Draft (sp-tg-moderation)
+  // and Publish Tick (sp-publish). Covers MEDIA_ROOT consts, the
+  // underRoot realpath escape guard, resolveMedia's candidate order
+  // and mimeOf - the container-side half of the photo-upload
+  // contract: the rel path Publish Tick sends to vk_token_service's
+  // /vk-photo-upload must resolve under the same root Prepare Draft
+  // previewed the file under
+  "media-resolve": { expect: 2 },
   // registryEvent append-only event writer (issue #12, the post
   // registry): identical copies in Generate Drafts (sp-content-gen),
   // Handle TG Update (sp-tg-moderation) and Publish Tick (sp-publish).

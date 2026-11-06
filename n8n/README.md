@@ -430,25 +430,44 @@ After enabling a platform, re-approve its parked drafts to re-queue
 them - the Approve path drops the stale `skipped/` copy and writes a
 fresh queue file (it refuses while the platform is still disabled).
 
-VK driver flow per queue file `{platform: "vk", text, media[], test?}`:
+VK driver flow per queue file `{platform: "vk", text, media[], test?,
+dry_run?}`:
 
-1. `wall.post` with `owner_id=$VK_USER_ID` and `message=text`.
-   Text-only for now - `media[]` is carried through but not attached
-   (wall photo upload is a follow-up). The legacy `image` field is
-   dropped the same way and counts into `media_ignored`, so a
-   set-but-unattached field is never lost silently.
-2. Ledger-first: a `post-created` record carrying `external_id` is
+0. Dry-run first: `dry_run: true` (or `mock: true`, strict booleans)
+   exercises claim -> media resolve -> param build with ZERO VK calls
+   and no host-service contact either - the CI/smoke path. The file
+   lands in `done/`, the ledger gets a `dry-run` record
+   (`media_resolved`/`media_failed` counts, `text_len`), and the
+   registry event folds as `publish/dry-run` - never `published`, so
+   analytics does not chase metrics for a post that never existed.
+1. Media attach (issue #36): `media[]` plus the legacy `image` field
+   resolve through the same `resolveMedia`/underRoot rules the TG
+   preview used (shared `media-resolve` SYNC block). Each resolved
+   file goes to `POST $VK_UPLOAD_URL` (default
+   `http://10.0.2.2:8792/vk-photo-upload`, the host
+   `vk_token_service.py`) with a materials-relative path and the same
+   `X-Shared-Token` gate - the n8n Code node cannot send multipart
+   itself (Buffer bodies do not survive the task-runner proxy) and
+   the VK token never crosses the container boundary: the service
+   mints it host-side. Returned `photo<owner>_<id>` strings attach to
+   `wall.post` via `attachments=`. Per-file failures are non-fatal -
+   the post still publishes and the drop is reported as
+   `media attached: N/M (k failed)` - but a queue file with no text
+   AND no attached media is terminal: no empty wall.post.
+2. `wall.post` with `owner_id=$VK_USER_ID`, `message=text` and
+   `attachments=` when media uploaded.
+3. Ledger-first: a `post-created` record carrying `external_id` is
    appended to `state/published.jsonl` immediately after `wall.post`
    returns - before verification - so a later failure cannot orphan a
    live wall post without a recorded id.
-3. Post-publish verification: `wall.getById` on `<owner>_<post_id>`
+4. Post-publish verification: `wall.getById` on `<owner>_<post_id>`
    must read the post back. A verify failure is appended as a
    `verify-failed` record and tolerated (the post is live either way);
    otherwise the `published` record gets `verified: true`. Records
    look like `{ts, id, platform, external_id, status, verified, test,
-   deleted, media_ignored}` - minimal ledger until the full registry
-   lands (issue #12).
-4. Test posts (`test: true` in the queue file, passed through from the
+   deleted, media_count, media_attached, media_failed}` - minimal
+   ledger until the full registry lands (issue #12).
+5. Test posts (`test: true` in the queue file, passed through from the
    draft meta by moderation - the flag is a strict JSON boolean, only
    `true` counts; `"yes"`/`1` are treated as real posts): after the
    `published` record the driver calls `wall.delete` and appends a
@@ -457,7 +476,7 @@ VK driver flow per queue file `{platform: "vk", text, media[], test?}`:
    A delete failure still lands the file in `done/`: the earlier
    records already hold the published+verified evidence and the wall
    post id.
-5. `state/vk_status.json` reflects the full outcome: `ok` only on a
+6. `state/vk_status.json` reflects the full outcome: `ok` only on a
    fully clean run - `publish_unverified` when wall.getById could not
    confirm the post, `test_delete_failed` when a test post stayed
    live, `auth_error` on a persistent VK error 5.
