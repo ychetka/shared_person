@@ -410,22 +410,23 @@ moderation-draft still accepts a pre-made local path/URL.
 ### sp-publish (schedule, every 2 min)
 
 Scans `queue/publish/` and routes per platform. Each file is claimed
-atomically before the first VK call - renamed into
+atomically before the first platform API call - renamed into
 `queue/publish/processing/` - so an overlapping tick sees the file
-gone and cannot double-publish. Currently VK only (issue #1): the
-`ENABLED` map gates execution and is built from the
+gone and cannot double-publish. The `ENABLED` map gates execution
+and is built from the
 `PUBLISH_PLATFORMS` env var (comma-separated, default `vk`, injected
 via `docker-compose.yml`) - the same var sp-tg-moderation's Handle TG
 Update reads for its requeue gate, so the two cannot drift. Every
 non-enabled platform's queue file is moved to
 `queue/publish/skipped/` with a
-`platform not enabled` log line - nothing goes to FB/LI/IG/TikTok.
+`platform not enabled` log line - nothing goes to FB/IG/TikTok.
 A platform that IS listed in `PUBLISH_PLATFORMS` but has no
 implemented driver lands in `skipped/` too: it passes the ENABLED
 gate, then the tick parks the file with a `no driver for platform
-<p>` log reason and `skipped` in `vk_status.json` - a config-only
-gap is parked, not failed (only `vk` ships a driver today, so
-`PUBLISH_PLATFORMS=all` currently parks fb/linkedin files this way).
+<p>` log reason and `skipped` in the platform's status file - a
+config-only gap is parked, not failed. `vk` and `linkedin` ship
+drivers today, so `PUBLISH_PLATFORMS=all` parks fb/ig/tiktok files
+this way.
 After enabling a platform, re-approve its parked drafts to re-queue
 them - the Approve path drops the stale `skipped/` copy and writes a
 fresh queue file (it refuses while the platform is still disabled).
@@ -506,6 +507,51 @@ from `processing/` back to the queue root so the NEXT tick retries it,
 writes a `retry-requeued` note to `publish.jsonl` and reports
 `token_service_busy` in `vk_status.json` - never `token_service_down`
 and never `failed/`.
+
+LinkedIn driver flow per queue file `{platform: "linkedin", text,
+media[], test?, dry_run?}` (issue #38):
+
+0. Dry-run first: `dry_run: true` (or `mock: true`) exercises claim
+   -> payload build with ZERO LinkedIn calls and no token
+   requirement - the CI/smoke path. The file lands in `done/`, the
+   ledger gets a `dry-run` record and the registry event folds as
+   `publish/dry-run`.
+1. `POST https://api.linkedin.com/v2/ugcPosts` with a
+   `com.linkedin.ugc.ShareContent` body: `author` =
+   `LINKEDIN_PERSON_URN` (bare member ids are normalized to
+   `urn:li:person:<id>`), `shareCommentary.text` = text,
+   `shareMediaCategory: NONE`, `visibility` = PUBLIC. Auth is
+   `Authorization: Bearer $LINKEDIN_ACCESS_TOKEN` +
+   `X-Restli-Protocol-Version: 2.0.0`. Media is NOT attached in v1:
+   binary upload needs `registerUpload` + a host-side PUT path that
+   is not implemented, so `media[]`/`image` entries are reported as
+   dropped/unsupported and the post goes out text-only.
+2. Ledger-first like VK: `post-created` with the returned share URN
+   is appended before verification. A response without an id falls
+   into the orphan probe: `GET /v2/ugcPosts` with
+   `q=authors&authors=List(<author>)` is scanned for a recent post
+   matching the text prefix, and a hit records `maybe-live` +
+   `orphan_id`.
+3. Verification: `GET /v2/ugcPosts/{id}`. LinkedIn may 403 the read
+   back (r_member_social is not granted) - a verify failure is
+   tolerated and appended as `verify-failed`; the `published`
+   record then carries `verified: false` and
+   `linkedin_status.json` reports `publish_unverified`.
+4. Test posts (`test: true`): after `published` the driver calls
+   `DELETE /v2/ugcPosts/{id}` (204 = success), appends
+   `test-published-deleted` and the registry event folds as
+   `test-deleted`. A delete failure records `test-delete-failed`
+   and the post stays live - flagged for manual removal.
+5. Error classes: POST/GET 401/403 are terminal `api_error`
+   (re-issue the token via the OAuth flow in
+   `../PLATFORM_ACCESS.md` - no automatic retry burns budget);
+   429/5xx are transient `api_transient` - the file is requeued to
+   the queue root for the next tick up to `RETRY_MAX` (5), then
+   lands in `failed/`.
+6. `state/linkedin_status.json` mirrors `vk_status.json` (same
+   `{status, ts, last_tick, file, reason, files[]}` shape) via its
+   own writer - LinkedIn outcomes never overwrite VK status and
+   vice versa.
 
 Processed files move to `done/` or `failed/` and are logged to
 `publish.jsonl` (the logged `status` mirrors the ledger:

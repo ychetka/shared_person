@@ -38,16 +38,26 @@ and how they were obtained. All secrets are in `../ENV` (never committed).
 ## LinkedIn
 
 - Method: LinkedIn API `POST /rest/posts` (or `/v2/ugcPosts`) as member.
-- App: "Shared Person" (app id `265036256`), created 2026-10-23 in
-  https://www.linkedin.com/developers/apps, associated page "LinkedIn"
-  (default page for individual developers).
+- Two developer apps exist:
+  - "Shared Person" (app id `265036256`), created 2026-10-23,
+    associated page "LinkedIn" (default page for individual
+    developers) - holds the currently working `LINKEDIN_ACCESS_TOKEN`.
+  - "shared-person content pipeline" (app id `265095434`, client id
+    `77y5g76kt1qs8o`), created 2026-11-06, associated page
+    "Trade AI Analyst" (company page built for the algo-trading
+    project, industry: software development) - the long-term app;
+    `ENV` `LINKEDIN_CLIENT_ID`/`LINKEDIN_CLIENT_SECRET` are this
+    app's credentials. Its OAuth is pending a developer password
+    re-auth (LinkedIn gates every token grant behind "Welcome Back").
 - `../ENV`: `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`,
   `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN` (`urn:li:person:CzvpUCPSve`).
-- Products enabled: "Share on LinkedIn" (Default Tier, instant approval)
-  → `w_member_social`; "Sign In with LinkedIn using OpenID Connect"
-  → `openid profile email`.
-- Authorized redirect URL registered:
-  `https://www.linkedin.com/developers/tools/oauth/redirect`.
+- Redirect URLs registered: `http://localhost:8793/linkedin/callback`
+  on the new app (host listener captures `?code=` for exchange);
+  `https://www.linkedin.com/developers/tools/oauth/redirect` on the
+  old app (token-generator tool).
+- Products enabled on BOTH apps: "Share on LinkedIn" (Default Tier,
+  instant approval) → `w_member_social`; "Sign In with LinkedIn
+  using OpenID Connect" → `openid profile email`.
 - Token TTL: ~60 days (`expires_in=5183999`). No refresh token on this
   tier — re-auth needed by ~2026-12-22.
 - Re-auth procedure (3-legged, ~1 min in the logged-in browser):
