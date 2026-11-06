@@ -33,10 +33,10 @@ Personal publications (`habr.com/ru/articles/`):
 Posts (short form, `habr.com/ru/posts/`):
 
 - 10-4000 chars, no title, no cut; rendered fully in feed. Up to 5
-  hubs. Available without premoderation once the account has 2
-  approved comments under publications by 2 different authors (the
-  Read&Comment unlock path). No rating impact; positioned as a
-  conversation format.
+  hubs. Unlocks inside Read&Comment once the account has 2 approved
+  comments under publications by 2 different authors - the same
+  threshold that lifts comment premoderation globally (see 1.2).
+  Practically no rating impact; positioned as a conversation format.
 
 Q&A (`qna.habr.com`):
 
@@ -75,9 +75,14 @@ Habr Career (`career.habr.com`):
 ### 1.2 Moderation model
 
 - Account tiers: ReadOnly (default after registration) -> Read&Comment
-  (after the first pre-moderated comment is approved) -> full-rights.
-  ReadOnly comments on posts <30 days old go through author+moderator
-  premoderation; full accounts publish and comment freely.
+  -> full-rights. ReadOnly users can propose comments on posts <30
+  days old; those go through author+moderator premoderation, and the
+  FIRST approved one upgrades the account to Read&Comment. Inside
+  Read&Comment, comments to a given publication post without
+  premoderation once its author approves one; after TWO approved
+  comments under publications by TWO different authors, comments go
+  without premoderation globally and the posts format unlocks.
+  Full accounts publish and comment freely.
 - Sandbox: ReadOnly users submit articles to `habr.com/ru/sandbox/`;
   staff moderators review and either grant the invite (full account)
   or bounce with a stated reason. ~80% of current sandbox submissions
