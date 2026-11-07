@@ -432,10 +432,12 @@ them - the Approve path drops the stale `skipped/` copy and writes a
 fresh queue file (it refuses while the platform is still disabled).
 
 Simulated publish mode (issue #41): real publishing is OFF by
-developer decision (2026-11-07) until an explicit go-live.
-`PUBLISH_SIMULATE` (`1`/`true`/`yes`, case-insensitive; any other
-value including unset = real mode, injected via
-`docker-compose.yml`) replaces ONLY the external API layer in both
+developer decision (2026-11-07) until an explicit go-live - the
+docker-compose default is ON (`PUBLISH_SIMULATE=${PUBLISH_SIMULATE:-1}`),
+so going live requires explicitly setting `PUBLISH_SIMULATE=0` in
+`../ENV`; that flip IS the go-live decision. `PUBLISH_SIMULATE`
+(`1`/`true`/`yes`, case-insensitive; anything else = real mode)
+replaces ONLY the external API layer in both
 drivers - no token refresh, no VK photo upload / `wall.post` /
 `wall.getById` / `wall.delete`, no LinkedIn `ugcPosts` / verify GET /
 test `DELETE` - while the claim -> media resolve -> ledger -> status
@@ -449,7 +451,14 @@ platform status file reports `simulated`, the Telegram line says
 `simulated` without any DELETE. Synthetic external ids always carry
 a `sim-` prefix (`sim-<draft_id>` for VK,
 `sim-urn:li:share:<draft_id>` for LinkedIn) so they can never be
-confused with a real numeric post id / share URN.
+confused with a real numeric post id / share URN. Simulated
+artifacts never count as publish proof on the moderation side
+either: `publishedIds()` in sp-tg-moderation skips `simulated`/
+`sim-` ledger rows, and the queue payload is stamped
+`simulated: true` before the `done/` move so the Approve path's
+dir probes treat an all-sim `done/` as rehearsal history - a draft
+simulated pre-go-live stays re-approvable and will publish for
+real after `PUBLISH_SIMULATE=0`.
 
 VK driver flow per queue file `{platform: "vk", text, media[], test?,
 dry_run?}`:
@@ -638,11 +647,12 @@ All tokens come from container env (`../ENV` via compose
 `--env-file`), read in Code nodes with `$env` - never hardcoded in node
 parameters. `PUBLISH_PLATFORMS` (comma-separated, default `vk`) is the
 single source for the ENABLED gates in sp-publish and
-sp-tg-moderation. `PUBLISH_SIMULATE` (`1`/`true`/`yes`, default
-off) makes both sp-publish drivers simulate instead of calling the
-platform APIs - real publishing is OFF by developer decision until
-explicit go-live (issue #41); simulated runs write `sim-*`
-external_ids and `SIMULATED`/`simulated` markers everywhere. Required compose vars: `TELEGRAM_BOT_TOKEN`,
+sp-tg-moderation. `PUBLISH_SIMULATE` (`1`/`true`/`yes`; compose
+default ON, an explicit `0` is the go-live flip) makes both
+sp-publish drivers simulate instead of calling the platform APIs -
+real publishing is OFF by developer decision until explicit go-live
+(issue #41); simulated runs write `sim-*` external_ids and
+`SIMULATED`/`simulated` markers everywhere. Required compose vars: `TELEGRAM_BOT_TOKEN`,
 `GEMINI_API_KEY` (llm-gateway), `VK_ACCESS_TOKEN`, `VK_USER_ID`,
 `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_PERSON_URN` (optional at compose
 level: `VK_ACCESS_TOKEN` and the `LINKEDIN_*` pair - VK can run on the

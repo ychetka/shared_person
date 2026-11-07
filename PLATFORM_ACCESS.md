@@ -4,9 +4,11 @@ How each target platform is reached for publishing, where credentials live,
 and how they were obtained. All secrets are in `../ENV` (never committed).
 
 > **Real publishing is OFF by developer decision (2026-11-07, issue #41)
-> until an explicit go-live.** The deploy runs with
-> `PUBLISH_SIMULATE=1` (compose injects `PUBLISH_SIMULATE=${PUBLISH_SIMULATE:-0}`;
-> `1`/`true`/`yes` = on): both sp-publish drivers skip every external
+> until an explicit go-live.** Compose injects
+> `PUBLISH_SIMULATE=${PUBLISH_SIMULATE:-1}` - simulated mode is the
+> DEPLOYMENT DEFAULT, and going live requires explicitly setting
+> `PUBLISH_SIMULATE=0` in `../ENV` (that flip IS the go-live
+> decision): both sp-publish drivers skip every external
 > API call (no VK `wall.post`/upload/`wall.delete`, no LinkedIn
 > `ugcPosts`/`DELETE`) and record synthetic `external_id`s - `sim-*`
 > prefixed for VK (`sim-<draft_id>`), `sim-urn:li:share:<draft_id>`
