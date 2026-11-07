@@ -108,6 +108,23 @@ Groups, expected member counts and normalizations live in the `GROUPS`
 table at the top of the script; a marker group with no table entry
 fails the run, so new shared helpers must be registered there.
 
+## check_fig_numbering.js - article-visuals figure contract harness
+
+Sandbox harness for the `[See Fig N]` / `[см. Fig N]` pointer contract
+(issue #51): extracts the 'Generate Drafts' jsCode from
+`n8n/workflows/sp-content-gen.json` and runs it under a stubbed
+Code-node environment (`require('fs')`, `$input.all()`, `$env`,
+`this.helpers.httpRequest` - all faked, nothing touches disk or the
+network). Asserts on the moderation-draft dispatch body: pointers
+renumber to the FINAL `media` attach order, failed renders drop their
+pointer and surface `fig N render failed` in `draft.warnings`,
+`caption_note` lists rendered figures in attach order, and an empty
+`visuals[]` keeps the legacy dispatch byte-identical.
+
+```bash
+node tools/check_fig_numbering.js   # exit 0 = all checks pass
+```
+
 ## deploy_workflow.js
 
 SQLite deployer for `n8n/workflows/*.json` - see `n8n/README.md`.
