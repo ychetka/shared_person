@@ -101,6 +101,12 @@ const GROUPS = {
   // copy today, tracked under its own group so the marker itself
   // stays accounted for
   "publish-simulate": { expect: 1 },
+  // postLink external_id -> operator-facing post reference (issue
+  // #43): VK numeric <owner>_<post> folds to a clickable wall URL,
+  // LinkedIn share URNs render labeled (not a fake URL), 'sim-' ids
+  // stay literal. Publish Tick only (sp-publish) - single copy,
+  // tracked so the marker stays accounted for
+  "publish-post-link": { expect: 1 },
   // REWRITE_WINDOW_MS const: Prepare Draft plus the 'ap' and 'ed'
   // refusal sites in Handle TG Update (all sp-tg-moderation) - the
   // copies sit at different nesting depths, so leading indentation
