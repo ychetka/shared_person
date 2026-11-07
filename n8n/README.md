@@ -518,7 +518,8 @@ so going live requires explicitly setting `PUBLISH_SIMULATE=0` in
 (`1`/`true`/`yes`, case-insensitive; anything else = real mode)
 replaces ONLY the external API layer in both
 drivers - no token refresh, no VK photo upload / `wall.post` /
-`wall.getById` / `wall.delete`, no LinkedIn `ugcPosts` / verify GET /
+`wall.getById` / `wall.delete`, no LinkedIn
+`assets.registerUpload` / binary PUT / `ugcPosts` / verify GET /
 test `DELETE` - while the claim -> media resolve -> ledger -> status
 file -> registry -> Telegram pipeline runs unchanged and the
 `PUBLISH_PLATFORMS` gate stays authoritative. Every artifact is
@@ -529,8 +530,10 @@ platform status file reports `simulated`, the Telegram line says
 `-> SIMULATED publish sim-<id>`, and `test: true` drafts record
 `simulated` without any DELETE. Synthetic external ids always carry
 a `sim-` prefix (`sim-<draft_id>` for VK,
-`sim-urn:li:share:<draft_id>` for LinkedIn) so they can never be
-confused with a real numeric post id / share URN. Simulated
+`sim-urn:li:share:<draft_id>` for LinkedIn, and `sim-asset-<n>` for
+each resolvable LinkedIn media file in the ledger `media_assets`
+list) so they can never be confused with a real numeric post id /
+share URN / asset URN. Simulated
 artifacts never count as publish proof on the moderation side
 either: `publishedIds()` in sp-tg-moderation skips `simulated`/
 `sim-` ledger rows, and the queue payload is stamped
@@ -617,46 +620,79 @@ writes a `retry-requeued` note to `publish.jsonl` and reports
 and never `failed/`.
 
 LinkedIn driver flow per queue file `{platform: "linkedin", text,
-media[], test?, dry_run?}` (issue #38):
+media[], test?, dry_run?}` (issue #38, image upload issue #50):
 
 0. Dry-run first: `dry_run: true` (or `mock: true`) exercises claim
-   -> payload build with ZERO LinkedIn calls and no token
-   requirement - the CI/smoke path. The file lands in `done/`, the
-   ledger gets a `dry-run` record and the registry event folds as
-   `publish/dry-run`.
-1. `POST https://api.linkedin.com/v2/ugcPosts` with a
+   -> media resolve -> param build with ZERO LinkedIn calls and no
+   token requirement - the CI/smoke path. The file lands in `done/`,
+   the ledger gets a `dry-run` record (`media_resolved`/
+   `media_failed` counts, `text_len`) and the registry event folds
+   as `publish/dry-run`.
+1. Media attach (issue #50): `media[]` plus the legacy `image` field
+   resolve through the same `resolveMedia`/underRoot rules the TG
+   preview and the VK driver use (shared `media-resolve` SYNC
+   block), capped at 4 images - the same `MEDIA_MAX` ceiling
+   content-gen's `mediaSel` enforces when it builds `draft.media`;
+   over-cap entries are reported dropped without reaching the API.
+   Each resolved file goes through the official asset flow:
+   `POST /v2/assets?action=registerUpload` (recipe
+   `urn:li:digitalmediaRecipe:feedshare-image`, `owner` =
+   `LINKEDIN_PERSON_URN`, `serviceRelationships`
+   `OWNER`/`urn:li:userGeneratedContent`) returns an `uploadUrl`
+   plus the `urn:li:digitalmediaAsset:<id>` urn; a binary `PUT` of
+   the file bytes to that URL (`Authorization: Bearer`, image
+   Content-Type, plus any recipe-provided media headers) ships the
+   bytes. `w_member_social` covers asset registration for member
+   shares - no extra scope. The VK photo hop is host-side because a
+   Code node cannot send a multipart body across the task-runner
+   proxy; this PUT is a raw binary Buffer body, which issue #50 runs
+   in-driver - if the proxy strips Buffer bodies the upload fails
+   visibly (a host-side endpoint is the documented fallback), never
+   silently.
+   Per-file failures are non-fatal, same semantics as the VK photo
+   upload - the post still publishes with what attached and every
+   drop is named in the `media_failed` ledger list + a
+   `media-upload-failed` log line, reported to the operator as
+   `media attached: N/M (k failed)` - but a transient failure (no
+   HTTP status = transport loss, or the 429/5xx family) rethrows
+   retryable BEFORE ugcPosts ran, so the file requeues bounded by
+   `RETRY_MAX` (5) exactly like a VK upload transient; a 401/403 on
+   the asset PUT is the same dead-credential `auth_error` verdict
+   `liCall` assigns. A queue file with no text AND no attached
+   media is terminal: no empty share.
+2. `POST https://api.linkedin.com/v2/ugcPosts` with a
    `com.linkedin.ugc.ShareContent` body: `author` =
    `LINKEDIN_PERSON_URN` (bare member ids are normalized to
    `urn:li:person:<id>`), `shareCommentary.text` = text,
-   `shareMediaCategory: NONE`, `visibility` = PUBLIC. Auth is
+   `shareMediaCategory` = `IMAGE` with `media[]` =
+   `[{status: "READY", media: <asset urn>, title: {text:
+   <filename>}}]` when assets uploaded (else `NONE`),
+   `visibility` = PUBLIC. Auth is
    `Authorization: Bearer $LINKEDIN_ACCESS_TOKEN` +
-   `X-Restli-Protocol-Version: 2.0.0`. Media is NOT attached in v1:
-   binary upload needs `registerUpload` + a host-side PUT path that
-   is not implemented, so `media[]`/`image` entries are reported as
-   dropped/unsupported and the post goes out text-only.
-2. Ledger-first like VK: `post-created` with the returned share URN
+   `X-Restli-Protocol-Version: 2.0.0`.
+3. Ledger-first like VK: `post-created` with the returned share URN
    is appended before verification. A response without an id falls
    into the orphan probe: `GET /v2/ugcPosts` with
    `q=authors&authors=List(<author>)` is scanned for a recent post
    matching the text prefix, and a hit records `maybe-live` +
    `orphan_id`.
-3. Verification: `GET /v2/ugcPosts/{id}`. LinkedIn may 403 the read
+4. Verification: `GET /v2/ugcPosts/{id}`. LinkedIn may 403 the read
    back (r_member_social is not granted) - a verify failure is
    tolerated and appended as `verify-failed`; the `published`
    record then carries `verified: false` and
    `linkedin_status.json` reports `publish_unverified`.
-4. Test posts (`test: true`): after `published` the driver calls
+5. Test posts (`test: true`): after `published` the driver calls
    `DELETE /v2/ugcPosts/{id}` (204 = success), appends
    `test-published-deleted` and the registry event folds as
    `test-deleted`. A delete failure records `test-delete-failed`
    and the post stays live - flagged for manual removal.
-5. Error classes: POST/GET 401/403 are terminal `api_error`
+6. Error classes: POST/GET 401/403 are terminal `api_error`
    (re-issue the token via the OAuth flow in
    `../PLATFORM_ACCESS.md` - no automatic retry burns budget);
    429/5xx are transient `api_transient` - the file is requeued to
    the queue root for the next tick up to `RETRY_MAX` (5), then
    lands in `failed/`.
-6. `state/linkedin_status.json` mirrors `vk_status.json` (same
+7. `state/linkedin_status.json` mirrors `vk_status.json` (same
    `{status, ts, last_tick, file, reason, files[]}` shape) via its
    own writer - LinkedIn outcomes never overwrite VK status and
    vice versa.

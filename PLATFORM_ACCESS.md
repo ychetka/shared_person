@@ -10,9 +10,11 @@ and how they were obtained. All secrets are in `../ENV` (never committed).
 > `PUBLISH_SIMULATE=0` in `../ENV` (that flip IS the go-live
 > decision): both sp-publish drivers skip every external
 > API call (no VK `wall.post`/upload/`wall.delete`, no LinkedIn
-> `ugcPosts`/`DELETE`) and record synthetic `external_id`s - `sim-*`
+> `assets.registerUpload`/binary PUT/`ugcPosts`/`DELETE`) and record
+> synthetic `external_id`s - `sim-*`
 > prefixed for VK (`sim-<draft_id>`), `sim-urn:li:share:<draft_id>`
-> for LinkedIn - marked `status: "simulated"` in `published.jsonl`,
+> for LinkedIn (plus `sim-asset-<n>` media urns) - marked
+> `status: "simulated"` in `published.jsonl`,
 > `publish/simulated` registry events, `simulated` platform status,
 > and `SIMULATED` in the Telegram summary. The credentials below are
 > ready for go-live but nothing is posted until the flag is flipped.
@@ -92,6 +94,12 @@ and how they were obtained. All secrets are in `../ENV` (never committed).
   `{author: "urn:li:person:CzvpUCPSve", commentary: ..., visibility:
   "PUBLIC", lifecycleState: "PUBLISHED", isReshareDisabledByAuthor: false}`
   with header `LinkedIn-Version: 202405` (or `/v2/ugcPosts` legacy).
+- Image attach (issue #50): `POST /v2/assets?action=registerUpload`
+  (recipe `urn:li:digitalmediaRecipe:feedshare-image`) -> binary `PUT`
+  to the returned `uploadUrl` -> `media[]` of the returned
+  `urn:li:digitalmediaAsset:<id>` on the share body with
+  `shareMediaCategory: IMAGE`. `w_member_social` covers asset
+  registration for member shares - no extra product/scope needed.
 
 ## Facebook / Instagram
 
