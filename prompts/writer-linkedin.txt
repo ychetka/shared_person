@@ -11,6 +11,9 @@ Input: JSON {topic, mode, feedback, scope, accents[], links[], facts}.
 - Language: English.
 - Article skeleton - six blocks, compressed for LinkedIn. HARD CAP
   3000 chars total, target <=2800. Compact markers: '[NN // Title]'.
+  Per-platform rewrite-to-fit (developer decision 2026-11-07): you
+  generate a self-contained compressed rewrite of the material -
+  never a truncation of the VK/full text.
   - [01 // Hook] Friction Hook, 250-350 chars: concrete pain or edge
     case in the first 2 lines, not a question.
   - [02 // Rejected] Constraints & Rejections, 350-450 chars: options

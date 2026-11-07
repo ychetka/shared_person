@@ -154,8 +154,11 @@ drivers) need no changes:
 - **VK** - full-length article (~5.3-7.7k chars), Russian, dev-log
   register. Block headers as `[NN / Заголовок]` or `=== NN ===`
   plain-text markers.
-- **LinkedIn** - compressed article: hard cap 3000 chars, target
-  <=2800. B1+B2 merge to ~4 lines, B3 becomes timestamped bullets, B4
+- **LinkedIn** - separately generated compressed rewrite: hard cap
+  3000 chars, target <=2800. Developer decision 2026-11-07:
+  per-platform **rewrite-to-fit** - the LinkedIn version is a
+  compressed regeneration of the article, NOT a truncation of the VK
+  text. B1+B2 merge to ~4 lines, B3 becomes timestamped bullets, B4
   detail moves into the diagram. Markers: `[NN // Title]`.
 - **Facebook** - OUT OF SCOPE for the article skeleton. The FB publish
   driver is not shipped in sp-publish (fb drafts park in `skipped/`
