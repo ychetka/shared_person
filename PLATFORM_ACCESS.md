@@ -19,6 +19,29 @@ and how they were obtained. All secrets are in `../ENV` (never committed).
 > and `SIMULATED` in the Telegram summary. The credentials below are
 > ready for go-live but nothing is posted until the flag is flipped.
 
+## Audit browser (CDP :9223)
+
+- A dedicated Chrome instance on profile `~/.chrome-audit-profile`
+  exposes the DevTools Protocol at `http://127.0.0.1:9223` (loopback
+  only). It holds the operator's logged-in sessions for VK, Facebook,
+  Instagram and LinkedIn; `tools/vk_token_issue.py`,
+  `tools/vk_token_service.py`, `hands-agent/cdp.py` (`HANDS_CDP`) and
+  `deploy/vk-token.service` all talk to it.
+- Canonical launch path: `tools/chrome-audit.sh`. It is idempotent
+  (a live `/json/version` answers 'already running', exit 0), removes
+  stale `Singleton{Cookie,Lock,Socket}` locks ONLY when no live chrome
+  holds the profile, discovers the Wayland/Xwayland env dynamically
+  (`WAYLAND_DISPLAY` from the `$XDG_RUNTIME_DIR/wayland-*` socket,
+  `XAUTHORITY` via the boot-rotating
+  `/run/user/$(id -u)/.mutter-Xwaylandauth.*` glob with
+  `~/.Xauthority` fallback, `DISPLAY` default `:0`), starts chrome
+  detached via `setsid` and waits ~15s for CDP, printing
+  `/json/version`. Missing chrome binary or a CDP timeout exits
+  non-zero. `--dry-run` reports decisions without changing anything.
+- Do NOT launch the audit browser by hand with different flags - a
+  second instance on the same profile never opens :9223, and deleting
+  its Singleton locks under a live process corrupts the profile.
+
 ## VK
 
 - Method: VK API `wall.post` to the user's own wall.
@@ -34,7 +57,8 @@ and how they were obtained. All secrets are in `../ENV` (never committed).
   fallback; the resilient primary path is `vk_token_service.py`
   (web-session extraction from the logged-in tab, see tools/README).
 - To re-issue (automated, issue #3): `uv run tools/vk_token_issue.py`
-  - opens the authorize URL in the audit Chrome (CDP :9223),
+  - opens the authorize URL in the audit Chrome (CDP :9223, started
+    via `tools/chrome-audit.sh` - see "Audit browser" above),
     OS-clicks the VK ID "Продолжить" consent (DOM read-only for
     coordinates, xdotool trusted click), harvests `access_token`
     from the `blank.html#...` fragment, verifies `wall` scope via
@@ -104,7 +128,8 @@ and how they were obtained. All secrets are in `../ENV` (never committed).
 ## Facebook / Instagram
 
 - Sessions exist in the audit Chrome profile (`:9223`,
-  `~/.chrome-audit-profile`) — used by hands-agent recipes for now.
+  `~/.chrome-audit-profile`, launch via `tools/chrome-audit.sh` - see
+  "Audit browser" above) — used by hands-agent recipes for now.
 - Official API path (Graph API, Page + IG Business/Creator publishing)
   is not configured yet; needs a Meta developer app + Page access token.
 - Instagram is a Creator account — for `instagram_content_publish` it
