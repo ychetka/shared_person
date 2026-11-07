@@ -144,9 +144,19 @@ drivers) need no changes:
    paths already write - and land on `draft.media` via the
    moderation-draft dispatch, attached as the bottom media grid at
    publish time.
-4. Render failures degrade to text-only exactly like the existing
-   paths; the draft still goes to moderation. Visual tasks are logged
-   under `stage:"viz"` / `stage:"image"` with
+4. Render results are collected per task and attached in requested
+   `visuals[]` order (the chart batch still runs before the image
+   calls, but attach order follows `visuals[]`), so the attach index
+   IS the figure number. After all render attempts the
+   `[See Fig N]` / `[см. Fig N]` pointers in `draft.text` are
+   rewritten to the final attach order (issue #51); a task that
+   produced no attached media loses its pointer entirely - no
+   dangling references - and adds a `fig N render failed: ...` entry
+   to `draft.warnings`, which lands on the moderation card's
+   [WARNINGS] block. `caption_note` lists the RENDERED figures in
+   attach order (`Fig N: type/block`), not the requested task list.
+   The draft still goes to moderation on any render failure; visual
+   tasks are logged under `stage:"viz"` / `stage:"image"` with
    `source:"article-visuals"`.
 
 ## Platform notes
