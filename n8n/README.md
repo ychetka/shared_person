@@ -133,8 +133,9 @@ rewrite `tg.json` and hijack previews.
 
 - `POST /webhook/moderation-draft` `{platform, text, image?, topic?,
   draft_id?, scope?, warnings?, media?, caption_note?, test?}` - saves a draft,
-  sends it to the Telegram chat with inline buttons Approve / Edit /
-  Reject (`callback_data` = `ap|ed|rj:<id>`). `scope` is rendered above
+  sends it to the Telegram chat with four inline buttons Approve /
+  Edit / Rework / Reject (`callback_data` = `ap|ed|rw|rj:<id>:<ver>`,
+  `ver` = the `preview_v` binding for that exact preview). `scope` is rendered above
   the text; `warnings[]` (verifier flags) are appended as a block under
   the text and stored in the draft meta.
   - shared-secret gate: the endpoint is reachable through the public
@@ -149,8 +150,8 @@ rewrite `tg.json` and hijack previews.
     `state/drafts/<id>.json` may only be replaced when its moderation
     is already decided AND a rewrite is expected - `status` must be
     `rejected` (dead draft, id free for reuse), `rewrite` (set by
-    Handle TG Update when an Edit rewrite is dispatched to
-    content-gen, which reuses the same `draft_id`), or a delivery
+    Handle TG Update when a Rework/comment-mode rewrite is dispatched
+    to content-gen, which reuses the same `draft_id`), or a delivery
     status (`delivering` when saved pre-sendMessage, `deliver-failed`
     when the preview send failed - no Approve button ever reached the
     operator, so a retry under the same `draft_id` must get through).
@@ -234,21 +235,52 @@ rewrite `tg.json` and hijack previews.
     matches the fresh write is the tick claiming OUR file (root >
     `processing/`): that is the single intended publish, not a
     duplicate.
-  - Reject > marks draft rejected, logs to `moderation.jsonl`
-  - Edit > refused while the publish is already decided: a draft in
+  - Reject > terminal cancel: marks the draft `rejected` (kept as the
+    internal status - it is one of Prepare Draft's rewritable
+    statuses, so the `draft_id` stays revivable), strips the preview
+    keyboard, stamps `[REJECTED]`, retracts a queued publish, and
+    writes a registry event `stage: "moderation", status:
+    "cancelled"` to `events.jsonl` (the draft-file status name and
+    the registry event status deliberately differ).
+  - Edit > REPLACE mode (issue #42): arms a `pending_edit` marker
+    with `mode: "replace"`; the operator's next message IS the
+    corrected post text. A service-line sanitizer strips every chrome
+    artifact the preview card can emit - lines matching `^[DRAFT`,
+    `^Scope:`, `^TEST POST`, `^[media]`, `^attach failed:`,
+    `^[truncated`, plus the `[WARNINGS` header and its `- ` bullet
+    lines (a `- ` line is only chrome inside that block - lists in
+    the post body survive) - plus surrounding whitespace (so a
+    pasted-back preview card works), then the remainder becomes
+    `draft.text` VERBATIM - no
+    LLM pass, no content-gen dispatch. The draft is re-previewed
+    in place through the same card assembly as Compose Message
+    (fresh `preview_v`, four-button keyboard, status back to
+    `pending`) and a registry `edited` event is written. Stripped
+    lines are logged to `moderation.jsonl` (`edit-sanitized` with
+    `removed_count` + `removed_preview`); `draft.warnings` is cleared
+    on replace since the flags were computed on the old text. An
+    empty post-sanitize reply is refused and the marker stays armed.
+  - Rework > COMMENT mode (issue #42): arms `pending_edit` with
+    `mode: "comment"`; the operator's reply is forwarded to
+    `/webhook/content-gen` as a rewrite request (mode `rewrite`,
+    feedback + previous draft) - the original single-Edit behavior.
+    Edit and Rework share the same press-side guards: refused while
+    the publish is already decided - a draft in
     `status: "approved"` or with a `queue/publish/<id>.json` copy in
     the root, `processing/` or `done/` answers `already
     queued/published - Reject first to edit` before any marker is
     armed (copies in `failed/`/`skipped/` stay editable - dead
-    records, not live publishes). The flow is Reject first: Reject
-    retracts the queued publish and flips the draft to `rejected`,
-    which Edit then revives. On an editable draft Edit stores a
-    pending-edit marker and still runs a press-time `retractQueued`
+    records, not live publishes; a `done/` copy stamped
+    `simulated: true` is a PUBLISH_SIMULATE rehearsal and does not
+    block either). The flow is Reject first for a decided publish:
+    Reject retracts the queued publish and flips the draft to
+    `rejected`, which Edit/Rework then revives. On an editable draft
+    either button stores a pending-edit marker and still runs a
+    press-time `retractQueued`
     as a race-catcher for a queue copy that slipped in after the
     refusal probes; the next
-    plain-text message in the chat is forwarded to
-    `/webhook/content-gen` as a rewrite request
-    (mode `rewrite`, with feedback + previous draft). The draft flips
+    plain-text message in the chat is then consumed per the armed
+    mode. On the Rework path the draft flips
     to `status: "rewrite"` and stamps `rewrite_issued_at` at dispatch
     so the regenerated version can reclaim the same `draft_id` under
     the (time-bounded) overwrite guard above. If the dispatch call
