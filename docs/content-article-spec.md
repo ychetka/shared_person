@@ -132,7 +132,12 @@ drivers) need no changes:
 ## Pipeline wiring (sp-content-gen / Generate Drafts)
 
 1. Pass 2 writer output is parsed as before (`parsed.text` -> draft
-   text -> humanizer -> critic verify).
+   text -> humanizer -> critic verify). The critic input also carries
+   `visuals` - one flattened claim line per `visuals[]` task
+   (`visual k <type>/<block> "title": key=value; ...`) - so dataset
+   numbers and labels are fact-checked against `facts` exactly like
+   the draft text (issue #52; the key is absent when `visuals[]` is
+   empty).
 2. After the verify pass, `parsed.visuals[]` is read off the FINAL
    parsed object. Renderable entries (non-`image` type with a
    `dataset.data` payload) become `{type, viz_id, title, caption,

@@ -484,23 +484,36 @@ def chart_timeline(spec, ds, out):
     return True
 
 
-def chart_matrix(spec, ds, out):
-    """Comparison matrix (article B2): option rows x criterion columns,
-    drawn as a table. values cells may be text or numbers."""
-    data = ds.get("data") or {}
+def _matrix_grid(data):
+    """Normalize matrix data to a rectangular [label, *columns] grid.
+
+    Ragged input rows used to reach ax.table as-is and left HOLES in the
+    rendered table - matplotlib only draws the cells it is given (issue
+    #52). Rows are truncated past len(columns) as before and now padded
+    up to it with '-' (the 'no data' cell), so every body row has
+    exactly len(columns) + 1 cells."""
     cols = [str(c) for c in (data.get("columns") or [])][:5]
     rows = []
     for r in (data.get("rows") or [])[:8]:
         if isinstance(r, dict):
-            rows.append(
-                [
-                    str(r.get("label") or ""),
-                    *[str(v) for v in r.get("values") or []][: len(cols)],
-                ]
-            )
+            row = [str(r.get("label") or "")] + [
+                str(v) for v in (r.get("values") or [])[: len(cols)]
+            ]
         elif isinstance(r, list):
-            rows.append([str(v) for v in r][: len(cols) + 1])
-    rows = [r for r in rows if r and r[0]]
+            row = [str(v) for v in r[: len(cols) + 1]]
+        else:
+            continue
+        if not row or not row[0]:
+            continue
+        row += ["-"] * (len(cols) + 1 - len(row))
+        rows.append(row)
+    return cols, rows
+
+
+def chart_matrix(spec, ds, out):
+    """Comparison matrix (article B2): option rows x criterion columns,
+    drawn as a table. values cells may be text or numbers."""
+    cols, rows = _matrix_grid(ds.get("data") or {})
     if not cols or not rows:
         return False
     fig = new_fig(8.0, 1.0 + 0.62 * (len(rows) + 1))
