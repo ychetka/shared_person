@@ -37,8 +37,8 @@ const path = require("node:path");
 const WF = path.join(__dirname, "..", "n8n", "workflows", "sp-content-gen.json");
 const spec = JSON.parse(fs.readFileSync(WF, "utf8"));
 const node0 = spec.nodes.find((n) => n.name === "Generate Drafts");
-if (!node0 || !node0.parameters || !node0.parameters.jsCode) {
-  console.error("FAIL: Generate Drafts jsCode not found in " + WF);
+if (!node0?.parameters?.jsCode) {
+  console.error(`FAIL: Generate Drafts jsCode not found in ${WF}`);
   process.exit(1);
 }
 
@@ -48,7 +48,7 @@ const factory = new Function(
   "require",
   "$input",
   "$env",
-  "return (async function () {\n" + node0.parameters.jsCode + "\n});",
+  `return (async function () {\n${node0.parameters.jsCode}\n});`,
 );
 
 const fsStub = {
@@ -75,7 +75,7 @@ const $env = {
 
 // brief gate needs >=200 chars of context plus >=2 digit-bearing
 // fact tokens; entity check needs the two fact entities in the text
-const CONTEXT = "harness supplied material ".repeat(10) + " rev1 rev2";
+const CONTEXT = `${"harness supplied material ".repeat(10)} rev1 rev2`;
 
 const item = (body) => ({
   json: {
@@ -92,15 +92,15 @@ const item = (body) => ({
 const chart = (block, type) => ({
   block,
   type,
-  title: type + " " + block,
-  caption: "cap " + block,
+  title: `${type} ${block}`,
+  caption: `cap ${block}`,
   dataset: { kind: type, data: { label: "d1" } },
 });
 const hero = (block) => ({
   block,
   type: "image",
   prompt: "blueprint hero",
-  caption: "hero " + block,
+  caption: `hero ${block}`,
 });
 
 const runScenario = async (sc) => {
@@ -126,7 +126,7 @@ const runScenario = async (sc) => {
         return sc.image || { path: "materials/img/hero.png" };
       }
       if (opts.url === "http://127.0.0.1:8787/run") {
-        const role = opts.body && opts.body.role;
+        const role = opts.body?.role;
         runs.push({ role, input: String(opts.body?.input || "") });
         return roles[role] || { json: {} };
       }
@@ -134,21 +134,21 @@ const runScenario = async (sc) => {
         dispatched.push(opts.body);
         return { ok: true, draft_id: opts.body.draft_id };
       }
-      throw new Error("unexpected httpRequest url: " + opts.url);
+      throw new Error(`unexpected httpRequest url: ${opts.url}`);
     },
   };
   const fn = factory(fakeRequire, { all: () => [item(sc.body)] }, $env);
   const out = await fn.call({ helpers });
-  const results = out && out[0] && out[0].json && out[0].json.results;
+  const results = out?.[0]?.json?.results;
   return { dispatched, calls, runs, results };
 };
 
 let fails = 0;
 const check = (name, cond, detail) => {
   if (cond) {
-    console.log("ok   " + name);
+    console.log(`ok   ${name}`);
   } else {
-    console.log("FAIL " + name + (detail ? " - " + detail : ""));
+    console.log(`FAIL ${name}${detail ? ` - ${detail}` : ""}`);
     fails++;
   }
 };
@@ -453,13 +453,11 @@ const main = async () => {
     );
   }
 
-  console.log(
-    fails ? "fig-numbering: " + fails + " check(s) failed" : "fig-numbering: all checks pass",
-  );
+  console.log(fails ? `fig-numbering: ${fails} check(s) failed` : "fig-numbering: all checks pass");
   process.exit(fails ? 1 : 0);
 };
 
 main().catch((e) => {
-  console.error("FAIL harness crashed: " + ((e && e.stack) || e));
+  console.error(`FAIL harness crashed: ${e?.stack || e}`);
   process.exit(1);
 });

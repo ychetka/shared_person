@@ -129,6 +129,29 @@ when the task list is empty.
 node tools/check_fig_numbering.js   # exit 0 = all checks pass
 ```
 
+## check_li_media.js - LinkedIn image-upload driver harness
+
+Sandbox harness for the LinkedIn media path in sp-publish's
+`publishLinkedin` driver (issue #50): extracts the real 'Publish
+Tick' jsCode from `n8n/workflows/sp-publish.json` and runs a full
+tick under a stubbed Code-node environment (in-memory `fs` seeded
+with the queue payload plus `/home/node/materials` media, `$env`,
+`this.helpers.httpRequest` routed to LinkedIn API fakes - nothing
+touches disk or the network). Asserts the whole contract:
+`PUBLISH_SIMULATE=1` produces `sim-urn:li:share:` + `sim-asset-<n>`
+ids with zero HTTP calls; the real path runs
+`assets.registerUpload` -> binary `PUT` to the returned `uploadUrl`
+-> `media[]` of `urn:li:digitalmediaAsset` urns under
+`shareMediaCategory: IMAGE`; a per-file upload failure still
+publishes with the surviving assets (VK-driver semantics) and names
+the drops in `media_failed`; media caps at 4; a transient upload
+error requeues the claim before `ugcPosts` ran; and dry-run resolves
+media with no calls at all.
+
+```bash
+node tools/check_li_media.js   # exit 0 = all checks pass
+```
+
 ## check_matrix_padding.py - chart_matrix ragged-rows harness
 
 Row-normalization harness for `render_viz.py`'s `matrix` renderer
