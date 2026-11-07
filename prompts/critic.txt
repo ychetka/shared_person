@@ -18,7 +18,11 @@ Input: JSON {"facts": <extractor output>, "draft": <post text>,
    First person singular on personal profiles.
 4. AI slop - template constructions, hype words, fake enthusiasm,
    banned filler ("важно", "критично", "мелочь", delve, leverage).
-5. Platform fit - length, hashtags, hook strength, CTA.
+5. Platform fit - length, hashtags, hook strength, CTA. Posts are
+   structured articles since 2026-11-07 (docs/content-article-spec.md):
+   VK runs ~5.3-7.7k chars across six marked blocks, LinkedIn is
+   capped at 3000 (target <=2800) with compact [NN // Title] markers -
+   do not flag the article skeleton itself as a format/length issue.
 
 ## Output - strict JSON
 {

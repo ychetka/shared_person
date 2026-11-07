@@ -23,11 +23,19 @@ Usage:
 Input JSON:
 {
   "draft_id": "abc123",
-  "specs": [{"type": "bar|line|pipeline|stat-cards", "viz_id": "...",
-             "title": "...", "caption": "...", "options": {}}],
-  "viz_data": [{"id": "...", "kind": "stats|series|distribution|topology",
-                "title": "...", "unit": "...", "data": {...}}]
+  "specs": [{"type": "bar|line|pipeline|stat-cards|timeline|matrix",
+             "viz_id": "...", "title": "...", "caption": "...",
+             "options": {}}],
+  "viz_data": [{"id": "...", "data": {...}, "title": "...", "unit": "...",
+                "kind": "stats|series|distribution|topology|timeline"
+                "|matrix"}]
 }
+
+timeline datasets carry data.milestones: [{t?, label, detail?, pivot?}]
+(the article B3 build arc - pivot:true marks the wrong turn in red);
+matrix datasets carry data.columns: [criteria] + data.rows:
+[{label, values:[...]}] (the article B2 comparison matrix). Both were
+added for the article skeleton in docs/content-article-spec.md.
 
 Output: PNG files <out>/<draft_id>_<i>_<viz_id>.png, and a JSON result
 on stdout / in the HTTP response: {"paths": ["materials/viz/..."], ...}.
@@ -87,7 +95,11 @@ plt.rcParams.update(
 # default output: <project>/materials/viz (repo root = parents[1] of tools/)
 DEFAULT_OUT = Path(__file__).resolve().parents[2] / "materials" / "viz"
 
-MAX_SPECS = 2
+# Hard ceiling per render request. Session posts still pick 0-2 via
+# viz-spec; article posts (docs/content-article-spec.md) may carry up
+# to 4 per-block tasks (B2 matrix + B3 timeline + B4 topology + B5
+# metric) and content-gen enforces the same 4-slot media cap.
+MAX_SPECS = 4
 
 
 # --- helpers ----------------------------------------------------------------
@@ -424,11 +436,101 @@ def chart_pipeline(spec, ds, out):
     return True
 
 
+def chart_timeline(spec, ds, out):
+    """Build-arc timeline (article B3): milestones T0 -> ... -> Now on a
+    horizontal axis; pivot:true milestones (the wrong turn) draw red."""
+    data = ds.get("data") or {}
+    miles = [m for m in (data.get("milestones") or []) if isinstance(m, dict) and m.get("label")][
+        :8
+    ]
+    if not miles:
+        return False
+    n = len(miles)
+    fig = new_fig(max(8.0, 1.7 * n), 3.8)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.axis("off")
+    ax.annotate(
+        "",
+        xy=(1.03, 0.5),
+        xytext=(-0.03, 0.5),
+        arrowprops={"arrowstyle": "-|>", "color": MUTED, "lw": 1.6},
+    )
+    for i, m in enumerate(miles):
+        x = (i + 0.5) / n
+        pivot = bool(m.get("pivot"))
+        col = BAD if pivot else ACCENT
+        ax.plot([x], [0.5], marker="o", markersize=11, color=col, zorder=3)
+        tag = str(m.get("t") or ("Now" if i == n - 1 else f"T{i}"))
+        ax.text(x, 0.60, tag, ha="center", va="bottom", fontsize=9, color=MUTED)
+        up = i % 2 == 0
+        ty = 0.80 if up else 0.18
+        label = wrap(m.get("label"), 18)
+        detail = wrap(m.get("detail"), 22) if m.get("detail") else ""
+        body = label + ("\n" + detail if detail else "")
+        stem = ty + (-0.02 if up else 0.02)
+        ax.plot([x, x], [0.5, stem], color=EDGE, lw=0.9, zorder=1)
+        ax.text(
+            x,
+            ty,
+            body,
+            ha="center",
+            va="bottom" if up else "top",
+            fontsize=8.5,
+            color=BAD if pivot else FG,
+        )
+    ax.set_xlim(-0.05, 1.05)
+    ax.set_ylim(-0.02, 1.02)
+    finish(fig, spec.get("title") or ds.get("title"), out)
+    return True
+
+
+def chart_matrix(spec, ds, out):
+    """Comparison matrix (article B2): option rows x criterion columns,
+    drawn as a table. values cells may be text or numbers."""
+    data = ds.get("data") or {}
+    cols = [str(c) for c in (data.get("columns") or [])][:5]
+    rows = []
+    for r in (data.get("rows") or [])[:8]:
+        if isinstance(r, dict):
+            rows.append(
+                [
+                    str(r.get("label") or ""),
+                    *[str(v) for v in r.get("values") or []][: len(cols)],
+                ]
+            )
+        elif isinstance(r, list):
+            rows.append([str(v) for v in r][: len(cols) + 1])
+    rows = [r for r in rows if r and r[0]]
+    if not cols or not rows:
+        return False
+    fig = new_fig(8.0, 1.0 + 0.62 * (len(rows) + 1))
+    ax = fig.add_axes([0.02, 0.02, 0.96, 0.9])
+    ax.axis("off")
+    cell_text = [[""] + [wrap(c, 14) for c in cols]] + [[wrap(v, 20) for v in r] for r in rows]
+    tbl = ax.table(cellText=cell_text, loc="center", cellLoc="left")
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(9)
+    tbl.scale(1, 1.7)
+    for (ri, ci), cell in tbl.get_celld().items():
+        cell.set_edgecolor(EDGE)
+        if ri == 0:
+            cell.set_facecolor(EDGE)
+            cell.get_text().set_color(FG)
+            cell.get_text().set_fontweight("bold")
+        else:
+            cell.set_facecolor(PANEL)
+            cell.get_text().set_color(FG if ci > 0 else MUTED)
+    finish(fig, spec.get("title") or ds.get("title"), out)
+    return True
+
+
 RENDERERS = {
     "stat-cards": chart_stat_cards,
     "bar": chart_bar,
     "line": chart_line,
     "pipeline": chart_pipeline,
+    "timeline": chart_timeline,
+    "matrix": chart_matrix,
 }
 
 

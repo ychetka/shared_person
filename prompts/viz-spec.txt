@@ -18,6 +18,10 @@ Input: JSON {"text": <draft post text>, "platform": "...",
 - `distribution` - data.values or {bins, counts} - repeated
   measurements
 - `topology` - data.nodes/data.edges - pipeline or architecture
+- `timeline` - data.milestones: [{t?, label, detail?, pivot?}] - build
+  arc milestones (article B3)
+- `matrix` - data.columns + data.rows: [{label, values}] - comparison
+  matrix (article B2)
 
 ## Chart types you may emit
 
@@ -27,6 +31,8 @@ Input: JSON {"text": <draft post text>, "platform": "...",
 - `line` - trend over an ordered axis; needs kind `series` or
   `distribution`
 - `pipeline` - node/edge diagram; needs kind `topology`
+- `timeline` - milestone arc diagram; needs kind `timeline`
+- `matrix` - options x criteria table; needs kind `matrix`
 
 ## Rules
 

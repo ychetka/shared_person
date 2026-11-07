@@ -130,8 +130,8 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["stats", "series", "distribution", "topology"],
-            "description": "stats = label/value pairs for stat-cards or bars; series = x-axis values + named y series for bar/line; distribution = raw values or {bins, counts} for a histogram; topology = {nodes, edges} for a pipeline diagram."
+            "enum": ["stats", "series", "distribution", "topology", "timeline", "matrix"],
+            "description": "stats = label/value pairs for stat-cards or bars; series = x-axis values + named y series for bar/line; distribution = raw values or {bins, counts} for a histogram; topology = {nodes, edges} for a pipeline diagram; timeline = {milestones: [{t?, label, detail?, pivot?}]} for a build-arc diagram (article B3); matrix = {columns, rows: [{label, values}]} for a comparison table (article B2)."
           },
           "title": {
             "type": "string",
@@ -142,7 +142,7 @@
             "description": "Measurement unit when one applies, e.g. 'R', 'ms', 'requests/day', '%'."
           },
           "data": {
-            "description": "Structured payload, shape depends on kind: stats -> {items: [{label, value}]}; series -> {x: [...], series: [{name, data: [...]}]}; distribution -> {values: [...]} or {bins: [...], counts: [...]}; topology -> {nodes: [{id, label}], edges: [{from, to, label?}]}. Every number must come from the source material - never estimated."
+            "description": "Structured payload, shape depends on kind: stats -> {items: [{label, value}]}; series -> {x: [...], series: [{name, data: [...]}]}; distribution -> {values: [...]} or {bins: [...], counts: [...]}; topology -> {nodes: [{id, label}], edges: [{from, to, label?}]}; timeline -> {milestones: [{t?, label, detail?, pivot?}]}; matrix -> {columns: [...], rows: [{label, values: [...]}]}. Every number must come from the source material - never estimated."
           },
           "source": {
             "type": "string",

@@ -2,13 +2,19 @@
 
 Host-side utilities for the shared_person stack.
 
-## render_viz.py - generated charts for session posts
+## render_viz.py - generated charts for session posts and articles
 
 Session-type drafts get GENERATED visualizations, not archive photos:
 the extractor puts measured datasets into `brief.viz_data[]`, the
 `viz-spec` role picks 0-2 chart specs, and this tool draws them with
 matplotlib into `../materials/viz/<draft_id>_<i>_<viz_id>.png`. The
 moderation workflow sends them via `sendPhoto` like any other media.
+
+Article drafts (docs/content-article-spec.md) skip viz-spec: the
+writer emits a `visuals[]` task list with INLINE datasets in its JSON
+output, and Generate Drafts registers each as a synthetic `viz_data`
+entry before POSTing here - same `/render` contract, up to 4 tasks
+(B2 matrix / B3 timeline / B4 topology / B5 metric).
 
 Numbers come only from `viz_data` - the renderer never invents data.
 
@@ -51,10 +57,12 @@ part of docker-compose (host process, needs the project checkout).
 ```json
 {
   "draft_id": "dabc123",
-  "specs": [{"type": "bar|line|pipeline|stat-cards", "viz_id": "...",
-             "title": "...", "caption": "...", "options": {}}],
-  "viz_data": [{"id": "...", "kind": "stats|series|distribution|topology",
-                "title": "...", "unit": "...", "data": {...}}]
+  "specs": [{"type": "bar|line|pipeline|stat-cards|timeline|matrix",
+             "viz_id": "...", "title": "...", "caption": "...",
+             "options": {}}],
+  "viz_data": [{"id": "...", "title": "...", "unit": "...",
+                "kind": "stats|series|distribution|topology|timeline"
+                "|matrix", "data": {...}}]
 }
 ```
 
@@ -66,7 +74,10 @@ Response: `{"ok": true, "paths": ["materials/viz/<file>.png", ...],
 Chart types: `stat-cards` (big-number cards from `stats`),
 `bar` (categories / histogram from `stats`, `series`, `distribution`),
 `line` (trends from `series`, `distribution`), `pipeline` (node/edge
-diagram from `topology`). Max 2 specs per request.
+diagram from `topology`), `timeline` (milestone arc from `timeline`,
+pivot milestones draw red) and `matrix` (options x criteria table from
+`matrix`). Max 4 specs per request; session posts still pick 0-2 via
+viz-spec, the extra headroom serves article visuals.
 
 ### Env
 
