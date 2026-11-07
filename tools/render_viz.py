@@ -440,11 +440,9 @@ def chart_timeline(spec, ds, out):
     """Build-arc timeline (article B3): milestones T0 -> ... -> Now on a
     horizontal axis; pivot:true milestones (the wrong turn) draw red."""
     data = ds.get("data") or {}
-    miles = [
-        m
-        for m in (data.get("milestones") or [])
-        if isinstance(m, dict) and m.get("label")
-    ][:8]
+    miles = [m for m in (data.get("milestones") or []) if isinstance(m, dict) and m.get("label")][
+        :8
+    ]
     if not miles:
         return False
     n = len(miles)
@@ -508,9 +506,7 @@ def chart_matrix(spec, ds, out):
     fig = new_fig(8.0, 1.0 + 0.62 * (len(rows) + 1))
     ax = fig.add_axes([0.02, 0.02, 0.96, 0.9])
     ax.axis("off")
-    cell_text = [[""] + [wrap(c, 14) for c in cols]] + [
-        [wrap(v, 20) for v in r] for r in rows
-    ]
+    cell_text = [[""] + [wrap(c, 14) for c in cols]] + [[wrap(v, 20) for v in r] for r in rows]
     tbl = ax.table(cellText=cell_text, loc="center", cellLoc="left")
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(9)
