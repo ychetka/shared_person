@@ -96,6 +96,11 @@ const GROUPS = {
     maxClasses: 2,
     tokenSet: PLATFORM_TOKEN_RE,
   },
+  // PUBLISH_SIMULATE env-flag parse (issue #41): Publish Tick
+  // (sp-publish) reads the flag once for both drivers - a single
+  // copy today, tracked under its own group so the marker itself
+  // stays accounted for
+  "publish-simulate": { expect: 1 },
   // REWRITE_WINDOW_MS const: Prepare Draft plus the 'ap' and 'ed'
   // refusal sites in Handle TG Update (all sp-tg-moderation) - the
   // copies sit at different nesting depths, so leading indentation
