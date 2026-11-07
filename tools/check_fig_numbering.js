@@ -26,8 +26,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const WF = path.join(
-  __dirname, "..", "n8n", "workflows", "sp-content-gen.json");
+const WF = path.join(__dirname, "..", "n8n", "workflows", "sp-content-gen.json");
 const spec = JSON.parse(fs.readFileSync(WF, "utf8"));
 const node0 = spec.nodes.find((n) => n.name === "Generate Drafts");
 if (!node0 || !node0.parameters || !node0.parameters.jsCode) {
@@ -152,19 +151,14 @@ const main = async () => {
   // Requested: Fig1 = pipeline (fails), Fig2 = hero image, Fig3 =
   // timeline. Attach: [hero img (Fig1), timeline png (Fig2)].
   {
-    const text =
-      "React n8n hook [See Fig 1]. mid [See Fig 2] tail [See Fig 3] end";
+    const text = "React n8n hook [See Fig 1]. mid [See Fig 2] tail [See Fig 3] end";
     const { dispatched } = await runScenario({
       writer: {
         platform: "vk",
         lang: "ru",
         text,
         hashtags: [],
-        visuals: [
-          chart("B4", "pipeline"),
-          hero("B1"),
-          chart("B3", "timeline"),
-        ],
+        visuals: [chart("B4", "pipeline"), hero("B1"), chart("B3", "timeline")],
       },
       viz: {
         ok: true,
@@ -188,8 +182,7 @@ const main = async () => {
       "S1 warning: fig 1 render failed surfaces on the card",
       Array.isArray(d.warnings) &&
         d.warnings.some(
-          (w) => w.startsWith("fig 1 render failed: pipeline/B4") &&
-            w.includes("no-data"),
+          (w) => w.startsWith("fig 1 render failed: pipeline/B4") && w.includes("no-data"),
         ),
       JSON.stringify(d.warnings),
     );
@@ -234,19 +227,15 @@ const main = async () => {
       "S2 warnings: chart failure + invalid task both reported",
       Array.isArray(d.warnings) &&
         d.warnings.some(
-          (w) => w.startsWith("fig 1 render failed: timeline/B3") &&
-            w.includes("render call failed"),
+          (w) =>
+            w.startsWith("fig 1 render failed: timeline/B3") && w.includes("render call failed"),
         ) &&
-        d.warnings.some(
-          (w) => w.startsWith("fig 3 render failed") &&
-            w.includes("non-object"),
-        ),
+        d.warnings.some((w) => w.startsWith("fig 3 render failed") && w.includes("non-object")),
       JSON.stringify(d.warnings),
     );
     check(
       "S2 caption_note: only the rendered image listed",
-      typeof d.caption_note === "string" &&
-        d.caption_note.includes("Fig 1: image/B1"),
+      typeof d.caption_note === "string" && d.caption_note.includes("Fig 1: image/B1"),
       d.caption_note,
     );
   }
@@ -254,8 +243,7 @@ const main = async () => {
   // S3: pointers at figures that were never requested are dropped
   // and warned once per number; the surviving pointer is untouched.
   {
-    const text =
-      "React n8n x [See Fig 1] y [See Fig 9] z [See Fig 2]. w";
+    const text = "React n8n x [See Fig 1] y [See Fig 9] z [See Fig 2]. w";
     const { dispatched } = await runScenario({
       writer: {
         platform: "vk",
@@ -279,25 +267,19 @@ const main = async () => {
         d.warnings.some((w) => w.startsWith("fig 9 pointer removed")),
       JSON.stringify(d.warnings),
     );
-    check("S3 media", eq(d.media, ["materials/viz/p1.png"]),
-      JSON.stringify(d.media));
+    check("S3 media", eq(d.media, ["materials/viz/p1.png"]), JSON.stringify(d.media));
   }
 
   // S4: all tasks render - pointers keep their numbers, no warnings.
   {
-    const text =
-      "React n8n one [See Fig 1] two [See Fig 2] three [See Fig 3]";
+    const text = "React n8n one [See Fig 1] two [See Fig 2] three [See Fig 3]";
     const { dispatched } = await runScenario({
       writer: {
         platform: "vk",
         lang: "ru",
         text,
         hashtags: [],
-        visuals: [
-          chart("B2", "matrix"),
-          chart("B3", "timeline"),
-          hero("B1"),
-        ],
+        visuals: [chart("B2", "matrix"), chart("B3", "timeline"), hero("B1")],
       },
       viz: {
         ok: true,
@@ -307,30 +289,19 @@ const main = async () => {
       image: { path: "materials/img/h.png" },
     });
     const d = dispatched[0] || {};
-    check(
-      "S4 all-rendered: text unchanged",
-      d.text === text,
-      JSON.stringify(d.text),
-    );
+    check("S4 all-rendered: text unchanged", d.text === text, JSON.stringify(d.text));
     check(
       "S4 media: all three attached in requested order",
-      eq(d.media, [
-        "materials/viz/m.png",
-        "materials/viz/t.png",
-        "materials/img/h.png",
-      ]),
+      eq(d.media, ["materials/viz/m.png", "materials/viz/t.png", "materials/img/h.png"]),
       JSON.stringify(d.media),
     );
-    check(
-      "S4 no warnings on a clean run",
-      d.warnings === undefined,
-      JSON.stringify(d.warnings),
-    );
+    check("S4 no warnings on a clean run", d.warnings === undefined, JSON.stringify(d.warnings));
     check(
       "S4 caption_note covers all rendered figs",
       typeof d.caption_note === "string" &&
-        ["Fig 1: matrix/B2", "Fig 2: timeline/B3", "Fig 3: image/B1"]
-          .every((s) => d.caption_note.includes(s)),
+        ["Fig 1: matrix/B2", "Fig 2: timeline/B3", "Fig 3: image/B1"].every((s) =>
+          d.caption_note.includes(s),
+        ),
       d.caption_note,
     );
   }
@@ -359,13 +330,11 @@ const main = async () => {
       "S5 warning: image render failure reported",
       Array.isArray(d.warnings) &&
         d.warnings.some(
-          (w) => w.startsWith("fig 2 render failed: image/B1") &&
-            w.includes("image render failed"),
+          (w) => w.startsWith("fig 2 render failed: image/B1") && w.includes("image render failed"),
         ),
       JSON.stringify(d.warnings),
     );
-    check("S5 media", eq(d.media, ["materials/viz/only.png"]),
-      JSON.stringify(d.media));
+    check("S5 media", eq(d.media, ["materials/viz/only.png"]), JSON.stringify(d.media));
   }
 
   // S6: legacy path byte-compat - no visuals[] means the dispatch is
@@ -385,9 +354,7 @@ const main = async () => {
     );
     check(
       "S6 legacy: no media/caption_note/warnings fields",
-      d.media === undefined &&
-        d.caption_note === undefined &&
-        d.warnings === undefined,
+      d.media === undefined && d.caption_note === undefined && d.warnings === undefined,
       JSON.stringify({
         media: d.media,
         caption_note: d.caption_note,
@@ -396,12 +363,13 @@ const main = async () => {
     );
   }
 
-  console.log(fails ? "fig-numbering: " + fails + " check(s) failed"
-    : "fig-numbering: all checks pass");
+  console.log(
+    fails ? "fig-numbering: " + fails + " check(s) failed" : "fig-numbering: all checks pass",
+  );
   process.exit(fails ? 1 : 0);
 };
 
 main().catch((e) => {
-  console.error("FAIL harness crashed: " + (e && e.stack || e));
+  console.error("FAIL harness crashed: " + ((e && e.stack) || e));
   process.exit(1);
 });
