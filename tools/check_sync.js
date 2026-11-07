@@ -159,6 +159,16 @@ const GROUPS = {
   // INTENTIONALLY divergent (a dynamic token set plus access_token=
   // form masking) and must NOT get a copy here
   "scrub-secrets": { expect: 4 },
+  // the 5MB per-file media cap: Prepare Draft and Fan Out Album (both
+  // sp-tg-moderation). Fan Out Album's re-read fallback must cap at
+  // exactly the bound Prepare Draft filtered the album's paths by -
+  // the paired binaries arrive pre-capped, but a bare literal on each
+  // side could drift (issue #60 review). The copies sit at different
+  // nesting depths, so leading indentation is stripped
+  "media-cap": {
+    expect: 2,
+    normalize: [[/^\s+/gm, ""]],
+  },
   // media path resolution against the read-only materials mount
   // (issue #36): identical copies in Prepare Draft and Fan Out Album
   // (sp-tg-moderation - the mediaGroup fallback re-reads the same

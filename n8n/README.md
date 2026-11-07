@@ -201,16 +201,23 @@ rewrite `tg.json` and hijack previews.
     Each path is resolved inside the container: literal path, anything
     under `materials/` maps to the read-only `/home/node/materials`
     mount, bare filenames are looked up in `materials/photos/`.
-    Resolvable files go to the chat via `sendPhoto` - one multipart
-    upload per file through the HTTP node (a real `sendMediaGroup`
-    album is not reachable: the n8n HTTP node attaches one binary
-    field per configured parameter, so a dynamic photo count cannot
-    ride a single request, and Code nodes cannot send binary bodies).
-    Since issue #43 the photos go out captionless and with
+    Resolvable files go to the chat captionless and silent: exactly
+    one file rides a `sendPhoto` item, 2-10 files ride ONE
+    `sendMediaGroup` request (issue #60 - the HTTP node's body
+    parameter list is a per-item expression, which is how a dynamic
+    file count fits a single request). The mediaGroup node runs
+    `onError: continueRegularOutput`, so every album lands exactly
+    one in-order item on Merge Media's album input - a send result
+    or an `{error}` - and a failed album additionally fans out into
+    the captionless `sendPhoto` fallback chain via Fan Out Album
+    (which pairs bare `{error}` items back to the pre-send album
+    item through `pairedItem`, since the regular output never merges
+    the input json back). Since issue #43 the media goes out with
     `disable_notification` - the old per-photo `[DRAFT ...] media i/n`
     caption messages are gone - and the card's `sendMessage` replies
-    to the FIRST delivered photo's `message_id` so the batch + card
-    read as one thread. The anchor id is persisted as
+    to the FIRST delivered photo's `message_id` (the media group's
+    `result[0]` for an album, else the first fallback photo) so the
+    batch + card read as one thread. The anchor id is persisted as
     `media_message_id` on the draft file so the Edit re-preview
     threads under the same photo. A stale anchor (deleted anchor
     photo 400s the `reply_to_message_id` send) retries the card once
