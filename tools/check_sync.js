@@ -82,17 +82,18 @@ const GROUPS = {
   // the coupled platform list in its two shapes: the gate blocks
   // (ALL_PLATFORMS fan-out list, facebook->fb alias map, ENABLED
   // expansion loop) run as identical copies in Publish Tick
-  // (sp-publish) and Handle TG Update (sp-tg-moderation); Generate
-  // Drafts' MAP (sp-content-gen) carries the same platform list as
-  // platform -> writer-* role keys - a different shape, so it forms
-  // its own normalized class (maxClasses: 2 allows exactly the two
-  // shapes while still demanding the gate copies stay
+  // (sp-publish), Handle TG Update and Compose Message
+  // (sp-tg-moderation, issue #60 - the card's LIVE/SIM tag reads it);
+  // Generate Drafts' MAP (sp-content-gen) carries the same platform
+  // list as platform -> writer-* role keys - a different shape, so it
+  // forms its own normalized class (maxClasses: 2 allows exactly the
+  // two shapes while still demanding the gate copies stay
   // line-identical). tokenSet then compares the one property every
   // shape must share - the platform list itself - so a platform
   // added to MAP but not to ALL_PLATFORMS fails the same way an
   // edited gate copy does
   "enabled-platforms": {
-    expect: 3,
+    expect: 4,
     maxClasses: 2,
     tokenSet: PLATFORM_TOKEN_RE,
   },
@@ -159,14 +160,15 @@ const GROUPS = {
   // form masking) and must NOT get a copy here
   "scrub-secrets": { expect: 4 },
   // media path resolution against the read-only materials mount
-  // (issue #36): identical copies in Prepare Draft (sp-tg-moderation)
-  // and Publish Tick (sp-publish). Covers MEDIA_ROOT consts, the
-  // underRoot realpath escape guard, resolveMedia's candidate order
-  // and mimeOf - the container-side half of the photo-upload
-  // contract: the rel path Publish Tick sends to vk_token_service's
-  // /vk-photo-upload must resolve under the same root Prepare Draft
-  // previewed the file under
-  "media-resolve": { expect: 2 },
+  // (issue #36): identical copies in Prepare Draft and Fan Out Album
+  // (sp-tg-moderation - the mediaGroup fallback re-reads the same
+  // paths, issue #60) and Publish Tick (sp-publish). Covers
+  // MEDIA_ROOT consts, the underRoot realpath escape guard,
+  // resolveMedia's candidate order and mimeOf - the container-side
+  // half of the photo-upload contract: the rel path Publish Tick
+  // sends to vk_token_service's /vk-photo-upload must resolve under
+  // the same root Prepare Draft previewed the file under
+  "media-resolve": { expect: 3 },
   // registryEvent append-only event writer (issue #12, the post
   // registry): identical copies in Generate Drafts (sp-content-gen),
   // Handle TG Update (sp-tg-moderation) and Publish Tick (sp-publish).
