@@ -19,7 +19,7 @@ keeps the registry honest about it.
 |---|---|---|
 | Public data/write REST API | NO | Dev FAQ verbatim: "We don't have an API that gives access to data." No official endpoint creates ideas, scripts or any community content. |
 | Embeddable widgets | NO | Free chart/ticker/screener/calendar embeds, TradingView-branded; display only, read direction. |
-| Lightweight Charts | NO | Apache-2.0 OSS charting lib (~35 KB), you supply the data; renders in OUR product, unrelated to publishing. |
+| Lightweight Charts | NO | Apache-2.0 OSS charting lib (~45 KB per the project's own headline figure), you supply the data; renders in OUR product, unrelated to publishing. |
 | Advanced Charts / Trading Platform | NO | Licensed charting libraries for companies; you implement the Datafeed API to feed them. |
 | Broker REST API | NO (for us) | A spec for BROKERS behind a signed integration agreement - the broker implements `/accounts`, `/config`, `/instruments`, `/orders`, `/state` server-side so users trade FROM TradingView. It is trading integration, not content publishing, and requires being a broker partner. |
 | Alert webhooks | outbound only | TradingView POSTs an alert message to YOUR URL (2FA required, ports 80/443 only, 3s response budget). Data leaves TradingView; nothing writes into it. |
@@ -102,12 +102,20 @@ platform).
 ### 2.2 Driver contract
 
 `publishTradingview(t, fname)` inside Publish Tick, dispatched on
-`p === 'tradingview'` (add `'tradingview'` to `ALL_PLATFORMS` in
-the SYNC'd enabled-platforms block, Publish Tick + Handle TG
-Update). Queue payload:
+`p === 'tradingview'`. Enabling the platform touches ALL FOUR
+copies of the SYNC'd `enabled-platforms` group
+(tools/check_sync.js `expect: 4`): the identical
+ALL_PLATFORMS/PLATFORM_ALIAS/ENABLED gate blocks in Publish Tick
+(sp-publish), Handle TG Update and Compose Message
+(sp-tg-moderation - the card's LIVE/SIM tag reads it), plus the
+platform list inside Generate Drafts' MAP (sp-content-gen) as a
+`tradingview: ['writer-tradingview']` key and a `MAP.all` entry.
+The new platform token also joins `PLATFORM_TOKEN_RE` in
+tools/check_sync.js or the token-set check cannot police it.
+Queue payload:
 `{id, platform: "tradingview", post_id, title, text (=
-description), direction, media[], chart_url?, dry_run?/mock?,
-retries?}`.
+description), direction, category, tags[]?, media[], chart_url?,
+dry_run?/mock?, retries?}`.
 
 - Same `PUBLISH_PLATFORMS` gate: disabled -> `skipped/`; enabled
   but driverless -> `skipped/` + `no driver for platform
@@ -115,7 +123,10 @@ retries?}`.
 - Ledger, status file (`state/tradingview_status.json` +
   `tvStatus` writer + end-of-tick merge), and registry events as
   in the existing drivers - `platform: 'tradingview'`.
-- `TV_VIA` env: `manual` (default) or `hands`.
+- `TV_VIA` env: `manual` (default) or `hands`. Optional
+  `TV_HANDLE` - the account's handle without `@`; no live use yet,
+  reserved for the profile-page read-back probe the hands path
+  uses to disambiguate a `maybe_live` (section 4).
 - `PUBLISH_SIMULATE`: records `simulated` with `sim-tv-<draft_id>`
   and does NOTHING external - no recipe enqueue, no hand-off
   message (the card already rendered SIM mode; a sim hand-off
@@ -190,8 +201,9 @@ the draft for the registry.
 ### 2.5 Path A - hands-agent recipe (`TV_VIA=hands`)
 
 `{"recipe": "tradingview_idea", "params": {"title": ...,
-"description": ..., "direction": ..., "chart_url": ...,
-"autopublish": false}}` into `hands-agent/queue/inbox/`; same
+"description": ..., "direction": ..., "category": ...,
+"tags": [...], "chart_url": ..., "autopublish": false}}` into
+`hands-agent/queue/inbox/`; same
 queue contract + `done/failed` landing and result-channel
 precondition (`queue/done/<task_id>.result.json` carrying the idea
 `url`) the Habr spec already requires - build once, share.
@@ -217,7 +229,7 @@ fixed coordinates):
 
 | Step | Owner | Rationale |
 |---|---|---|
-| Idea text composition (title/description/direction/tags) | pipeline | Same writer contract as every platform; facts-only. |
+| Idea text composition (title/description/direction/category/tags) | pipeline | Same writer contract as every platform; facts-only. |
 | Field fill + snapshot trigger in the composer | hands-agent recipe | Pure mechanics, full shot audit trail. |
 | Chart preparation (symbol, timeframe, drawings, layout) | HUMAN | The chart IS the idea's evidence; picking what the market view should show is judgment, not mechanics. `chart_url` points at what the operator arranged. A pipeline-rendered viz PNG may ride in `media[]` as supplementary evidence for the hand-off, but the idea's snapshot comes from the live TV chart - it cannot be substituted. |
 | Final "Publish" click | HUMAN (recommended) / recipe only when `autopublish:true` | Default fail-closed: last human eyes on the exact composed form on a peer-review platform. Matches the Habr model - automation prepares, human releases. |
@@ -237,6 +249,11 @@ An idea is NOT the 6-block article. Writer contract
   unchanged, as does the live-vs-simulated honesty rule (an idea
   built on simulated telemetry says so).
 - `direction`: `long|neutral|short` - mandatory on the platform.
+- `category`: the composer's required pick (the instrument class
+  the idea charts) - mandatory on the platform, so the draft
+  carries it explicitly and the driver fails closed on a missing
+  one rather than leaving the operator to guess.
+- `tags`: optional smart-tag list the recipe may fill.
 - `chart_url`/`media[]`: the evidence; the draft is incomplete
   (driver fails closed like the empty-text guard) without at least
   a chart reference - a TradingView idea without a chart is not a

@@ -68,7 +68,9 @@ DECISION: **OAuth 1.0a** is the primary scheme. Justification:
 
 Caveat: X is steering integrations toward OAuth 2.0 (docs mark
 OAuth 1.0a as legacy; a silent 1.0a -> 2.0 token-exchange grant
-exists since Sep 2026). The spec therefore keeps the env layout
+was reported in Sep 2026 - verify its current status against the
+OAuth docs at build time before relying on it). The spec
+therefore keeps the env layout
 (2.3) mappable to OAuth 2.0 (`X_CLIENT_ID`/`X_CLIENT_SECRET` +
 stored user token) so a future migration changes the signer, not
 the driver contract. If OAuth 1.0a is ever rejected at runtime the
@@ -111,7 +113,7 @@ driver fails closed (`auth_error`), never silently.
   `TRANSIENT_LI_STATUSES`/`TRANSIENT_VK_CODES`.
 - No HTTP status at all (timeout/reset after the request left) ->
   the dangerous case: the tweet may have landed while the response
-  was lost -> `maybe_live` + orphan probe (2.2), identical to the
+  was lost -> `maybe_live` + orphan probe (2.1), identical to the
   `ugcPosts`/`wall.post` transport-loss rule.
 
 ## 2. Integration spec
@@ -124,8 +126,16 @@ per-file loop (`p === 'x'` branch alongside the existing
 `{id, platform: "x", post_id, text, media[], image?, test?,
 dry_run?/mock?, thread?, retries?}`.
 
-- `PUBLISH_PLATFORMS` gate: add `'x'` to `ALL_PLATFORMS` (SYNC'd
-  enabled-platforms block, both Publish Tick and Handle TG Update).
+- `PUBLISH_PLATFORMS` gate: add `'x'` to ALL FOUR copies of the
+  SYNC'd `enabled-platforms` group (tools/check_sync.js
+  `expect: 4`): the identical ALL_PLATFORMS/PLATFORM_ALIAS/ENABLED
+  gate blocks in Publish Tick (sp-publish), Handle TG Update and
+  Compose Message (sp-tg-moderation - the card's LIVE/SIM tag
+  reads it), plus Generate Drafts' MAP (sp-content-gen) as an
+  `x: ['writer-x']` key and a `MAP.all` entry. The token also
+  joins `PLATFORM_TOKEN_RE` in tools/check_sync.js - the
+  single-letter `x` needs whole-word care there so prose inside
+  the copies cannot phantom-match it.
   An x draft with `x` not in `PUBLISH_PLATFORMS` parks in
   `skipped/` unchanged; an enabled-but-driverless platform parks in
   `skipped/` with `no driver for platform x` until this driver
@@ -328,8 +338,9 @@ Before `X_DRIVER=api` can go live:
 
 ### 3.2 Known risks
 
-- Credential retirement: OAuth 1.0a is marked legacy by X (Sept
-  2026 token-exchange grant signals migration intent). Mitigation:
+- Credential retirement: OAuth 1.0a is marked legacy by X (the
+  reported Sept 2026 token-exchange grant signals migration
+  intent). Mitigation:
   env layout already maps to OAuth 2.0; a rejected 1.0a signature
   surfaces as terminal `auth_error`, never a silent post.
 - v1.1 media upload docs are stale across the ecosystem (2025
@@ -380,7 +391,8 @@ Before `X_DRIVER=api` can go live:
   POST /2/tweets user-context only; media.write on v2 upload;
   v1.1 upload.x.com sunset mid-2025).
 - OAuth 1.0a vs 2.0 PKCE coverage and the 1.0a retirement signal:
-  X OAuth docs + token-exchange grant (Sep 2026).
+  X OAuth docs + the reported token-exchange grant (Sep 2026) -
+  re-verify at build time.
 - Media caps (4 images / 1 GIF / 1 video, 5 MB) and 280-char
   weighted counting: X help center.
 - Driver contract mirrored from `n8n/workflows/sp-publish.json`
