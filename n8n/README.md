@@ -138,6 +138,8 @@ rewrite `tg.json` and hijack previews.
   `ver` = the `preview_v` binding for that exact preview).
   Card layout (issue #43): the service header is one line -
   `[DRAFT <id> | <platform> | <post_id>] <chars>/<platform_limit> chars`
+  (`| N visuals` appended when media exist; the `/<limit>` part is
+  omitted for platforms with no known text cap rather than guessed)
   with explicit `| SIMULATE` / `| TEST` mode tags when they apply -
   followed by the TEST banner for `test: true` drafts, an action
   semantics line (`Approve = LIVE PUBLISH to <platform>`, or
@@ -210,7 +212,11 @@ rewrite `tg.json` and hijack previews.
     to the FIRST delivered photo's `message_id` so the batch + card
     read as one thread. The anchor id is persisted as
     `media_message_id` on the draft file so the Edit re-preview
-    threads under the same photo. Files that fail resolution or
+    threads under the same photo. A stale anchor (deleted anchor
+    photo 400s the `reply_to_message_id` send) retries the card once
+    WITHOUT the reply field - the card outranks the thread; the
+    fallback is logged in Handle TG Update
+    (`preview-reply-stale-anchor`). Files that fail resolution or
     upload are listed in the message text instead, and the draft meta
     keeps `media`, `caption_note` and `media_sent`.
   - On Approve the `media[]` list is carried into the publish queue
@@ -272,14 +278,22 @@ rewrite `tg.json` and hijack previews.
   - Edit > REPLACE mode (issue #42): arms a `pending_edit` marker
     with `mode: "replace"`; the operator's next message IS the
     corrected post text. The instruction message carries the raw
-    `draft.text` inside a ` ``` ` code block for one-tap copy
-    (issue #43) - when instruction + block would exceed the 4096
-    sendMessage cap the block goes alone in a second message. A
+    `draft.text` inside a `<pre>` code block (`parse_mode: "HTML"` -
+    the workflow's first parse_mode; HTML chosen over `Markdown`
+    because legacy Markdown has no escape mechanism and `draft_id`s
+    containing `_` or text markup would break it) for one-tap copy
+    (issue #43). The copy is never truncated: text over the ~3800
+    per-block budget splits into as many `<pre>` messages as needed,
+    each tagged `[text part i/N]`; when instruction + a single block
+    exceed ~3900 the instruction goes alone first. A
     service-line sanitizer strips every chrome
     artifact the preview card can emit - lines matching `^[DRAFT`,
     `^Approve =`, `^Scope:`, `^TEST POST`, `^[media]`, `^attach failed:`,
-    `^[truncated`, `^---` (the card separator and the fold marker) and
-    `^Full text: https://telegra.ph/`, plus the `[WARNINGS` header and
+    `^[truncated`, `^Full text: https://telegra.ph/`, the exact
+    `----------` separator and `--- "See more" fold ---` marker (a
+    bare `^---` prefix would eat legit horizontal-rule lines in post
+    text), plus the copy-block chrome `^``` `, `^</?pre>` and
+    `^[text part `, plus the `[WARNINGS` header and
     its `- ` bullet
     lines (a `- ` line is only chrome inside that block - lists in
     the post body survive) - plus surrounding whitespace (so a
