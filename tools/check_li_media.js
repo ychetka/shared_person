@@ -47,8 +47,8 @@ const path = require("node:path");
 const WF = path.join(__dirname, "..", "n8n", "workflows", "sp-publish.json");
 const spec = JSON.parse(fs.readFileSync(WF, "utf8"));
 const node0 = spec.nodes.find((n) => n.name === "Publish Tick");
-if (!node0 || !node0.parameters || !node0.parameters.jsCode) {
-  console.error("FAIL: Publish Tick jsCode not found in " + WF);
+if (!node0?.parameters?.jsCode) {
+  console.error(`FAIL: Publish Tick jsCode not found in ${WF}`);
   process.exit(1);
 }
 
@@ -58,7 +58,7 @@ const factory = new Function(
   "require",
   "$input",
   "$env",
-  "return (async function () {\n" + node0.parameters.jsCode + "\n});",
+  `return (async function () {\n${node0.parameters.jsCode}\n});`,
 );
 
 // ------------------------------------------------------------------
@@ -77,9 +77,7 @@ const mkFs = () => {
   const err = (code) => Object.assign(new Error(code), { code });
   const fileNode = (content) => ({
     dir: false,
-    content: Buffer.isBuffer(content)
-      ? Buffer.from(content)
-      : Buffer.from(String(content ?? "")),
+    content: Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(String(content ?? "")),
     mtimeMs: Date.now(),
     ctimeMs: Date.now(),
   });
@@ -98,14 +96,14 @@ const mkFs = () => {
     mkdirSync(p, o) {
       p = norm(p);
       if (nodes.has(p)) {
-        if (o && o.recursive) return;
+        if (o?.recursive) return;
         throw err("EEXIST");
       }
-      if (o && o.recursive) {
+      if (o?.recursive) {
         const parts = p.split("/").filter(Boolean);
         let cur = "";
         for (const part of parts) {
-          cur += "/" + part;
+          cur += `/${part}`;
           if (!nodes.has(cur)) nodes.set(cur, dirNode());
         }
         return;
@@ -120,7 +118,7 @@ const mkFs = () => {
     readdirSync(d) {
       d = norm(d);
       const n = nodes.get(d);
-      if (!n || !n.dir) throw err("ENOENT");
+      if (!n?.dir) throw err("ENOENT");
       const out = [];
       for (const k of nodes.keys()) {
         if (k !== d && path.posix.dirname(k) === d) {
@@ -228,7 +226,7 @@ const seed = (fakeFs, fname, payload, media) => {
     fakeFs.writeFileSync(mp, bytes);
   }
   fakeFs.mkdirSync(Q, { recursive: true });
-  fakeFs.writeFileSync(Q + "/" + fname, JSON.stringify(payload));
+  fakeFs.writeFileSync(`${Q}/${fname}`, JSON.stringify(payload));
 };
 const read = (fakeFs, p) => {
   try {
@@ -238,7 +236,7 @@ const read = (fakeFs, p) => {
   }
 };
 const ledger = (fakeFs) =>
-  (read(fakeFs, STATE + "/published.jsonl") || "")
+  (read(fakeFs, `${STATE}/published.jsonl`) || "")
     .split("\n")
     .filter(Boolean)
     .map((l) => {
@@ -250,7 +248,7 @@ const ledger = (fakeFs) =>
     });
 const at = (fakeFs, dir) => {
   try {
-    return fakeFs.readdirSync(Q + "/" + dir);
+    return fakeFs.readdirSync(`${Q}/${dir}`);
   } catch (_e) {
     return [];
   }
@@ -272,23 +270,23 @@ const runTick = async (sc) => {
   const helpers = {
     httpRequest: async (opts) => {
       calls.push(opts);
-      const key = opts.method + " " + opts.url;
+      const key = `${opts.method} ${opts.url}`;
       if (key === "POST https://api.linkedin.com/v2/assets?action=registerUpload") {
         regN++;
-        if (sc.regFail && sc.regFail(regN, opts)) throw sc.regFail(regN, opts);
+        if (sc.regFail?.(regN, opts)) throw sc.regFail(regN, opts);
         return {
           value: {
-            asset: "urn:li:digitalmediaAsset:TST" + regN,
+            asset: `urn:li:digitalmediaAsset:TST${regN}`,
             uploadMechanism: {
               "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest": {
-                uploadUrl: "https://uploads.li.test/put/" + regN,
+                uploadUrl: `https://uploads.li.test/put/${regN}`,
               },
             },
           },
         };
       }
       if (opts.method === "PUT" && String(opts.url).startsWith("https://uploads.li.test/")) {
-        if (sc.putFail && sc.putFail(opts)) throw sc.putFail(opts);
+        if (sc.putFail?.(opts)) throw sc.putFail(opts);
         return "";
       }
       if (key === "POST https://api.linkedin.com/v2/ugcPosts") {
@@ -298,41 +296,37 @@ const runTick = async (sc) => {
       if (opts.method === "GET" && opts.url.startsWith("https://api.linkedin.com/v2/ugcPosts")) {
         return { id: "urn:li:share:777001" };
       }
-      throw new Error("unexpected httpRequest: " + key);
+      throw new Error(`unexpected httpRequest: ${key}`);
     },
   };
   const env = { ...BASE_ENV, ...(sc.env || {}) };
-  const fn = factory(
-    (m) => (m === "fs" ? fakeFs : require(m)),
-    { all: () => [] },
-    env,
-  );
+  const fn = factory((m) => (m === "fs" ? fakeFs : require(m)), { all: () => [] }, env);
   const out = await fn.call({ helpers });
   return {
     calls,
     fakeFs,
-    results: (out && out[0] && out[0].json && out[0].json.results) || [],
+    results: out?.[0]?.json?.results || [],
     ledger: ledger(fakeFs),
   };
 };
 
 const httpErr = (statusCode) =>
-  Object.assign(new Error("Request failed with status code " + statusCode), {
+  Object.assign(new Error(`Request failed with status code ${statusCode}`), {
     statusCode,
   });
 
 let fails = 0;
 const check = (name, cond, detail) => {
   if (cond) {
-    console.log("ok   " + name);
+    console.log(`ok   ${name}`);
   } else {
-    console.log("FAIL " + name + (detail ? " - " + detail : ""));
+    console.log(`FAIL ${name}${detail ? ` - ${detail}` : ""}`);
     fails++;
   }
 };
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-const png = (s) => Buffer.from("PNG-BYTES-" + s);
+const png = (s) => Buffer.from(`PNG-BYTES-${s}`);
 const MEDIA = {
   "/home/node/materials/photos/fig1.png": png("fig1"),
   "/home/node/materials/photos/fig2.png": png("fig2"),
@@ -388,10 +382,7 @@ const main = async () => {
       media: MEDIA,
     });
     const kinds = calls.map(
-      (c) =>
-        c.method +
-        " " +
-        (c.url.startsWith("https://uploads.li.test") ? "<uploadUrl>" : c.url),
+      (c) => c.method + " " + (c.url.startsWith("https://uploads.li.test") ? "<uploadUrl>" : c.url),
     );
     check(
       "S2 call order: register,PUT x2 -> ugcPosts -> verify GET",
@@ -406,7 +397,7 @@ const main = async () => {
       JSON.stringify(kinds),
     );
     const reg = calls[0];
-    const req = reg.body && reg.body.registerUploadRequest;
+    const req = reg.body?.registerUploadRequest;
     check(
       "S2 registerUpload body: feedshare-image recipe + member owner",
       !!req &&
@@ -430,7 +421,7 @@ const main = async () => {
       JSON.stringify({ url: put.url, headers: put.headers, body: String(put.body) }),
     );
     const ugc = calls.find((c) => c.url.endsWith("/v2/ugcPosts") && c.method === "POST");
-    const sc2 = ugc && ugc.body && ugc.body.specificContent["com.linkedin.ugc.ShareContent"];
+    const sc2 = ugc?.body?.specificContent["com.linkedin.ugc.ShareContent"];
     check(
       "S2 ugcPosts: shareMediaCategory IMAGE + READY media urns",
       !!sc2 &&
@@ -453,13 +444,16 @@ const main = async () => {
     const pub = ledger.find((r) => r && r.status === "published");
     check(
       "S2 ledger: published with media_attached 2, verified",
-      !!pub && pub.external_id === "urn:li:share:777001" && pub.media_attached === 2 &&
-        pub.verified === true && pub.media_failed === undefined,
+      !!pub &&
+        pub.external_id === "urn:li:share:777001" &&
+        pub.media_attached === 2 &&
+        pub.verified === true &&
+        pub.media_failed === undefined,
       JSON.stringify(pub),
     );
     check(
       "S2 status file headlines ok",
-      JSON.parse(read(fakeFs, STATE + "/linkedin_status.json")).status === "ok",
+      JSON.parse(read(fakeFs, `${STATE}/linkedin_status.json`)).status === "ok",
     );
     check("S2 file lands in done/", at(fakeFs, "done").includes("d1.json"));
   }
@@ -573,7 +567,7 @@ const main = async () => {
         failed: at(fakeFs, "failed"),
       }),
     );
-    const requeued = JSON.parse(read(fakeFs, Q + "/d1.json") || "{}");
+    const requeued = JSON.parse(read(fakeFs, `${Q}/d1.json`) || "{}");
     check(
       "S5 transient: retries counter persisted on the claim inode",
       requeued.retries === 1,
@@ -659,11 +653,11 @@ const main = async () => {
     check("S8 dry-run: file lands in done/", at(fakeFs, "done").includes("d1.json"));
   }
 
-  console.log(fails ? "li-media: " + fails + " check(s) failed" : "li-media: all checks pass");
+  console.log(fails ? `li-media: ${fails} check(s) failed` : "li-media: all checks pass");
   process.exit(fails ? 1 : 0);
 };
 
 main().catch((e) => {
-  console.error("FAIL harness crashed: " + ((e && e.stack) || e));
+  console.error(`FAIL harness crashed: ${e?.stack || e}`);
   process.exit(1);
 });
