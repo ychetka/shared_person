@@ -22,9 +22,11 @@
 #      SingletonSocket symlinks+files in the profile dir and refuses to
 #      take the profile while a peer holds them. They are removed ONLY
 #      when no live chrome process runs on this profile dir (pgrep -f
-#      on the --user-data-dir= path) AND the CDP endpoint is dead -
-#      deleting the locks under a live instance would let a second
-#      browser hijack the profile and corrupt session state.
+#      on the --user-data-dir flag, regex-escaped and end-anchored so
+#      sibling dirs like <profile>-bak cannot match) AND the CDP
+#      endpoint is dead - deleting the locks under a live instance
+#      would let a second browser hijack the profile and corrupt
+#      session state.
 #
 #   2. WAYLAND/X11 ENV: the desktop session on this host is GNOME/
 #      mutter on Wayland (loginctl Type=wayland). Chrome needs
@@ -35,24 +37,32 @@
 #        - XAUTHORITY: mutter writes its Xwayland cookie to
 #          /run/user/<uid>/.mutter-Xwaylandauth.<SUFFIX> where the
 #          suffix embeds a value that ROTATES EVERY BOOT - it MUST be
-#          globbed, never hardcoded. On pure-X11 sessions the file is
-#          absent and the fallback is the classic $HOME/.Xauthority.
-#          An inherited XAUTHORITY that still points at a readable file
-#          is used only when no mutter cookie exists;
+#          globbed, never hardcoded, and when several cookies exist
+#          (Xwayland restart) the NEWEST wins. On pure-X11 sessions the
+#          file is absent and the fallback is the classic
+#          $HOME/.Xauthority. An inherited XAUTHORITY that still points
+#          at a readable file is used only when no mutter cookie
+#          exists;
 #        - DISPLAY: the Xwayland display; the inherited value wins,
 #          default :0.
 #
-#   3. DETACHED START + HEALTHCHECK: chrome is started via setsid
+#   3. DETACHED START + HEALTHCHECK: chrome is started via setsid -f
 #      (new session, reparented away from this script - survives the
 #      launcher exiting and the calling terminal closing), output to
-#      $PROFILE_DIR/chrome-audit.log. The script then polls
+#      $PROFILE_DIR/chrome-audit.log (capped: truncated to the newest
+#      512KiB once it passes 1MiB). The script then polls
 #      http://127.0.0.1:9223/json/version for up to ~15s and prints the
 #      returned JSON (Browser version line included); a timeout or a
 #      missing chrome binary is a clear non-zero failure.
 #
-#   4. IDEMPOTENT: if the CDP endpoint already answers, the script
-#      prints 'already running' and exits 0 - no relaunch, no lock
-#      cleanup, no env probing.
+#   4. IDEMPOTENT: if the CDP endpoint already answers AND its
+#      /json/version really is CDP (carries Browser +
+#      webSocketDebuggerUrl) AND a chrome process is bound to THIS
+#      profile dir, the script prints 'already running' and exits 0 -
+#      no relaunch, no lock cleanup, no env probing. A foreign listener
+#      on :9223 (non-CDP body, or CDP served by a chrome on a
+#      different profile) is a loud non-zero failure - reported,
+#      never killed.
 #
 # Usage:
 #   tools/chrome-audit.sh            # launch (or no-op if already up)
@@ -69,11 +79,22 @@ CDP_ADDR="${CDP_ADDR:-127.0.0.1}"
 CDP_PORT="${CDP_PORT:-9223}"
 CDP_URL="http://${CDP_ADDR}:${CDP_PORT}"
 CDP_WAIT_SECONDS="${CDP_WAIT_SECONDS:-15}"
-DRY_RUN=0
-[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf '!! %s\n' "$*" >&2; exit 1; }
+
+# Strict args: a mistyped flag ('--dryrun') must fail loudly instead
+# of silently performing a REAL launch.
+DRY_RUN=0
+for _arg in "$@"; do
+  case "$_arg" in
+    --dry-run) DRY_RUN=1 ;;
+    -h|--help)
+      say "usage: $0 [--dry-run]  - launch the audit Chrome on $CDP_URL (idempotent)"
+      exit 0 ;;
+    *) fail "unrecognized argument '$_arg' - usage: $0 [--dry-run]" ;;
+  esac
+done
 
 # curl is the only CDP client used here (probe + version fetch) - the
 # same hard dependency vk_token_issue.py/service already assume via
@@ -81,12 +102,53 @@ fail() { printf '!! %s\n' "$*" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 \
   || fail "curl is required for the CDP healthcheck - install it and re-run $0"
 
+# 'chrome holding this profile dir' test, shared by the idempotence
+# check and the stale-lock guard. PROFILE_DIR is raw text, not a
+# regex - escape every non-alphanumeric char so a '.' or '+' in $HOME
+# cannot widen the match, and anchor the path with a terminator
+# ([[:space:]]=next argv token, $=end of cmdline) so siblings like
+# '.chrome-audit-profile-bak' do NOT match.
+_ESCAPED_DIR="$(printf '%s' "$PROFILE_DIR" | sed 's/[^[:alnum:]_]/\\&/g')"
+_PROFILE_PAT="--user-data-dir[= ]${_ESCAPED_DIR}"'([[:space:]]|$)'
+profile_chrome_pid() {
+  # argv match alone is not enough: a wrapper whose command line merely
+  # MENTIONS the flag (e.g. `bash -c '... --user-data-dir=...'`, an
+  # editor with the recipe open, a fake argv[0]) would pass the regex.
+  # /proc/<pid>/exe always resolves to the real binary, so require the
+  # match to actually BE a chrome/chromium executable.
+  local pid
+  for pid in $(pgrep -f -- "$_PROFILE_PAT" 2>/dev/null); do
+    case "$(readlink "/proc/$pid/exe" 2>/dev/null)" in
+      *chrome*|*chromium*) printf '%s\n' "$pid"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
 # --- 0. Idempotence: a live CDP endpoint means the audit browser is
 # already serving every consumer - nothing else must happen (no
-# relaunch, no lock cleanup, no env discovery).
+# relaunch, no lock cleanup, no env discovery). 'HTTP 200' alone is
+# NOT proof though: any web listener on :9223 returns a body, and a
+# chrome started on a DIFFERENT profile would silently hijack every
+# CDP consumer (they would drive the wrong sessions). Require BOTH
+# markers a real /json/version always carries AND a chrome process
+# bound to THIS profile dir. Foreign listeners are reported loudly -
+# never killed.
 if VERSION_JSON="$(curl -fsS --max-time 2 "$CDP_URL/json/version" 2>/dev/null)" \
      && [ -n "$VERSION_JSON" ]; then
-  say ">> audit Chrome already running on $CDP_URL - nothing to do"
+  if ! printf '%s' "$VERSION_JSON" | grep -q '"webSocketDebuggerUrl"' \
+    || ! printf '%s' "$VERSION_JSON" | grep -q '"Browser"'; then
+    fail "$CDP_URL answers HTTP but is NOT a CDP endpoint - a foreign
+   service holds the audit port. Free port $CDP_PORT and re-run $0."
+  fi
+  PROFILE_PROC="$(profile_chrome_pid || true)"
+  if [ -z "$PROFILE_PROC" ]; then
+    fail "$CDP_URL serves a CDP endpoint but no chrome runs on
+   $PROFILE_DIR - a chrome on a DIFFERENT profile holds the audit port
+   and consumers would attach to the wrong sessions. Stop that
+   instance (left untouched on purpose) and re-run $0."
+  fi
+  say ">> audit Chrome already running on $CDP_URL (pid $PROFILE_PROC) - nothing to do"
   # keep it short: the Browser line only (a caller needing the full
   # /json/version can curl it - the endpoint is live by definition).
   printf '%s\n' "$VERSION_JSON" | grep -o '"Browser"[^,}]*' || true
@@ -106,18 +168,15 @@ if [ ! -x "$CHROME_BIN" ]; then
   fail "chrome binary not found at $CHROME_BIN and no google-chrome on PATH - install Chrome or set CHROME_BIN"
 fi
 
-# --- 2. Is a live chrome already holding this profile dir? Match on
-# the --user-data-dir flag value (covers both '--user-data-dir=PATH'
-# and '--user-data-dir PATH' argv spellings). If one is running but
+# --- 2. Is a live chrome already holding this profile dir? The
+# escaped/anchored pattern above covers both '--user-data-dir=PATH'
+# and '--user-data-dir PATH' argv spellings. If one is running but
 # CDP is dead, it was started WITHOUT --remote-debugging-port (or is
 # mid-crash) - launching again would just open a window in that
 # instance and never bring CDP up, and deleting its locks would be
 # worse. Give it a short grace for the in-flight-startup case, then
 # fail loudly so the operator kills or adopts it.
-PROFILE_PROC=""
-if pgrep -f -- "--user-data-dir[= ]$PROFILE_DIR" >/dev/null 2>&1; then
-  PROFILE_PROC="$(pgrep -f -- "--user-data-dir[= ]$PROFILE_DIR" | head -1)"
-fi
+PROFILE_PROC="$(profile_chrome_pid || true)"
 
 if [ -n "$PROFILE_PROC" ]; then
   say ">> chrome pid $PROFILE_PROC already runs on $PROFILE_DIR but CDP is down -"
@@ -161,6 +220,13 @@ fi
 # from a context that has none (ssh, systemd unit, agent shell).
 _UID="$(id -u)"
 XDG_RT="${XDG_RUNTIME_DIR:-/run/user/$_UID}"
+# libwayland resolves a BASENAME WAYLAND_DISPLAY ('wayland-0') through
+# $XDG_RUNTIME_DIR - so when this script had to derive the dir itself
+# (cron/systemd/agent shells carry none), it MUST reach chrome's
+# environment too or the socket lookup has no root to resolve
+# against. Exporting unconditionally also covers an inherited-but-
+# unexported value.
+export XDG_RUNTIME_DIR="$XDG_RT"
 
 # WAYLAND_DISPLAY: keep the inherited value only while its socket is
 # still live; otherwise glob $XDG_RT/wayland-* (skipping the .lock
@@ -196,13 +262,16 @@ else
 fi
 
 # XAUTHORITY: mutter's Xwayland cookie name carries a boot-rotating
-# suffix (.mutter-Xwaylandauth.XXXXXX) - glob, NEVER hardcode. The
-# classic $HOME/.Xauthority is the fallback for X11 sessions where no
-# mutter cookie exists; an inherited readable XAUTHORITY is only a
-# last resort when neither file is there.
+# suffix (.mutter-Xwaylandauth.XXXXXX) - glob, NEVER hardcode. When
+# several match (Xwayland restarted mid-session leaves the old cookie
+# behind) the NEWEST is the live one - plain glob order is
+# alphabetical and would pick a stale suffix, so sort by mtime
+# (`ls -t`). The classic $HOME/.Xauthority is the fallback for X11
+# sessions where no mutter cookie exists; an inherited readable
+# XAUTHORITY is only a last resort when neither file is there.
 _XAUTH=""
-for _xa in "$XDG_RT"/.mutter-Xwaylandauth.*; do
-  [ -r "$_xa" ] || continue   # unmatched glob fails this test too
+for _xa in $(ls -t "$XDG_RT"/.mutter-Xwaylandauth.* 2>/dev/null); do
+  [ -r "$_xa" ] || continue
   _XAUTH="$_xa"
   break
 done
@@ -242,6 +311,16 @@ fi
 # diagnosable.
 mkdir -p "$PROFILE_DIR"
 LOG="$PROFILE_DIR/chrome-audit.log"
+# The log is append-only across launches - cap it: past 1MiB keep the
+# newest 512KiB. Truncate IN PLACE (temp file + `cat >`, not mv): if
+# an older chrome still holds the fd, replacing the inode would split
+# its output into an orphaned file. Crash diagnostics live at the
+# tail anyway.
+if [ -f "$LOG" ] && [ "$(stat -c %s "$LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+  _logtail="$(mktemp)"
+  tail -c 524288 "$LOG" > "$_logtail" && cat "$_logtail" > "$LOG"
+  rm -f "$_logtail"
+fi
 export DISPLAY
 
 setsid -f "$CHROME_BIN" \
