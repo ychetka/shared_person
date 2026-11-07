@@ -97,6 +97,15 @@ services:
       # matching content-gen's MAP.all fan-out. Default keeps VK
       # only; non-enabled platforms land in queue skipped/
       - PUBLISH_PLATFORMS=${PUBLISH_PLATFORMS:-vk}
+      # simulated-publish kill switch (issue #41): real publishing is
+      # OFF by developer decision until an explicit go-live - the
+      # default below is ON ('1'/'true'/'yes' = simulate). Simulated
+      # drivers skip every external API call (no wall.post/upload, no
+      # ugcPosts/DELETE) and record synthetic 'sim-*' external_ids as
+      # ledger status 'simulated'. Going live requires an EXPLICIT
+      # PUBLISH_SIMULATE=0 in ../ENV - that flip IS the developer
+      # go-live decision, so it can never happen by omission.
+      - PUBLISH_SIMULATE=${PUBLISH_SIMULATE:-1}
       # rewrite-overwrite window (ms) - single source for the two
       # REWRITE_WINDOW_MS readers in sp-tg-moderation: Prepare Draft
       # (how long a 'rewrite' draft may be overwritten through the

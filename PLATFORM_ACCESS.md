@@ -3,6 +3,20 @@
 How each target platform is reached for publishing, where credentials live,
 and how they were obtained. All secrets are in `../ENV` (never committed).
 
+> **Real publishing is OFF by developer decision (2026-11-07, issue #41)
+> until an explicit go-live.** Compose injects
+> `PUBLISH_SIMULATE=${PUBLISH_SIMULATE:-1}` - simulated mode is the
+> DEPLOYMENT DEFAULT, and going live requires explicitly setting
+> `PUBLISH_SIMULATE=0` in `../ENV` (that flip IS the go-live
+> decision): both sp-publish drivers skip every external
+> API call (no VK `wall.post`/upload/`wall.delete`, no LinkedIn
+> `ugcPosts`/`DELETE`) and record synthetic `external_id`s - `sim-*`
+> prefixed for VK (`sim-<draft_id>`), `sim-urn:li:share:<draft_id>`
+> for LinkedIn - marked `status: "simulated"` in `published.jsonl`,
+> `publish/simulated` registry events, `simulated` platform status,
+> and `SIMULATED` in the Telegram summary. The credentials below are
+> ready for go-live but nothing is posted until the flag is flipped.
+
 ## VK
 
 - Method: VK API `wall.post` to the user's own wall.
