@@ -244,15 +244,22 @@ rewrite `tg.json` and hijack previews.
     the registry event status deliberately differ).
   - Edit > REPLACE mode (issue #42): arms a `pending_edit` marker
     with `mode: "replace"`; the operator's next message IS the
-    corrected post text. A service-line sanitizer strips lines
-    matching `^[DRAFT`, `^Scope:`, `^[WARNINGS`, `^[media]`, `^TEST
-    POST` plus surrounding whitespace (so a pasted-back preview card
-    works), then the remainder becomes `draft.text` VERBATIM - no
+    corrected post text. A service-line sanitizer strips every chrome
+    artifact the preview card can emit - lines matching `^[DRAFT`,
+    `^Scope:`, `^TEST POST`, `^[media]`, `^attach failed:`,
+    `^[truncated`, plus the `[WARNINGS` header and its `- ` bullet
+    lines (a `- ` line is only chrome inside that block - lists in
+    the post body survive) - plus surrounding whitespace (so a
+    pasted-back preview card works), then the remainder becomes
+    `draft.text` VERBATIM - no
     LLM pass, no content-gen dispatch. The draft is re-previewed
     in place through the same card assembly as Compose Message
     (fresh `preview_v`, four-button keyboard, status back to
-    `pending`) and a registry `edited` event is written. An empty
-    post-sanitize reply is refused and the marker stays armed.
+    `pending`) and a registry `edited` event is written. Stripped
+    lines are logged to `moderation.jsonl` (`edit-sanitized` with
+    `removed_count` + `removed_preview`); `draft.warnings` is cleared
+    on replace since the flags were computed on the old text. An
+    empty post-sanitize reply is refused and the marker stays armed.
   - Rework > COMMENT mode (issue #42): arms `pending_edit` with
     `mode: "comment"`; the operator's reply is forwarded to
     `/webhook/content-gen` as a rewrite request (mode `rewrite`,
