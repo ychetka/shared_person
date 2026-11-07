@@ -119,10 +119,29 @@ network). Asserts on the moderation-draft dispatch body: pointers
 renumber to the FINAL `media` attach order, failed renders drop their
 pointer and surface `fig N render failed` in `draft.warnings`,
 `caption_note` lists rendered figures in attach order, and an empty
-`visuals[]` keeps the legacy dispatch byte-identical.
+`visuals[]` keeps the legacy dispatch byte-identical. Issue #52 adds
+the critic-side contract: the verifier payload carries one flattened
+claim line per `visuals[]` task so diagram numbers are fact-checked
+like the draft text, and keeps its legacy shape (no `visuals` key)
+when the task list is empty.
 
 ```bash
 node tools/check_fig_numbering.js   # exit 0 = all checks pass
+```
+
+## check_matrix_padding.py - chart_matrix ragged-rows harness
+
+Row-normalization harness for `render_viz.py`'s `matrix` renderer
+(issue #52): rows shorter than `len(columns)` used to leave holes in
+the rendered table (matplotlib only draws the cells it is given). The
+script stubs `matplotlib`/`pyplot`/`patches` in `sys.modules` - the
+pinned wheels are not needed - runs the real `chart_matrix` and
+asserts the `cellText` grid handed to `ax.table` is rectangular:
+short rows padded with `-`, long rows truncated, empty-label rows
+dropped, degenerate datasets still declined.
+
+```bash
+python3 tools/check_matrix_padding.py   # exit 0 = all checks pass
 ```
 
 ## deploy_workflow.js

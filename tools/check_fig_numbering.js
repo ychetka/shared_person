@@ -15,6 +15,14 @@
 //   4. an empty visuals[] leaves the legacy path byte-identical:
 //      text untouched, no media, no caption_note, no warnings.
 //
+// Issue #52 adds the critic-side contract: the verifier used to see
+// {draft} only, so numbers inside visuals[] datasets bypassed
+// fact-checking. Scenarios S7/S8 capture the /run request bodies and
+// assert the critic input carries one flattened claim line per visual
+// ('visual k <type>/<block> "title": key=value; ...') when visuals[]
+// is non-empty, and keeps the legacy payload shape (no 'visuals' key)
+// when it is empty.
+//
 // Sandbox contract: the Code node sees require('fs'), $input.all(),
 // $env.NAME and this.helpers.httpRequest - all stubbed here. The fs
 // stub swallows the state/log appends so nothing touches the disk;
@@ -98,6 +106,7 @@ const hero = (block) => ({
 const runScenario = async (sc) => {
   const dispatched = [];
   const calls = [];
+  const runs = []; // {role, input} of every llm-gateway /run call
   const roles = {
     "extract-facts": { json: { stack: ["React"], metrics: ["n8n"] } },
     critic: { json: { verdict: "pass", issues: [] } },
@@ -118,6 +127,7 @@ const runScenario = async (sc) => {
       }
       if (opts.url === "http://127.0.0.1:8787/run") {
         const role = opts.body && opts.body.role;
+        runs.push({ role, input: String(opts.body?.input || "") });
         return roles[role] || { json: {} };
       }
       if (opts.url === "http://127.0.0.1:5780/webhook/moderation-draft") {
@@ -130,7 +140,7 @@ const runScenario = async (sc) => {
   const fn = factory(fakeRequire, { all: () => [item(sc.body)] }, $env);
   const out = await fn.call({ helpers });
   const results = out && out[0] && out[0].json && out[0].json.results;
-  return { dispatched, calls, results };
+  return { dispatched, calls, runs, results };
 };
 
 let fails = 0;
@@ -360,6 +370,86 @@ const main = async () => {
         caption_note: d.caption_note,
         warnings: d.warnings,
       }),
+    );
+  }
+
+  // S7: critic fact-checks visual dataset claims (issue #52). The
+  // verifier payload must carry one flattened claim line per visual so
+  // diagram numbers/labels get the same facts-only check as the text;
+  // an image task with no dataset still contributes its caption.
+  {
+    const text = "React n8n body [See Fig 1] tail [See Fig 2]";
+    const { runs } = await runScenario({
+      writer: {
+        platform: "vk",
+        lang: "ru",
+        text,
+        hashtags: [],
+        visuals: [
+          {
+            block: "B2",
+            type: "matrix",
+            title: "opts",
+            dataset: {
+              kind: "matrix",
+              data: {
+                columns: ["speed", "cost"],
+                rows: [{ label: "opt-a", values: [42, "free"] }],
+              },
+            },
+          },
+          hero("B1"),
+        ],
+      },
+      viz: { ok: true, paths: ["materials/viz/m.png"], skipped: [] },
+    });
+    const criticInputs = runs.filter((r) => r.role === "critic").map((r) => JSON.parse(r.input));
+    check(
+      "S7 critic called once on a clean verdict",
+      criticInputs.length === 1,
+      String(criticInputs.length),
+    );
+    const vlines = criticInputs[0]?.visuals;
+    check(
+      "S7 critic input carries one claim line per visual",
+      Array.isArray(vlines) && vlines.length === 2,
+      JSON.stringify(vlines),
+    );
+    check(
+      "S7 dataset numbers/labels reach the critic flattened",
+      Array.isArray(vlines) &&
+        vlines[0].startsWith('visual 1 matrix/B2 "opts":') &&
+        vlines[0].includes("columns=speed|cost") &&
+        vlines[0].includes("label=opt-a") &&
+        vlines[0].includes("values=42|free"),
+      JSON.stringify(vlines?.[0]),
+    );
+    check(
+      "S7 dataset-less image task keeps its caption claim",
+      Array.isArray(vlines) &&
+        vlines[1].startsWith("visual 2 image/B1") &&
+        vlines[1].includes("caption=hero B1"),
+      JSON.stringify(vlines?.[1]),
+    );
+    check(
+      "S7 draft text still passed to the critic verbatim",
+      criticInputs[0]?.draft === text,
+      JSON.stringify(criticInputs[0]?.draft),
+    );
+  }
+
+  // S8: no visuals[] -> the critic payload keeps its legacy shape -
+  // no 'visuals' key at all, so non-article drafts are byte-identical
+  // to the pre-#52 input.
+  {
+    const { runs } = await runScenario({
+      writer: { platform: "vk", lang: "ru", text: "React n8n plain text", hashtags: [] },
+    });
+    const ci = runs.filter((r) => r.role === "critic").map((r) => JSON.parse(r.input))[0];
+    check(
+      "S8 legacy: critic input has no visuals key without visuals[]",
+      ci && !("visuals" in ci) && typeof ci.draft === "string",
+      JSON.stringify(ci),
     );
   }
 
