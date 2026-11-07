@@ -27,7 +27,7 @@ output:
           properties:
             type:
               type: string
-              enum: ["bar", "line", "pipeline", "stat-cards"]
+              enum: ["bar", "line", "pipeline", "stat-cards", "timeline", "matrix"]
             viz_id:
               type: string
             title:

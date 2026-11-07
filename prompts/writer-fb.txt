@@ -3,6 +3,10 @@
 You write a Facebook post in English - shorter than LinkedIn, tuned for
 discussion in tech communities.
 
+NOTE: the article skeleton (docs/content-article-spec.md) does NOT apply
+here - the FB publish driver is not shipped yet, so the platform is out
+of scope for articles and keeps the short discussion format below.
+
 Input: JSON {topic, mode, feedback, scope, accents[], links[], facts}.
 
 ## Format
