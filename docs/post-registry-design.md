@@ -65,7 +65,7 @@ Event schema (`schema_v: 1`):
   "draft_id": "dabc123",
   "platform": "vk",
   "stage": "draft|moderation|publish",
-  "status": "pending|approved|rejected|edited|published|failed|skipped|test-deleted",
+  "status": "pending|approved|cancelled|edited|published|failed|skipped|test-deleted",
   "ts": "2026-11-02T15:04:05.123Z",
   "writer": "sp-content-gen|sp-tg-moderation|sp-publish",
   "error": "optional, scrubbed, <=300 chars",
@@ -115,8 +115,8 @@ buys a stale-cache failure mode for zero users.
 |---|---|---|
 | sp-content-gen | draft file written per platform | `stage=draft, status=pending` (+post_id into draft json) |
 | sp-tg-moderation | Approve | `stage=moderation, status=approved` |
-| sp-tg-moderation | Reject | `stage=moderation, status=rejected` |
-| sp-tg-moderation | Edit dispatch / rewrite landed | `stage=moderation, status=edited` |
+| sp-tg-moderation | Reject (terminal cancel) | `stage=moderation, status=cancelled` (draft file keeps internal status `rejected`) |
+| sp-tg-moderation | Edit replace landed / Rework rewrite dispatch | `stage=moderation, status=edited` |
 | sp-publish | wall.post success | `stage=publish, status=published, external_ids, published_at` |
 | sp-publish | definite failure | `stage=publish, status=failed, error` |
 | sp-publish | transport loss, probe found it | `stage=publish, status=failed, maybe_live=true, external_ids` (no external_ids when probe empty) |
@@ -221,8 +221,8 @@ post_report.py orphans                # queue files / drafts with no
   `moderation/approved` + `publish/published` events reachable via
   `post_report.py get <post_id>` showing one VK service entry with
   `external_ids` and `published_at`.
-- Rejecting a draft produces a terminal `rejected` service entry -
-  rejected drafts are in the registry from creation, so approval-rate
+- Rejecting a draft produces a terminal `cancelled` service entry -
+  cancelled drafts are in the registry from creation, so approval-rate
   metrics are computable later.
 - Killing the publish node mid-append leaves at most one torn line;
   `post_report.py` still answers.

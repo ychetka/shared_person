@@ -167,6 +167,36 @@ const GROUPS = {
   // The helper embeds an inline sha1 (Code nodes only require fs), so
   // any fix must replicate to all three or the event streams diverge
   "registry-event": { expect: 3 },
+  // preview card assembly (issue #42): the '[DRAFT ...]' message
+  // build - cap(), header/TEST/Scope/text/[WARNINGS/[media] lines and
+  // the assembled 3900-char cap - shared by Compose Message
+  // (sp-tg-moderation) and the Edit 'replace'-mode re-preview in
+  // Handle TG Update. Inputs (id/draft/warnings/media/mediaSent/
+  // failed) sit outside the markers; the copies sit at different
+  // nesting depths, so leading indentation is stripped
+  "preview-message": {
+    expect: 2,
+    normalize: [[/^\s+/gm, ""]],
+  },
+  // the FNV-1a preview_v token computation over msg + the
+  // publish-relevant payload fields: Compose Message and the Edit
+  // 'replace'-mode re-preview in Handle TG Update. A ver computed
+  // differently between the two would make re-preview buttons
+  // bind to a different hash than pipeline previews do
+  "preview-v-fnv": {
+    expect: 2,
+    normalize: [[/^\s+/gm, ""]],
+  },
+  // the four-button moderation keyboard (issue #42: Approve/Edit/
+  // Rework/Reject with '<act>:<id><verSuffix>' callback_data): the
+  // preview sendMessage in Compose Message, the replace-mode
+  // re-preview send and the rewrite-expired keyboard restore in
+  // Handle TG Update. verSuffix is bound per-site (':' + ver, or ''
+  // for a legacy pre-preview_v draft) so the blocks stay identical
+  "preview-keyboard": {
+    expect: 3,
+    normalize: [[/^\s+/gm, ""]],
+  },
   // mkdirErrs collection prelude: Handle TG Update, Prepare Draft
   // (both sp-tg-moderation), Resolve Chat + Webhook (sp-tg-setup),
   // Generate Drafts (sp-content-gen) and Analytics Tick
