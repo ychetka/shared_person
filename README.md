@@ -43,6 +43,8 @@ rootless docker daemon - nothing from this project runs bare on the host
   never committed).
 - `quant-partner/` - Gemini MCP server on the same manifests.
 - `n8n-workflows/` - exported workflow JSON specs.
+- `docs/` - design specs: post registry, content article, Habr
+  integration, X/Twitter and TradingView publish drivers.
 - `hands-agent/` - python OS-level automation (the one host component).
 - `scripts/` - utilities.
 
