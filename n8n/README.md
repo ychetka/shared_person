@@ -135,9 +135,26 @@ rewrite `tg.json` and hijack previews.
   draft_id?, scope?, warnings?, media?, caption_note?, test?}` - saves a draft,
   sends it to the Telegram chat with four inline buttons Approve /
   Edit / Rework / Reject (`callback_data` = `ap|ed|rw|rj:<id>:<ver>`,
-  `ver` = the `preview_v` binding for that exact preview). `scope` is rendered above
-  the text; `warnings[]` (verifier flags) are appended as a block under
-  the text and stored in the draft meta.
+  `ver` = the `preview_v` binding for that exact preview).
+  Card layout (issue #43): the service header is one line -
+  `[DRAFT <id> | <platform> | <post_id>] <chars>/<platform_limit> chars`
+  with explicit `| SIMULATE` / `| TEST` mode tags when they apply -
+  followed by the TEST banner for `test: true` drafts, an action
+  semantics line (`Approve = LIVE PUBLISH to <platform>`, or
+  `Approve = SIMULATED PUBLISH (no real post)` when `PUBLISH_SIMULATE`
+  is truthy - same `1`/`true`/`yes` parse the publish tick uses),
+  `Scope:` when set, and a `----------` separator. Inside the text
+  preview a `--- "See more" fold ---` marker lands at the platform's
+  feed-fold position (~300 chars for vk, ~210 for linkedin) so the
+  operator sees what readers get above the fold. `warnings[]`
+  (verifier flags) are appended as a block under the text, then the
+  `[media]` tail; the assembled message is still capped at 3900 chars
+  + `[truncated]` under Telegram's 4096 limit. For drafts whose text
+  alone is over ~3800 chars the card instead publishes the full text
+  to an anonymous telegra.ph page (createAccount once, token cached
+  in `state/telegraph.json`; createPage per draft, paragraph-node
+  content) and shows hook (first ~600 chars) + `Full text: <url>`;
+  a Telegraph failure falls back to the truncated card.
   - shared-secret gate: the endpoint is reachable through the public
     edge proxy, so every call must carry `X-Shared-Token` or
     `X-TG-Draft-Secret` matching `DRAFT_WEBHOOK_SECRET` (constant-time
@@ -182,10 +199,20 @@ rewrite `tg.json` and hijack previews.
     Each path is resolved inside the container: literal path, anything
     under `materials/` maps to the read-only `/home/node/materials`
     mount, bare filenames are looked up in `materials/photos/`.
-    Resolvable files go to the chat via `sendPhoto` (multipart upload
-    built in the Code node, before the text message). Files that fail
-    resolution or upload are listed in the message text instead, and
-    the draft meta keeps `media`, `caption_note` and `media_sent`.
+    Resolvable files go to the chat via `sendPhoto` - one multipart
+    upload per file through the HTTP node (a real `sendMediaGroup`
+    album is not reachable: the n8n HTTP node attaches one binary
+    field per configured parameter, so a dynamic photo count cannot
+    ride a single request, and Code nodes cannot send binary bodies).
+    Since issue #43 the photos go out captionless and with
+    `disable_notification` - the old per-photo `[DRAFT ...] media i/n`
+    caption messages are gone - and the card's `sendMessage` replies
+    to the FIRST delivered photo's `message_id` so the batch + card
+    read as one thread. The anchor id is persisted as
+    `media_message_id` on the draft file so the Edit re-preview
+    threads under the same photo. Files that fail resolution or
+    upload are listed in the message text instead, and the draft meta
+    keeps `media`, `caption_note` and `media_sent`.
   - On Approve the `media[]` list is carried into the publish queue
     file so platform drivers can attach the same files.
 - `POST /webhook/tg-moderation` - Telegram webhook target. Every update
@@ -244,10 +271,16 @@ rewrite `tg.json` and hijack previews.
     the registry event status deliberately differ).
   - Edit > REPLACE mode (issue #42): arms a `pending_edit` marker
     with `mode: "replace"`; the operator's next message IS the
-    corrected post text. A service-line sanitizer strips every chrome
+    corrected post text. The instruction message carries the raw
+    `draft.text` inside a ` ``` ` code block for one-tap copy
+    (issue #43) - when instruction + block would exceed the 4096
+    sendMessage cap the block goes alone in a second message. A
+    service-line sanitizer strips every chrome
     artifact the preview card can emit - lines matching `^[DRAFT`,
-    `^Scope:`, `^TEST POST`, `^[media]`, `^attach failed:`,
-    `^[truncated`, plus the `[WARNINGS` header and its `- ` bullet
+    `^Approve =`, `^Scope:`, `^TEST POST`, `^[media]`, `^attach failed:`,
+    `^[truncated`, `^---` (the card separator and the fold marker) and
+    `^Full text: https://telegra.ph/`, plus the `[WARNINGS` header and
+    its `- ` bullet
     lines (a `- ` line is only chrome inside that block - lists in
     the post body survive) - plus surrounding whitespace (so a
     pasted-back preview card works), then the remainder becomes
@@ -618,6 +651,11 @@ Processed files move to `done/` or `failed/` and are logged to
 `publish.jsonl` (the logged `status` mirrors the ledger:
 `published` / `test-published-deleted` / `test-delete-failed`, not a
 flat `published` for test drafts); results are summarized to Telegram.
+The summary's post reference is operator-facing (issue #43): a VK
+`external_id` `<owner>_<post>` renders as the clickable
+`https://vk.com/wall<owner>_<post>`; a LinkedIn share URN is not a
+URL so it renders labeled as `LinkedIn post URN: <urn>`; simulated
+ids stay literal (`sim-... (sim id)`).
 
 Housekeeping runs inside the same tick: stale `processing/` claims and
 orphaned `*.tmp-*` staging files are pruned, terminal dirs drop records
