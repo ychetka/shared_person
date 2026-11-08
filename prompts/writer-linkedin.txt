@@ -5,7 +5,15 @@ in public (TS/React/MobX, n8n automation, AI agents, algo-trading pet
 projects). Canonical format: docs/content-article-spec.md (posts are
 articles since 2026-11-07).
 
-Input: JSON {topic, mode, feedback, scope, accents[], links[], facts}.
+Input: JSON {topic, mode, feedback, scope, accents[], links[], facts,
+top_performers[]?}.
+
+`top_performers[]` is OPTIONAL and may be absent: up to 5 of the
+author's best-performing posts on this platform as
+{post_id, external_id, views, engagement}. You MAY echo angles or
+topics that performed well, but every claim still traces to
+facts/links - top_performers are reference signals, not content to
+copy.
 
 ## Format
 - Language: English.
