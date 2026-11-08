@@ -123,10 +123,35 @@ pointer and surface `fig N render failed` in `draft.warnings`,
 the critic-side contract: the verifier payload carries one flattened
 claim line per `visuals[]` task so diagram numbers are fact-checked
 like the draft text, and keeps its legacy shape (no `visuals` key)
-when the task list is empty.
+when the task list is empty. Issue #64 adds the `perf_summary.json`
+read side: a seeded analytics file feeds up to 5 trimmed
+`top_performers` into the writer brief for matching platforms only,
+marks the card `perf-informed`, logs `{action:'perf-summary'}` once,
+and a missing/corrupt file fails open with a byte-identical brief.
 
 ```bash
 node tools/check_fig_numbering.js   # exit 0 = all checks pass
+```
+
+## check_analytics.js - collector registry harness
+
+Sandbox harness for the collector registry in sp-analytics's
+'Analytics Tick' (issue #64): extracts the real jsCode and runs a full
+tick under a stubbed Code-node environment (in-memory `fs` seeded with
+registry events, `$env`, `this.helpers.httpRequest` routed to VK /
+LinkedIn API fakes - nothing touches disk or the network). Asserts the
+`metrics.jsonl` contract: linkedin `GET /v2/socialActions/<urn>` maps
+`likesSummary`/`commentsSummary` onto a `measured` row while
+views/reposts stay absent (not exposed for member shares); a missing
+`LINKEDIN_ACCESS_TOKEN`, a 401/403 auth/perm rejection, a 404 and a
+transient failure produce `unsupported`/`gone`/`error` verdicts
+respectively; facebook (and the `fb` alias) get the explicit
+'no facebook api creds (meta app pending)' unsupported row with zero
+HTTP calls; the vk collector, the unsupported counter and the
+`perf_summary.json` write keep working unchanged.
+
+```bash
+node tools/check_analytics.js   # exit 0 = all checks pass
 ```
 
 ## check_li_media.js - LinkedIn image-upload driver harness

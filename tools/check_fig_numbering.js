@@ -23,11 +23,19 @@
 // is non-empty, and keeps the legacy payload shape (no 'visuals' key)
 // when it is empty.
 //
+// Issue #64 adds the perf_summary.json read side: a seeded analytics
+// file feeds up to 5 trimmed top_performers into the writer brief for
+// matching platforms only, marks the moderation card 'perf-informed',
+// and logs {action:'perf-summary'} once - while a missing/corrupt file
+// fails OPEN with a logged skip and a byte-identical legacy brief
+// (S9-S11).
+//
 // Sandbox contract: the Code node sees require('fs'), $input.all(),
 // $env.NAME and this.helpers.httpRequest - all stubbed here. The fs
-// stub swallows the state/log appends so nothing touches the disk;
-// httpRequest is routed by URL to per-scenario fakes (llm-gateway
-// /run and /image, the viz renderer, the moderation-draft webhook).
+// stub serves sc.files and captures the log appends, so nothing
+// touches the disk; httpRequest is routed by URL to per-scenario
+// fakes (llm-gateway /run and /image, the viz renderer, the
+// moderation-draft webhook).
 //
 // Run:  node tools/check_fig_numbering.js    (exit 0 = all pass)
 
@@ -51,20 +59,31 @@ const factory = new Function(
   `return (async function () {\n${node0.parameters.jsCode}\n});`,
 );
 
-const fsStub = {
-  mkdirSync() {},
-  appendFileSync() {},
-  writeFileSync() {},
-  renameSync() {},
-  truncateSync() {},
-  readFileSync() {
-    throw new Error("fs stub: no files");
-  },
-  statSync() {
-    throw new Error("fs stub: no files");
-  },
+// per-scenario fs stub: sc.files seeds readable files (issue #64's
+// perf_summary.json), every appendFileSync is captured per path so the
+// content-gen.jsonl log lines can be asserted on, and the read miss is
+// a real ENOENT - the perf-summary fail-open path classifies by code
+const mkFsStub = (sc) => {
+  const files = sc.files || {};
+  const appends = {};
+  const stub = {
+    mkdirSync() {},
+    appendFileSync(p, data) {
+      appends[p] = (appends[p] || "") + String(data);
+    },
+    writeFileSync() {},
+    renameSync() {},
+    truncateSync() {},
+    readFileSync(p) {
+      if (files[p] != null) return files[p];
+      throw Object.assign(new Error("fs stub: no files"), { code: "ENOENT" });
+    },
+    statSync() {
+      throw Object.assign(new Error("fs stub: no files"), { code: "ENOENT" });
+    },
+  };
+  return { stub, appends };
 };
-const fakeRequire = (m) => (m === "fs" ? fsStub : require(m));
 
 // n8n exposes $env as a plain object (the Code node reads $env[n])
 const $env = {
@@ -137,10 +156,25 @@ const runScenario = async (sc) => {
       throw new Error(`unexpected httpRequest url: ${opts.url}`);
     },
   };
-  const fn = factory(fakeRequire, { all: () => [item(sc.body)] }, $env);
+  const fsm = mkFsStub(sc);
+  const fn = factory(
+    (m) => (m === "fs" ? fsm.stub : require(m)),
+    { all: () => [item(sc.body)] },
+    $env,
+  );
   const out = await fn.call({ helpers });
   const results = out?.[0]?.json?.results;
-  return { dispatched, calls, runs, results };
+  const logs = (fsm.appends["/home/node/.n8n/logs/content-gen.jsonl"] || "")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null;
+      }
+    });
+  return { dispatched, calls, runs, results, logs };
 };
 
 let fails = 0;
@@ -450,6 +484,151 @@ const main = async () => {
       "S8 legacy: critic input has no visuals key without visuals[]",
       ci && !("visuals" in ci) && typeof ci.draft === "string",
       JSON.stringify(ci),
+    );
+  }
+
+  // S9: perf_summary.json present (issue #64) - the writer brief gains
+  // a trimmed top_performers list limited to posts matching the
+  // writer's own platform, the moderation card note reports
+  // 'perf-informed: N top posts' and exactly one {action:'perf-summary'}
+  // line records the posts/matched counts.
+  {
+    const perf = {
+      schema_v: 1,
+      generated_at: "2026-11-10T00:00:00Z",
+      window_days: 30,
+      posts: [
+        {
+          post_id: "p_a",
+          platform: "vk",
+          external_id: "1_2",
+          views: 100,
+          likes: 9,
+          comments: 3,
+          reposts: 1,
+          engagement: 13,
+        },
+        {
+          post_id: "p_b",
+          platform: "linkedin",
+          external_id: "urn:li:share:9",
+          views: 50,
+          likes: 4,
+          comments: 1,
+          engagement: 5,
+        },
+        {
+          post_id: "p_c",
+          platform: "vk",
+          external_id: "1_3",
+          views: null,
+          likes: 7,
+          comments: 2,
+          reposts: 0,
+          engagement: 9,
+        },
+      ],
+    };
+    const { dispatched, runs, logs } = await runScenario({
+      writer: { platform: "vk", lang: "ru", text: "React n8n perf article", hashtags: [] },
+      files: { "/home/node/.n8n/state/analytics/perf_summary.json": JSON.stringify(perf) },
+    });
+    const wb = JSON.parse(runs.find((r) => r.role === "writer-vk")?.input || "{}");
+    check(
+      "S9 writer brief carries top_performers for the writer's platform only",
+      Array.isArray(wb.top_performers) && wb.top_performers.length === 2,
+      JSON.stringify(wb.top_performers),
+    );
+    check(
+      "S9 entries trimmed to the reference fields, nulls dropped",
+      eq(wb.top_performers, [
+        { post_id: "p_a", external_id: "1_2", views: 100, engagement: 13 },
+        { post_id: "p_c", external_id: "1_3", engagement: 9 },
+      ]),
+      JSON.stringify(wb.top_performers),
+    );
+    check(
+      "S9 caption_note marks perf-informed generation",
+      typeof dispatched[0]?.caption_note === "string" &&
+        dispatched[0].caption_note.includes("perf-informed: 2 top posts"),
+      dispatched[0]?.caption_note,
+    );
+    check(
+      "S9 one perf-summary log line with posts/matched counts",
+      logs.filter((l) => l && l.action === "perf-summary").length === 1 &&
+        logs.some((l) => l && l.action === "perf-summary" && l.posts === 3 && l.matched === 2),
+      JSON.stringify(logs.filter((l) => l && l.action === "perf-summary")),
+    );
+  }
+
+  // S10: perf_summary present but nothing on the writer's platform -
+  // the brief keeps the legacy shape (no top_performers key at all)
+  // and no perf-informed marker is emitted; the summary line still
+  // logs once with matched:0.
+  {
+    const perf = {
+      schema_v: 1,
+      posts: [
+        {
+          post_id: "p_b",
+          platform: "linkedin",
+          external_id: "urn:li:share:9",
+          views: 50,
+          engagement: 5,
+        },
+      ],
+    };
+    const { dispatched, runs, logs } = await runScenario({
+      writer: { platform: "vk", lang: "ru", text: "React n8n plain text", hashtags: [] },
+      files: { "/home/node/.n8n/state/analytics/perf_summary.json": JSON.stringify(perf) },
+    });
+    const wb = JSON.parse(runs.find((r) => r.role === "writer-vk")?.input || "{}");
+    check(
+      "S10 no top_performers key when nothing matches",
+      wb && !("top_performers" in wb) && typeof wb.topic === "string",
+      JSON.stringify(wb),
+    );
+    check(
+      "S10 no perf-informed marker on the card",
+      dispatched[0]?.caption_note === undefined,
+      dispatched[0]?.caption_note,
+    );
+    check(
+      "S10 perf-summary log still emitted once",
+      logs.some((l) => l && l.action === "perf-summary" && l.posts === 1 && l.matched === 0),
+      JSON.stringify(logs.filter((l) => l && l.action === "perf-summary")),
+    );
+  }
+
+  // S11: corrupt perf_summary fails OPEN - generation runs exactly as
+  // without the file (no top_performers, draft still dispatched) and
+  // the skip reason lands in the log instead of blocking the run.
+  {
+    const { dispatched, runs, logs } = await runScenario({
+      writer: { platform: "vk", lang: "ru", text: "React n8n plain text", hashtags: [] },
+      files: { "/home/node/.n8n/state/analytics/perf_summary.json": "{corrupt json," },
+    });
+    const wb = JSON.parse(runs.find((r) => r.role === "writer-vk")?.input || "{}");
+    check(
+      "S11 corrupt file: no top_performers key",
+      wb && !("top_performers" in wb),
+      JSON.stringify(wb),
+    );
+    check(
+      "S11 corrupt file: draft still dispatched",
+      dispatched.length === 1 && dispatched[0]?.text === "React n8n plain text",
+      JSON.stringify(dispatched),
+    );
+    check(
+      "S11 corrupt file: skip reason logged",
+      logs.some(
+        (l) =>
+          l &&
+          l.action === "perf-summary" &&
+          typeof l.skipped === "string" &&
+          l.skipped.includes("unreadable"),
+      ),
+      JSON.stringify(logs.filter((l) => l && l.action === "perf-summary")),
     );
   }
 
