@@ -87,7 +87,8 @@ before resuming or parking:
      acceptance of the X Developer Agreement via this document).
    - Optional marketing/updates checkbox: leave UNTICKED.
    - Submit.
-2b. **PHONE VERIFICATION - operator action, not abort.** X may
+
+   **Step 2b - PHONE VERIFICATION: operator action, not abort.** X may
    demand phone verification during dev-portal signup / account
    security. The prompt can appear on either surface: an
    x.com-origin account-security dialog (x.com asks the account to
@@ -101,7 +102,8 @@ before resuming or parking:
    hands-agent waits. The recipe never reads, types or relays
    verification codes; it resumes only on the operator's bridge
    reply confirming the gate is passed.
-2c. **TIER CHECK / BUDGET GATE.** Per x-twitter-driver-spec 1.1
+
+   **Step 2c - TIER CHECK / BUDGET GATE.** Per x-twitter-driver-spec 1.1
    and confirmed by the developer: X API WRITE access is PAID
    since Feb 2026 - the free tier ended except classified Public
    Utility Apps, and self-serve moved to pay-per-use. The

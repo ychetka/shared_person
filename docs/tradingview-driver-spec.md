@@ -196,9 +196,11 @@ TAGS: <tags>
 ---
 
 Steps: open the chart in the audit browser (tools/chrome-audit.sh
-session), "Publish idea", fill the fields above, attach/verify
-snapshot, click Publish. Then drop the idea URL here / note it in
-the draft for the registry.
+session). IMPORTANT: save/name the chart layout first - "Post image"
+on an unsaved "Без названия" chart is a silent no-op (verified
+2026-11-08). Then snapshot button -> "Post image", fill the fields
+above, attach/verify snapshot, click Publish. Then drop the idea URL
+here / note it in the draft for the registry.
 ```
 
 2. Writes ledger `status: 'manual'` + registry
