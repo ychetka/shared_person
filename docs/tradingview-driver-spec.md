@@ -11,6 +11,16 @@ programmatic publish path - there is nothing to promise an API
 around. This spec therefore defines a MANUAL/hands-agent path and
 keeps the registry honest about it.
 
+Live exploration update (2026-11-08, audit browser, CDP :9223):
+account `varenikx` confirmed logged in on the Essential plan
+(profile badge `pro:pro`) - BUT an active payment-failure
+notification is displayed ('Не удалось провести списание с вашего
+платёжного средства'), flagged as a monitor item in section 2.5:
+publishing may degrade if the plan lapses. The publish entry point
+(snapshot-button menu -> 'Post image') and the saved-layout
+precondition were verified on a chart page and are folded into
+section 2.5.
+
 ## 1. Platform research (verified 2026-11-07)
 
 ### 1.1 What TradingView exposes programmatically
@@ -124,9 +134,10 @@ dry_run?/mock?, retries?}`.
   `tvStatus` writer + end-of-tick merge), and registry events as
   in the existing drivers - `platform: 'tradingview'`.
 - `TV_VIA` env: `manual` (default) or `hands`. Optional
-  `TV_HANDLE` - the account's handle without `@`; no live use yet,
-  reserved for the profile-page read-back probe the hands path
-  uses to disambiguate a `maybe_live` (section 4).
+  `TV_HANDLE` - the account's handle without `@` (the audit
+  profile holds `varenikx`, confirmed 2026-11-08); no live use
+  yet, reserved for the profile-page read-back probe the hands
+  path uses to disambiguate a `maybe_live` (section 4).
 - `PUBLISH_SIMULATE`: records `simulated` with `sim-tv-<draft_id>`
   and does NOTHING external - no recipe enqueue, no hand-off
   message (the card already rendered SIM mode; a sim hand-off
@@ -185,9 +196,11 @@ TAGS: <tags>
 ---
 
 Steps: open the chart in the audit browser (tools/chrome-audit.sh
-session), "Publish idea", fill the fields above, attach/verify
-snapshot, click Publish. Then drop the idea URL here / note it in
-the draft for the registry.
+session). IMPORTANT: save/name the chart layout first - "Post image"
+on an unsaved "Без названия" chart is a silent no-op (verified
+2026-11-08). Then snapshot button -> "Post image", fill the fields
+above, attach/verify snapshot, click Publish. Then drop the idea URL
+here / note it in the draft for the registry.
 ```
 
 2. Writes ledger `status: 'manual'` + registry
@@ -208,18 +221,54 @@ queue contract + `done/failed` landing and result-channel
 precondition (`queue/done/<task_id>.result.json` carrying the idea
 `url`) the Habr spec already requires - build once, share.
 
+Verified surfaces (live exploration 2026-11-08, audit browser):
+
+- Account: `varenikx`, Essential plan (`pro:pro` badge).
+  MONITOR ITEM: an active payment-failure notification was
+  displayed ('Не удалось провести списание с вашего платёжного
+  средства'). Publishing may be degraded if the plan lapses - the
+  recipe's preflight re-checks the plan badge and the absence of
+  account-limit banners, and escalates if the plan state changed.
+- Publish entry point: on a chart page, the snapshot button
+  'Сделать снимок экрана' opens a menu with (RU locale, as
+  observed): 'Скачать изображение / Копировать изображение /
+  Копировать ссылку / Открыть в новой вкладке / Post image'.
+  'Post image' is the idea-publish entry - it opens the idea
+  composer. The recipe locates the button and the menu item by
+  vision/DOM, never fixed coordinates; the RU strings are the
+  observed labels, not a contract.
+- PRECONDITION - saved layout (finding to re-verify): clicking
+  'Post image' on an UNSAVED chart ('Без названия' in the layout
+  title) produced NO dialog - the click is silently swallowed.
+  The recipe must therefore either open a `chart_url` that points
+  at a saved layout, or save/rename the current layout BEFORE
+  invoking 'Post image'. Marked as a recipe precondition to
+  verify at run time.
+
 Recipe shape (audit-profile tab on `tradingview.com`, `dom_find`/
 `click_dom` via cdp.py + OS-level input; per-step `shot` into
-`queue/done/`; dismiss overlays first; locate/verify loops, never
-fixed coordinates):
+`queue/done/`; dismiss overlays first - including the
+payment-failure notification; locate/verify loops, never fixed
+coordinates):
 
-1. Open `chart_url` (operator-prepared chart or saved layout).
-2. Click "Publish idea" -> the composer snapshots the chart.
-3. Fill title, description (description can exceed jittered-type
+1. Preflight: confirm the plan badge (`pro:pro` / Essential or
+   better) and check for account-limit banners - plan lapse or a
+   hard account warning is an abort-and-escalate (MONITOR ITEM
+   above).
+2. Open `chart_url` (operator-prepared chart or saved layout).
+3. Saved-layout precondition: if the layout is unsaved
+   ('Без названия'), save/rename it first - 'Post image' on an
+   unsaved chart is a silent no-op (verified 2026-11-08).
+4. Click the snapshot button 'Сделать снимок экрана' -> menu ->
+   'Post image' (locate by vision/DOM; RU labels above are the
+   observed strings) -> the idea composer opens with the chart
+   snapshot.
+5. Fill title, description (description can exceed jittered-type
    size - same `set_clipboard` precondition as Habr applies),
-   direction, category, optional tags.
-4. `shot` of the composed form (the moderation-audit record).
-5. `autopublish !== true` (the default and recommendation): STOP
+   direction, category, optional tags - composer fields per
+   section 1.4, unchanged.
+6. `shot` of the composed form (the moderation-audit record).
+7. `autopublish !== true` (the default and recommendation): STOP
    here - the recipe leaves the filled composer on screen for the
    operator's final review + Publish click, and reports
    `awaiting_human` in the result file. `autopublish: true` clicks
@@ -274,6 +323,19 @@ An idea is NOT the 6-block article. Writer contract
 - Composer DOM drift: form fields and the publish button are the
   likely drift points; locate/verify + shot trail make failures
   diagnosable.
+- Plan lapse: the account showed an active payment-failure
+  notification on 2026-11-08 (Essential plan still active,
+  `pro:pro` badge). If the plan lapses the publish surface may
+  degrade or the composer may lock - the hands recipe's preflight
+  re-checks plan state and escalates rather than discovering it
+  mid-compose. Operator side: resolve the failed payment before
+  the first real run.
+- Saved-layout precondition is verified-but-narrow: observed once
+  on an untitled chart ('Post image' click -> no dialog). If a
+  future portal change makes 'Post image' work on unsaved charts,
+  step 3 stays harmless; if the real precondition turns out to be
+  something else (e.g. a layout-name prompt), step 3's
+  locate/verify loop catches it in the shot trail.
 - `manual` is a new registry status: readers that enumerate
   statuses must tolerate it (schema is forward-tolerant by design;
   `post_report.py` prints unknown statuses verbatim - verify at
@@ -305,6 +367,11 @@ An idea is NOT the 6-block article. Writer contract
 
 ## 5. Sources
 
+- Live audit-browser exploration 2026-11-08 (CDP :9223): account
+  `varenikx`, Essential plan (`pro:pro`), active payment-failure
+  notification; snapshot-button menu itemized (RU locale) and
+  'Post image' entry point verified; unsaved-layout 'Post image'
+  no-op observed.
 - TradingView developer FAQ / support: "We don't have an API that
   gives access to data"; REST API = broker integration only.
 - Idea composer fields + 15-min edit window:
