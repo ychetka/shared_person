@@ -81,7 +81,7 @@ accurate beats marketing that invites scrutiny.
 |---|---|
 | App name | `shared-person-content-tools` |
 | Description | `Personal developer tool used by the account owner to publish posts to their own X profile.` |
-| Website URL | `https://github.com/ychetka/ai_trading` (the repo URL already registered as the LinkedIn app's privacy/website URL - one consistent project identity) |
+| Website URL | `https://github.com/ychetka/ai_trading` (the URL already registered on the LinkedIn app per session record - verify against `PLATFORM_ACCESS.md`; one consistent project identity) |
 | Use case / justification | `I am building a personal tool that publishes content I have written to my own X account. I review every post before it is sent. The app calls POST /2/tweets with my own credentials; it does not read other users' data, does not post on behalf of anyone else, and does not run ads.` |
 | Callback / redirect URLs | none needed - OAuth 1.0a user context mints owner tokens in-portal; leave empty unless the form forces a value (then reuse the website URL) |
 | Project name | `shared-person` (or the portal default) |
@@ -109,8 +109,10 @@ Notes for the approver:
 - `docker-compose.yml` n8n env gains passthrough entries
   (`X_API_KEY=${X_API_KEY:-}` style - optional like the `LINKEDIN_*`
   vars, NOT `${VAR:?}` guards: X must not become a boot blocker).
-- Secrets handling rule: values move through the established
-  upload-secrets/`../ENV` flow only. They are never committed, never
+- Secrets handling rule: values move into `../ENV` only - the
+  repo-external env file (never committed), edited/appended
+  directly like the `VK_*`/`LINKEDIN_*` keys already there; no
+  separate upload tooling exists. They are never committed, never
   pasted into tickets/docs, and join the scrub sets
   (`scrub()`/`KNOWN_TOKENS` in sp-publish, `SECRET_VALUES` in
   sp-tg-moderation) when the driver lands (x-twitter-driver-spec

@@ -120,7 +120,15 @@ test?, retries?}`.
 - Media: `image_path` is the КДПВ (header image); `media[]` carries
   inline figures. All paths resolve through the same
   `resolveMedia`/under-root rules; the recipe gets the resolved
-  absolute paths only (see 2.4) - never raw draft paths.
+  absolute paths only (see 2.4) - never raw draft paths. Boundary
+  rule: `resolveMedia` returns CONTAINER paths under the n8n mount
+  (`/home/node/materials/<rel>`), but hands-agent and its
+  file-chooser attach run on the HOST where the same tree is the
+  compose bind-mount source (docker-compose.yml:
+  `../materials:/home/node/materials:ro`). The driver must
+  translate at enqueue - `/home/node/materials/<rel>` ->
+  `<repo>/../materials/<rel>` (the host-side materials dir) - so
+  the queue payload carries the host-side path only.
 
 ### 2.3 Auth model - no API, no credentials
 
@@ -202,9 +210,13 @@ A recipe failure after the "Опубликовать" click is the transport-los
 analog: the article may be live while the result file never arrived.
 Probe (habr-integration-spec 2.4): open the profile publications page
 (`HABR_PROFILE_URL` or the recipe's own profile read) and `dom_text`
--match the publication title (exact title match - Habr titles are
-unique per account, so no normalized-prefix ambiguity like the API
-probes). A hit recovers the article URL into `external_ids` on a
+-match the publication title: exact title match bounded by a recency
+window (recent entries on the publications page only). "Habr titles
+are unique per account" is an assumption to verify at probe-build
+time, not a documented platform guarantee - the recency bound is
+what removes the ambiguity the API probes handle with
+normalized-prefix rules. A hit recovers the article URL into
+`external_ids` on a
 `failed` + `maybe_live` registry event - same fold semantics as the
 VK/LI/X probes. An empty probe leaves `external_ids` absent and the
 operator hand-off names the last confirmed recipe step.
