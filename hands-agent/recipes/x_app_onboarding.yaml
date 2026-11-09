@@ -8,17 +8,24 @@
 # START -> supervised run. No unsupervised queue use.
 #
 # Params: account_name (required), use_case (required), out_dir
-# (required - run-record directory; see KEY HANDLING below).
+# (operator context only - NOT consumed by any step below; carried
+# for the run-record directory convention, see KEY HANDLING).
 #
 # Preconditions:
 # - Audit Chrome profile (CDP :9223), logged in to x.com as
 #   @varenicX. developer.x.com confirmed to redirect to
 #   console.x.com/onboarding (exploration 2026-11-08) - onboarding
 #   was never completed, no apps/keys exist.
-# - EN UI. Portal DOM past the onboarding form is UNEXPLORED: every
-#   click_dom target in phases 3-5 below is a FIRST-RUN DRAFT marked
-#   UNVERIFIED - a miss fails closed (step error -> queue/failed/),
-#   which IS the abort convention.
+# - EN UI. Portal DOM past the onboarding form is UNEXPLORED: phases
+#   3-5 below are FIRST-RUN CLICK-SKELETONS - navigation clicks +
+#   audit shots only, no typing. The recipe is EXPECTED to fail
+#   closed at the first portal form that needs text input (project/
+#   app creation asks app_name/website_url/description fields); a
+#   miss or a typing wall ends the run as a failed task (step error
+#   -> queue/failed/), which IS the abort convention. Steps to type
+#   the app metadata (draft values in runbook section 3, future
+#   app_name/website_url params) are a deliberate follow-up - not
+#   written until the live DOM is seen once.
 #
 # EARLY-EXIT / ESCALATION CONVENTION (the DSL has no park/resume):
 # - Any wall the recipe cannot cross ends the run as a failed task:
@@ -40,11 +47,14 @@
 #   state".
 #
 # KEY HANDLING: credential values NEVER enter the recipe log, the
-# chat, or queue payloads. The recipe only navigates to the
-# Keys-and-tokens page and shoots the audit trail; extraction/copy is
-# done by the operator (or local tooling via cdp.py reads) into
-# "{out_dir}/x_keys.json" written locally with mode 600 - hands
-# writes the file on disk, not to the conversation.
+# chat, queue payloads or shot PNGs - the recipe deliberately takes
+# NO screenshot of the Keys-and-tokens page (a keys PNG would commit
+# API secrets into queue/done/, which lives in the repo). The recipe
+# only navigates there; extraction/copy is operator-side: the four
+# values move into ../ENV (repo-external env file, never committed -
+# runbook section 4) as X_API_KEY/X_API_SECRET/X_ACCESS_TOKEN/
+# X_ACCESS_SECRET. {out_dir} remains operator context; no step reads
+# it.
 name: x_app_onboarding
 steps:
   # ---- Phase 1: open the portal -------------------------------------
@@ -86,12 +96,18 @@ steps:
   - action: shot
     name: xonb_3_usecase.png
   # Developer Agreement checkbox - operator-approved acceptance per
-  # the runbook checklist. UNVERIFIED: if the box is a <label> outside
-  # click_dom's selector set, replace with locate("Developer Agreement
-  # checkbox") + click pos. The next shot audits the tick.
-  - action: click_dom
-    url: console.x.com
-    target: "Developer Agreement"
+  # the runbook checklist. PRIMARY path = vision locate + OS click:
+  # click_dom "Developer Agreement" would hit the agreement HYPERLINK
+  # and navigate away mid-form. (click_dom fallback if locate ever
+  # misses: a longer label-text target like "I agree to" avoids the
+  # link collision - verify the exact label wording at run.) The next
+  # shot audits the tick.
+  - action: locate
+    target: "Developer Agreement checkbox"
+    hint: "onboarding form, below the use-case textarea"
+    into: pos
+  - action: click
+    pos: pos
   - action: wait
     seconds: 1
   # Marketing/updates checkbox: left UNTICKED by design - no step.
@@ -151,17 +167,16 @@ steps:
   - action: shot
     name: xonb_9_saved.png
   # ---- Phase 5: Keys and tokens (runbook steps 5-7) ------------------
-  # Navigate to the keys page only. VALUES are never typed, pasted or
-  # logged by this recipe - the operator extracts API Key/Secret +
-  # Access Token/Secret and writes "{out_dir}/x_keys.json" locally
-  # (mode 600); see KEY HANDLING in the header.
+  # Navigate to the keys page only - NO shot here: a keys-page PNG
+  # would commit API secrets into queue/done/ (secrets find, PR #73).
+  # The click_dom + wait prove navigation; operator extraction of API
+  # Key/Secret + Access Token/Secret into ../ENV IS the audit (see
+  # KEY HANDLING in the header).
   - action: click_dom
     url: console.x.com
     target: "Keys and tokens"
   - action: wait
     seconds: 3
-  - action: shot
-    name: xonb_10_keys.png
   # ---- Phase 6: handle verify (runbook step 8) ----------------------
   # Confirm X_HANDLE = "varenicX" (no @) on the profile page; a
   # mismatch = abort-and-escalate (wrong account). Final audit shot.

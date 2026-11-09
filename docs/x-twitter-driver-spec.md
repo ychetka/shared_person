@@ -287,12 +287,13 @@ hands-agent - the same session model VK/FB/IG/LI already use.
   works. Under `PUBLISH_SIMULATE` the driver still emits `sim-*`
   and enqueues NOTHING (the recipe would post for real).
 - Mechanism: driver drops `{"recipe": "x_post", "params": {"text":
-  ..., "image_path": "...", "text2": "..."}}` into
+  ..., "image_path": "...", "text2": "...", "publish_label":
+  "Post"|"Post all"}}` into
   `hands-agent/queue/inbox/` instead of calling the API; the recipe
   (`hands-agent/recipes/x_post.yaml` - written, not yet run; its
   first run is supervised and gated on an explicit developer START)
   would drive x.com's web composer in the audit-profile tab
-  (`dom_find`/`click_dom` via `cdp.py` on the `x.com` target +
+  (`dom_find`/`click_dom` via `cdp.py` on the `x.com/home` target +
   OS-level `type`; per-step `shot` audit trail into `queue/done/`
   per hands-agent UX rules - verify before click, dismiss overlays
   first). Composer anatomy verified live 2026-11-09 (@varenicX
@@ -301,13 +302,20 @@ hands-agent - the same session model VK/FB/IG/LI already use.
   element pre-dialog) opens the compose `[role=dialog]`;
   `tweetTextarea_0` (`aria-label "Post text"`) autofocuses;
   `Add photos or video` -> hidden file input -> GTK file chooser
-  (ctrl+l -> path -> Return); the dialog's Post button is
-  `[data-testid=tweetButton]` with text "Post". `dom_rect`'s
+  (ctrl+l -> path -> Return); the dialog's publish button is
+  `[data-testid=tweetButton]` with text "Post" - or "Post all" when
+  a thread second post is attached. The driver passes
+  `publish_label`: "Post" for a single post, "Post all" when
+  `text2` is set. In SINGLE-POST mode `dom_rect`'s
   smallest-exact-match rule disambiguates the two 'Post' elements:
   inside the open dialog the smaller `tweetButton` wins over the
-  larger nav `Post`. The thread add-post "+" button (expected
-  `data-testid=addButton`) is UNVERIFIED - the recipe's `text2`
-  branch is marked for first-run verification.
+  larger nav `Post`. In THREAD mode "Post" exact-matches ONLY the
+  nav button behind the modal (the dialog button no longer reads
+  "Post"), so an unconditional "Post" target would click the nav
+  button and return ok:true with nothing published - `publish_label`
+  exists to prevent that silent false-success. The thread add-post
+  "+" button (expected `data-testid=addButton`) is UNVERIFIED - the
+  recipe's `text2` branch is marked for first-run verification.
 - Preconditions (same gaps the Habr spec already tracks - resolve
   once for both): a `set_clipboard`/insert action for >280-char
   fields is NOT needed (tweets are short enough for jittered
