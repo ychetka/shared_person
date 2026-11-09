@@ -287,12 +287,27 @@ hands-agent - the same session model VK/FB/IG/LI already use.
   works. Under `PUBLISH_SIMULATE` the driver still emits `sim-*`
   and enqueues NOTHING (the recipe would post for real).
 - Mechanism: driver drops `{"recipe": "x_post", "params": {"text":
-  ..., "image_paths": [...]}}` into `hands-agent/queue/inbox/`
-  instead of calling the API; the recipe drives x.com's web
-  composer in the audit-profile tab (`dom_find`/`click_dom` via
-  `cdp.py` on the `x.com` target + OS-level `type`; per-step
-  `shot` audit trail into `queue/done/` per hands-agent UX rules -
-  verify before click, dismiss overlays first).
+  ..., "image_path": "...", "text2": "..."}}` into
+  `hands-agent/queue/inbox/` instead of calling the API; the recipe
+  (`hands-agent/recipes/x_post.yaml` - written, not yet run; its
+  first run is supervised and gated on an explicit developer START)
+  would drive x.com's web composer in the audit-profile tab
+  (`dom_find`/`click_dom` via `cdp.py` on the `x.com` target +
+  OS-level `type`; per-step `shot` audit trail into `queue/done/`
+  per hands-agent UX rules - verify before click, dismiss overlays
+  first). Composer anatomy verified live 2026-11-09 (@varenicX
+  session, EN UI, audit browser CDP :9223): left-nav `Post`
+  (`[data-testid=SideNav_NewTweet_Button]`, the only exact-'Post'
+  element pre-dialog) opens the compose `[role=dialog]`;
+  `tweetTextarea_0` (`aria-label "Post text"`) autofocuses;
+  `Add photos or video` -> hidden file input -> GTK file chooser
+  (ctrl+l -> path -> Return); the dialog's Post button is
+  `[data-testid=tweetButton]` with text "Post". `dom_rect`'s
+  smallest-exact-match rule disambiguates the two 'Post' elements:
+  inside the open dialog the smaller `tweetButton` wins over the
+  larger nav `Post`. The thread add-post "+" button (expected
+  `data-testid=addButton`) is UNVERIFIED - the recipe's `text2`
+  branch is marked for first-run verification.
 - Preconditions (same gaps the Habr spec already tracks - resolve
   once for both): a `set_clipboard`/insert action for >280-char
   fields is NOT needed (tweets are short enough for jittered
