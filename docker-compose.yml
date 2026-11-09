@@ -113,6 +113,13 @@ services:
       # refuses while a rewrite is in flight). Both Code nodes fall
       # back to 900000 (15min) when this is unset/empty.
       - REWRITE_WINDOW_MS=${REWRITE_WINDOW_MS:-}
+      # content-gen dispatch timeout (ms) for the two bounded
+      # httpRequest dispatches in Handle TG Update ('post N' and the
+      # edit 'rewrite' call): generation runs ~300s but drafts arrive
+      # through moderation-draft on their own, so the call only hands
+      # the brief off and a timeout counts as DISPATCHED. Falls back
+      # to 15000 (15s) when unset/empty; 1000ms floor.
+      - CONTENT_GEN_DISPATCH_MS=${CONTENT_GEN_DISPATCH_MS:-}
       # platform tokens for the publish workflow (optional - VK can run
       # on the refresh-service token; non-VK platforms go to skipped/)
       - VK_ACCESS_TOKEN=${VK_ACCESS_TOKEN:-}

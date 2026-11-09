@@ -28,7 +28,21 @@
 //       async' logged and the operator told 'sent to content-gen' -
 //       while ECONNREFUSED stays a real 'post_n-dispatch-failed';
 //   D2  the httpRequest for content-gen carries the bounded
-//       CONTENT_GEN_DISPATCH_MS timeout, not the old 300000.
+//       CONTENT_GEN_DISPATCH_MS timeout, not the old 300000;
+//   D3  an unset/empty CONTENT_GEN_DISPATCH_MS env falls back to the
+//       15000 default (the || fallback sits INSIDE Math.max - on the
+//       clamped value the 1000 floor is already truthy and the
+//       fallback could never fire), a configured value reaches the
+//       request, and a sub-floor value clamps to 1000;
+//   E1  replace-mode busy: a live foreign draft lock makes the edit
+//       feedback answer 'busy - resend the corrected text' AND re-arm
+//       pending_edit.json (the entry read already consumed it, so
+//       without the re-arm the resent text falls through to the
+//       generic reply); after the lock clears the resend lands
+//       verbatim;
+//   E2  comment-mode busy: same re-arm contract on the rewrite arm
+//       ('busy - resend the comments'); after the lock clears the
+//       resend dispatches mode:'rewrite' to content-gen.
 //
 // Sandbox contract: same stub style as check_card_ux.js - require
 // ('fs') is an in-memory filesystem (the jsCode paths are hardcoded
@@ -514,9 +528,10 @@ const main = async () => {
   }
 
   // --- D1 dispatch timeout = DISPATCHED, refused transport = fail -
-  const runPostN = async (cgError) => {
+  const runPostN = async (cgError, env) => {
     const sc = mkSc();
     seed(sc.fakeFs);
+    sc.env = env || {};
     sc.fakeFs.writeFileSync(
       `${STATE}/digest.json`,
       JSON.stringify({
@@ -608,6 +623,158 @@ const main = async () => {
       "D2 accepted dispatch still says 'sent to content-gen'",
       !!ok && /sent to content-gen/.test(String(ok.body.text)),
       ok && ok.body.text,
+    );
+  }
+
+  // --- D3 env fallback: unset -> 15000, knob usable, floor clamp --
+  {
+    // the compose passthrough writes ${VAR:-}, so a missing and an
+    // empty CONTENT_GEN_DISPATCH_MS both reach $env as '' - an empty
+    // string covers the unset case. The buggy order clamped '' to the
+    // 1000 floor first and '|| 15000' on that truthy floor could
+    // never fire: the effective timeout silently became 1s
+    const sc = await runPostN(null, { CONTENT_GEN_DISPATCH_MS: "" });
+    const cg = sc.cgCalls[0];
+    check(
+      "D3 unset env: dispatch timeout falls back to 15000",
+      !!cg && cg.timeout === 15000,
+      cg && cg.timeout,
+    );
+  }
+  {
+    const sc = await runPostN(null, { CONTENT_GEN_DISPATCH_MS: "45000" });
+    const cg = sc.cgCalls[0];
+    check(
+      "D3 env knob: a configured value reaches the request",
+      !!cg && cg.timeout === 45000,
+      cg && cg.timeout,
+    );
+  }
+  {
+    const sc = await runPostN(null, { CONTENT_GEN_DISPATCH_MS: "500" });
+    const cg = sc.cgCalls[0];
+    check(
+      "D3 env floor: a sub-floor value clamps to 1000",
+      !!cg && cg.timeout === 1000,
+      cg && cg.timeout,
+    );
+  }
+
+  // --- E busy edit feedback: marker re-armed, resend lands --------
+  // pend.chat_id is a NUMBER in the real marker (the 'ed'/'rw'
+  // callbacks arm it from cb.message.chat.id) and ===-compared
+  // against m.chat.id - keep the seeded shape identical
+  const armPend = (sc, mode) => {
+    sc.fakeFs.writeFileSync(
+      `${STATE}/pending_edit.json`,
+      JSON.stringify({
+        chat_id: Number(BASE_ENV.TELEGRAM_CHAT_ID),
+        draft_id: "d7",
+        message_id: 555,
+        mode,
+      }),
+    );
+  };
+  const feedbackItem = (text, updateId) =>
+    tgItem(
+      {
+        message: {
+          chat: { id: Number(BASE_ENV.TELEGRAM_CHAT_ID) },
+          text,
+        },
+      },
+      updateId,
+    );
+  {
+    // replace mode: the busy reply must re-arm the marker it just
+    // consumed, or the resent text falls through to the generic reply
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    seedDraft(sc.fakeFs, "d7");
+    armPend(sc, "replace");
+    holdLock(sc.fakeFs, "draft-d7", 30000);
+    sc.items = [feedbackItem("the first corrected text", 9301)];
+    await execNode(htuFactory, sc);
+    const busy = sc.tgCalls.find(
+      (c) =>
+        c.method === "sendMessage" &&
+        /busy in a parallel update - resend the corrected text/.test(String(c.body.text)),
+    );
+    check("E1 replace-busy: resend hint sent", !!busy,
+      JSON.stringify(sc.tgCalls.map((c) => c.body.text)));
+    check(
+      "E1 replace-busy: 'edit-replace-lock-busy' logged",
+      logLines(sc.fakeFs).some((l) => l.action === "edit-replace-lock-busy"),
+    );
+    const pend = readJson(sc.fakeFs, `${STATE}/pending_edit.json`);
+    check(
+      "E1 replace-busy: marker re-armed for the resend",
+      !!pend && pend.draft_id === "d7" && pend.mode === "replace",
+      JSON.stringify(pend),
+    );
+    // the foreign lock clears; the resend must now reach the replace
+    // path instead of the generic reply
+    sc.fakeFs.unlinkSync(`${LOCKS}/draft-d7.lock`);
+    sc.items = [feedbackItem("the resent corrected text", 9302)];
+    await execNode(htuFactory, sc);
+    const d = readJson(sc.fakeFs, `${DRAFTS}/d7.json`);
+    check(
+      "E1 replace-resend: text landed verbatim in the draft",
+      !!d && d.text === "the resent corrected text",
+      d && d.text,
+    );
+    check(
+      "E1 replace-resend: marker consumed by the landed edit",
+      !sc.fakeFs.existsSync(`${STATE}/pending_edit.json`),
+    );
+  }
+  {
+    // comment mode: same re-arm contract on the rewrite arm
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    seedDraft(sc.fakeFs, "d7");
+    armPend(sc, "comment");
+    holdLock(sc.fakeFs, "draft-d7", 30000);
+    sc.items = [feedbackItem("please shorten the intro", 9311)];
+    await execNode(htuFactory, sc);
+    const busy = sc.tgCalls.find(
+      (c) =>
+        c.method === "sendMessage" &&
+        /busy in a parallel update - resend the comments/.test(String(c.body.text)),
+    );
+    check("E2 comment-busy: resend hint sent", !!busy,
+      JSON.stringify(sc.tgCalls.map((c) => c.body.text)));
+    check(
+      "E2 comment-busy: 'edit-lock-busy' logged",
+      logLines(sc.fakeFs).some((l) => l.action === "edit-lock-busy"),
+    );
+    const pend = readJson(sc.fakeFs, `${STATE}/pending_edit.json`);
+    check(
+      "E2 comment-busy: marker re-armed for the resend",
+      !!pend && pend.draft_id === "d7" && pend.mode === "comment",
+      JSON.stringify(pend),
+    );
+    // resend after the lock clears: the rewrite arm must run and the
+    // feedback must reach content-gen as mode:'rewrite'
+    sc.fakeFs.unlinkSync(`${LOCKS}/draft-d7.lock`);
+    sc.items = [feedbackItem("please shorten the intro", 9312)];
+    await execNode(htuFactory, sc);
+    const d = readJson(sc.fakeFs, `${DRAFTS}/d7.json`);
+    check(
+      "E2 comment-resend: draft armed to 'rewrite'",
+      !!d && d.status === "rewrite",
+      d && d.status,
+    );
+    check(
+      "E2 comment-resend: feedback dispatched as mode:'rewrite'",
+      sc.cgCalls.some(
+        (c) =>
+          c.body &&
+          c.body.mode === "rewrite" &&
+          c.body.draft_id === "d7" &&
+          c.body.feedback === "please shorten the intro",
+      ),
+      JSON.stringify(sc.cgCalls.map((c) => c.body)),
     );
   }
 
