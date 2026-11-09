@@ -44,8 +44,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const WF = path.join(__dirname, "..", "n8n", "workflows",
-  "sp-tg-moderation.json");
+const WF = path.join(__dirname, "..", "n8n", "workflows", "sp-tg-moderation.json");
 const spec = JSON.parse(fs.readFileSync(WF, "utf8"));
 const nodeOf = (name) => spec.nodes.find((n) => n.name === name);
 const factoryOf = (name) => {
@@ -54,8 +53,13 @@ const factoryOf = (name) => {
     console.error(`FAIL: ${name} jsCode not found in ${WF}`);
     process.exit(1);
   }
-  return new Function("require", "$input", "$env", "$",
-    `return (async function () {\n${code}\n});`);
+  return new Function(
+    "require",
+    "$input",
+    "$env",
+    "$",
+    `return (async function () {\n${code}\n});`,
+  );
 };
 const htuFactory = factoryOf("Handle TG Update");
 const prepFactory = factoryOf("Prepare Draft");
@@ -72,9 +76,7 @@ const mkFs = () => {
   const err = (code) => Object.assign(new Error(code), { code });
   const fileNode = (content) => ({
     dir: false,
-    content: Buffer.isBuffer(content)
-      ? Buffer.from(content)
-      : Buffer.from(String(content ?? "")),
+    content: Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(String(content ?? "")),
     ino: inoSeq++,
     mtimeMs: Date.now(),
   });
@@ -107,8 +109,7 @@ const mkFs = () => {
       if (!n || !n.dir) throw err("ENOENT");
       const out = [];
       for (const k of nodes.keys()) {
-        if (k !== d && norm(path.posix.dirname(k)) === d &&
-            !k.slice(d.length + 1).includes("/")) {
+        if (k !== d && norm(path.posix.dirname(k)) === d && !k.slice(d.length + 1).includes("/")) {
           out.push(k.slice(d.length + 1));
         }
       }
@@ -128,8 +129,7 @@ const mkFs = () => {
       if (!nodes.has(norm(path.posix.dirname(p)))) throw err("ENOENT");
       const n = nodes.get(p) || fileNode(data);
       n.dir = false;
-      n.content = Buffer.isBuffer(data)
-        ? Buffer.from(data) : Buffer.from(String(data));
+      n.content = Buffer.isBuffer(data) ? Buffer.from(data) : Buffer.from(String(data));
       n.mtimeMs = Date.now();
       nodes.set(p, n);
     },
@@ -208,8 +208,7 @@ const mkFs = () => {
       if (!h) throw err("EBADF");
       const n = nodes.get(h.p);
       if (!n || n.dir) throw err("ENOENT");
-      const src = n.content.subarray(pos == null ? h.pos : pos,
-        (pos == null ? h.pos : pos) + len);
+      const src = n.content.subarray(pos == null ? h.pos : pos, (pos == null ? h.pos : pos) + len);
       src.copy(buf, off);
       const read = src.length;
       if (pos == null) h.pos += read;
@@ -220,11 +219,9 @@ const mkFs = () => {
       if (!h) throw err("EBADF");
       const n = nodes.get(h.p);
       if (!n || n.dir) throw err("ENOENT");
-      const chunk = Buffer.isBuffer(buf)
-        ? buf.subarray(off, off + len) : Buffer.from(String(buf));
+      const chunk = Buffer.isBuffer(buf) ? buf.subarray(off, off + len) : Buffer.from(String(buf));
       const at = pos == null ? n.content.length : pos;
-      const grown = Buffer.alloc(Math.max(at + chunk.length,
-        n.content.length));
+      const grown = Buffer.alloc(Math.max(at + chunk.length, n.content.length));
       n.content.copy(grown);
       chunk.copy(grown, at);
       n.content = grown;
@@ -255,8 +252,11 @@ const BASE_ENV = {
 
 const logLines = (fakeFs) => {
   try {
-    return fakeFs.readFileSync(`${LOG}/moderation.jsonl`, "utf8")
-      .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    return fakeFs
+      .readFileSync(`${LOG}/moderation.jsonl`, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
   } catch (_e) {
     return [];
   }
@@ -304,8 +304,12 @@ const mkHelpers = (sc) => ({
 });
 
 const execNode = async (factory, sc) => {
-  const fn = factory((m) => (m === "fs" ? sc.fakeFs : require(m)),
-    { all: () => sc.items }, { ...BASE_ENV, ...(sc.env || {}) }, null);
+  const fn = factory(
+    (m) => (m === "fs" ? sc.fakeFs : require(m)),
+    { all: () => sc.items },
+    { ...BASE_ENV, ...(sc.env || {}) },
+    null,
+  );
   const out = await fn.call({ helpers: mkHelpers(sc) });
   return out;
 };
@@ -318,18 +322,22 @@ const tgItem = (body, updateId) => ({
     body: { update_id: updateId, ...body },
   },
 });
-const cbItem = (data, updateId) => tgItem({
-  callback_query: {
-    id: `cbq-${updateId}`,
-    data,
-    message: {
-      chat: { id: Number(BASE_ENV.TELEGRAM_CHAT_ID) },
-      message_id: 555,
-      text: "[DRAFT d1] preview text",
-      reply_markup: { inline_keyboard: [[{ text: "Approve" }]] },
+const cbItem = (data, updateId) =>
+  tgItem(
+    {
+      callback_query: {
+        id: `cbq-${updateId}`,
+        data,
+        message: {
+          chat: { id: Number(BASE_ENV.TELEGRAM_CHAT_ID) },
+          message_id: 555,
+          text: "[DRAFT d1] preview text",
+          reply_markup: { inline_keyboard: [[{ text: "Approve" }]] },
+        },
+      },
     },
-  },
-}, updateId);
+    updateId,
+  );
 
 const mkSc = (extra) => ({
   fakeFs: mkFs(),
@@ -344,30 +352,36 @@ const mkSc = (extra) => ({
 });
 
 const seedDraft = (fakeFs, id, fields) => {
-  fakeFs.writeFileSync(`${DRAFTS}/${id}.json`, JSON.stringify({
-    id,
-    platform: "vk",
-    topic: "t",
-    text: "draft text one",
-    image: "",
-    media: [],
-    caption_note: "",
-    scope: "",
-    post_id: "p1",
-    test: false,
-    warnings: [],
-    status: "pending",
-    message_id: 555,
-    preview_v: "v1",
-    created_at: new Date().toISOString(),
-    ...fields,
-  }));
+  fakeFs.writeFileSync(
+    `${DRAFTS}/${id}.json`,
+    JSON.stringify({
+      id,
+      platform: "vk",
+      topic: "t",
+      text: "draft text one",
+      image: "",
+      media: [],
+      caption_note: "",
+      scope: "",
+      post_id: "p1",
+      test: false,
+      warnings: [],
+      status: "pending",
+      message_id: 555,
+      preview_v: "v1",
+      created_at: new Date().toISOString(),
+      ...fields,
+    }),
+  );
 };
 const holdLock = (fakeFs, key, liveMs) => {
-  fakeFs.writeFileSync(`${LOCKS}/${key}.lock`, JSON.stringify({
-    token: "foreign-exec",
-    exp: Date.now() + liveMs,
-  }));
+  fakeFs.writeFileSync(
+    `${LOCKS}/${key}.lock`,
+    JSON.stringify({
+      token: "foreign-exec",
+      exp: Date.now() + liveMs,
+    }),
+  );
 };
 
 let failures = 0;
@@ -389,16 +403,18 @@ const main = async () => {
     sc.items = [cbItem("ap:d1:v1", 9001)];
     await execNode(htuFactory, sc);
     const d = readJson(sc.fakeFs, `${DRAFTS}/d1.json`);
-    check("L1 approve: draft flipped to 'approved'",
-      d && d.status === "approved", d && d.status);
-    check("L1 approve: queue file landed in publish root",
-      sc.fakeFs.existsSync(`${PUBLISH}/d1.json`));
-    check("L1 approve: draft lock released",
-      !sc.fakeFs.existsSync(`${LOCKS}/draft-d1.lock`));
+    check("L1 approve: draft flipped to 'approved'", d && d.status === "approved", d && d.status);
+    check(
+      "L1 approve: queue file landed in publish root",
+      sc.fakeFs.existsSync(`${PUBLISH}/d1.json`),
+    );
+    check("L1 approve: draft lock released", !sc.fakeFs.existsSync(`${LOCKS}/draft-d1.lock`));
     const ans = sc.tgCalls.find((c) => c.method === "answerCallbackQuery");
-    check("L1 approve: operator toast sent",
+    check(
+      "L1 approve: operator toast sent",
       !!ans && /queued/i.test(String(ans.body.text)),
-      ans && ans.body.text);
+      ans && ans.body.text,
+    );
   }
 
   // --- L2 interleaved executions: one transition + one busy -------
@@ -419,22 +435,29 @@ const main = async () => {
     s2.items = [cbItem("ap:d1:v1", 9003)];
     await execNode(htuFactory, s2);
     const d2 = readJson(s2.fakeFs, `${DRAFTS}/d1.json`);
-    const ans2 = s2.tgCalls.find(
-      (c) => c.method === "answerCallbackQuery");
-    check("L2 interleave: first exec transitioned once",
-      t1 && t1.status === "approved" &&
-        s1.fakeFs.existsSync(`${PUBLISH}/d1.json`));
-    check("L2 interleave: second exec busy-answers, no transition",
+    const ans2 = s2.tgCalls.find((c) => c.method === "answerCallbackQuery");
+    check(
+      "L2 interleave: first exec transitioned once",
+      t1 && t1.status === "approved" && s1.fakeFs.existsSync(`${PUBLISH}/d1.json`),
+    );
+    check(
+      "L2 interleave: second exec busy-answers, no transition",
       !!ans2 &&
         /Busy - try again in a moment/.test(String(ans2.body.text)) &&
         ans2.body.show_alert === false &&
-        d2 && d2.status === "pending" &&
+        d2 &&
+        d2.status === "pending" &&
         !s2.fakeFs.existsSync(`${PUBLISH}/d1.json`),
-      JSON.stringify({ ans: ans2 && ans2.body, st: d2 && d2.status }));
-    check("L2 interleave: 'approve-lock-busy' logged",
-      logLines(s2.fakeFs).some((l) => l.action === "approve-lock-busy"));
-    check("L2 interleave: foreign lock left untouched",
-      s2.fakeFs.existsSync(`${LOCKS}/draft-d1.lock`));
+      JSON.stringify({ ans: ans2 && ans2.body, st: d2 && d2.status }),
+    );
+    check(
+      "L2 interleave: 'approve-lock-busy' logged",
+      logLines(s2.fakeFs).some((l) => l.action === "approve-lock-busy"),
+    );
+    check(
+      "L2 interleave: foreign lock left untouched",
+      s2.fakeFs.existsSync(`${LOCKS}/draft-d1.lock`),
+    );
   }
 
   // --- L3 stale lock steal + release ------------------------------
@@ -446,16 +469,17 @@ const main = async () => {
     sc.items = [cbItem("ap:d1:v1", 9004)];
     await execNode(htuFactory, sc);
     const d = readJson(sc.fakeFs, `${DRAFTS}/d1.json`);
-    check("L3 steal: expired lock stolen, approve completed",
-      d && d.status === "approved" &&
-        sc.fakeFs.existsSync(`${PUBLISH}/d1.json`),
-      d && d.status);
-    check("L3 steal: stolen lock released after use",
-      !sc.fakeFs.existsSync(`${LOCKS}/draft-d1.lock`));
-    const leftovers = sc.fakeFs.readdirSync(LOCKS)
-      .filter((f) => f.includes("draft-d1"));
-    check("L3 steal: no lock/tmp debris left",
-      leftovers.length === 0, leftovers.join(","));
+    check(
+      "L3 steal: expired lock stolen, approve completed",
+      d && d.status === "approved" && sc.fakeFs.existsSync(`${PUBLISH}/d1.json`),
+      d && d.status,
+    );
+    check(
+      "L3 steal: stolen lock released after use",
+      !sc.fakeFs.existsSync(`${LOCKS}/draft-d1.lock`),
+    );
+    const leftovers = sc.fakeFs.readdirSync(LOCKS).filter((f) => f.includes("draft-d1"));
+    check("L3 steal: no lock/tmp debris left", leftovers.length === 0, leftovers.join(","));
   }
 
   // --- L4 Prepare Draft busy -> in-band refusal -------------------
@@ -463,100 +487,128 @@ const main = async () => {
     const sc = mkSc();
     seed(sc.fakeFs);
     holdLock(sc.fakeFs, "draft-d2", 30000);
-    sc.items = [{
-      json: {
-        headers: { "x-shared-token": BASE_ENV.DRAFT_WEBHOOK_SECRET },
-        body: {
-          draft_id: "d2",
-          platform: "vk",
-          topic: "t",
-          text: "fresh draft text",
+    sc.items = [
+      {
+        json: {
+          headers: { "x-shared-token": BASE_ENV.DRAFT_WEBHOOK_SECRET },
+          body: {
+            draft_id: "d2",
+            platform: "vk",
+            topic: "t",
+            text: "fresh draft text",
+          },
         },
       },
-    }];
+    ];
     const out = await execNode(prepFactory, sc);
     const msg = (out || []).find((i) => i.json && i.json.kind === "msg");
-    check("L4 prepare: live lock -> in-band ok:false refusal",
-      !!msg && msg.json.ok === false &&
-        /busy/i.test(String(msg.json.error)),
-      msg && JSON.stringify(msg.json));
-    check("L4 prepare: busy refusal did not write a draft",
-      !sc.fakeFs.existsSync(`${DRAFTS}/d2.json`));
+    check(
+      "L4 prepare: live lock -> in-band ok:false refusal",
+      !!msg && msg.json.ok === false && /busy/i.test(String(msg.json.error)),
+      msg && JSON.stringify(msg.json),
+    );
+    check(
+      "L4 prepare: busy refusal did not write a draft",
+      !sc.fakeFs.existsSync(`${DRAFTS}/d2.json`),
+    );
   }
 
   // --- D1 dispatch timeout = DISPATCHED, refused transport = fail -
   const runPostN = async (cgError) => {
     const sc = mkSc();
     seed(sc.fakeFs);
-    sc.fakeFs.writeFileSync(`${STATE}/digest.json`, JSON.stringify({
-      "2025-01-01": {
-        1: {
-          id: "i1", title: "Story", source: "src",
-          url: "https://example.com/x", hype: 88,
+    sc.fakeFs.writeFileSync(
+      `${STATE}/digest.json`,
+      JSON.stringify({
+        "2025-01-01": {
+          1: {
+            id: "i1",
+            title: "Story",
+            source: "src",
+            url: "https://example.com/x",
+            hype: 88,
+          },
         },
-      },
-    }));
-    sc.items = [tgItem({
-      message: {
-        chat: { id: Number(BASE_ENV.TELEGRAM_CHAT_ID) },
-        text: "post 1",
-      },
-    }, 9100 + Math.floor(Math.random() * 1000))];
+      }),
+    );
+    sc.items = [
+      tgItem(
+        {
+          message: {
+            chat: { id: Number(BASE_ENV.TELEGRAM_CHAT_ID) },
+            text: "post 1",
+          },
+        },
+        9100 + Math.floor(Math.random() * 1000),
+      ),
+    ];
     sc.cgError = cgError;
     await execNode(htuFactory, sc);
     return sc;
   };
   {
     const sc = await runPostN(
-      Object.assign(new Error("timeout of 15000ms exceeded"),
-        { code: "ECONNABORTED" }));
+      Object.assign(new Error("timeout of 15000ms exceeded"), { code: "ECONNABORTED" }),
+    );
     const sent = sc.tgCalls.find(
-      (c) => c.method === "sendMessage" &&
-        /sent to content-gen/.test(String(c.body.text)));
-    check("D1 timeout(ECONNABORTED): async-dispatched toast",
-      !!sent && /drafts will arrive as previews/.test(
-        String(sent.body.text)),
-      JSON.stringify(sc.tgCalls.map((c) => c.body.text)));
-    check("D1 timeout: 'post_n-dispatch-async' logged",
-      logLines(sc.fakeFs).some(
-        (l) => l.action === "post_n-dispatch-async"));
-    check("D1 timeout: no 'dispatch-failed' log",
-      !logLines(sc.fakeFs).some(
-        (l) => l.action === "post_n-dispatch-failed"));
+      (c) => c.method === "sendMessage" && /sent to content-gen/.test(String(c.body.text)),
+    );
+    check(
+      "D1 timeout(ECONNABORTED): async-dispatched toast",
+      !!sent && /drafts will arrive as previews/.test(String(sent.body.text)),
+      JSON.stringify(sc.tgCalls.map((c) => c.body.text)),
+    );
+    check(
+      "D1 timeout: 'post_n-dispatch-async' logged",
+      logLines(sc.fakeFs).some((l) => l.action === "post_n-dispatch-async"),
+    );
+    check(
+      "D1 timeout: no 'dispatch-failed' log",
+      !logLines(sc.fakeFs).some((l) => l.action === "post_n-dispatch-failed"),
+    );
+  }
+  {
+    const sc = await runPostN(Object.assign(new Error("socket hang up"), { code: "ETIMEDOUT" }));
+    check(
+      "D1 timeout(ETIMEDOUT): async-dispatched toast",
+      sc.tgCalls.some(
+        (c) => c.method === "sendMessage" && /sent to content-gen/.test(String(c.body.text)),
+      ),
+      JSON.stringify(sc.tgCalls.map((c) => c.body.text)),
+    );
   }
   {
     const sc = await runPostN(
-      Object.assign(new Error("socket hang up"), { code: "ETIMEDOUT" }));
-    check("D1 timeout(ETIMEDOUT): async-dispatched toast",
-      sc.tgCalls.some((c) => c.method === "sendMessage" &&
-        /sent to content-gen/.test(String(c.body.text))),
-      JSON.stringify(sc.tgCalls.map((c) => c.body.text)));
-  }
-  {
-    const sc = await runPostN(
-      Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5780"),
-        { code: "ECONNREFUSED" }));
-    check("D1 refused: 'Generation failed' toast, no async log",
-      sc.tgCalls.some((c) => c.method === "sendMessage" &&
-        /Generation failed/.test(String(c.body.text))) &&
-        !logLines(sc.fakeFs).some(
-          (l) => l.action === "post_n-dispatch-async"),
-      JSON.stringify(sc.tgCalls.map((c) => c.body.text)));
-    check("D1 refused: 'post_n-dispatch-failed' logged",
-      logLines(sc.fakeFs).some(
-        (l) => l.action === "post_n-dispatch-failed"));
+      Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5780"), { code: "ECONNREFUSED" }),
+    );
+    check(
+      "D1 refused: 'Generation failed' toast, no async log",
+      sc.tgCalls.some(
+        (c) => c.method === "sendMessage" && /Generation failed/.test(String(c.body.text)),
+      ) && !logLines(sc.fakeFs).some((l) => l.action === "post_n-dispatch-async"),
+      JSON.stringify(sc.tgCalls.map((c) => c.body.text)),
+    );
+    check(
+      "D1 refused: 'post_n-dispatch-failed' logged",
+      logLines(sc.fakeFs).some((l) => l.action === "post_n-dispatch-failed"),
+    );
   }
 
   // --- D2 bounded dispatch timeout on the request ------------------
   {
     const sc = await runPostN(null);
     const cg = sc.cgCalls[0];
-    check("D2 post-N request carries CONTENT_GEN_DISPATCH_MS",
-      !!cg && cg.timeout === 15000, cg && cg.timeout);
+    check(
+      "D2 post-N request carries CONTENT_GEN_DISPATCH_MS",
+      !!cg && cg.timeout === 15000,
+      cg && cg.timeout,
+    );
     const ok = sc.tgCalls.find((c) => c.method === "sendMessage");
-    check("D2 accepted dispatch still says 'sent to content-gen'",
+    check(
+      "D2 accepted dispatch still says 'sent to content-gen'",
       !!ok && /sent to content-gen/.test(String(ok.body.text)),
-      ok && ok.body.text);
+      ok && ok.body.text,
+    );
   }
 
   if (failures) {
