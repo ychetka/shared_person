@@ -406,7 +406,18 @@ result consumption, `credit_cap` and missing-queue stub fallback),
 the inhouse partner `/run` call + 422 'partner_failed' escalate,
 declared-but-unconfigured external stages -> 'unavailable' cell +
 'stage_unavailable' with zero outbound calls, and the
-regression->revert decide branch.
+regression->revert decide branch. Also covered: the SCORE_STALE_MS
+claim window (one re-enqueue then 'scorer_failed'), the per-task-id
+charge ledger (a crash between inbox rename and run write re-arms
+the same task without double-spending), the crash-after-consume
+`.consumed` re-read, the vetoed rewrite settle on nonce mismatch,
+the `roles/humanizer-partner.yaml` manifest+schema contract compiled
+through ajv (full output shape incl. plan-mode pass-through), the
+partner's `detector_payload {ai_score, marker_spans[]}` input shape,
+>=150-word fixture cells with parsable `*.spans.json` annotations,
+the `humanizer-seed` lock race guard, cross-backend 'best'
+separation (pangram vs stub scores never compare), the 0-100
+threshold clamp, and the spec shipping `active: false`.
 
 ```bash
 node tools/check_humanizer.js   # exit 0 = all checks pass

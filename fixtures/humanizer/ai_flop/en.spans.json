@@ -11,7 +11,7 @@
       "reason": "Meta-announcement filler; the statement that follows carries its own weight."
     },
     {
-      "text": "deliver reliable systems at scale",
+      "text": "deliver dependable systems at scale",
       "marker_type": "generic_claim",
       "reason": "Uncited scale/reliability claim with no concrete object or number."
     },
@@ -21,7 +21,12 @@
       "reason": "Stock importance phrase; no mechanism or evidence attached."
     },
     {
-      "text": "position themselves for lasting long-term success",
+      "text": "Furthermore,",
+      "marker_type": "connector_filler",
+      "reason": "Additive connector that only pads the transition between two list-like claims."
+    },
+    {
+      "text": "position themselves for lasting success",
       "marker_type": "vague_benefit",
       "reason": "Aspirational closer with no measurable outcome."
     },

@@ -5,3 +5,5 @@ The fix was boring. I made the warmer wait on the migration lock, and the whole 
 Open question I keep circling: the credit counter still resets on UTC rollover, and a run that starts at 23:58 can hit the cap two minutes in. I left a note in the trace instead of fixing it properly. The estimate is charged optimistically at enqueue, so the worst case is we over-report spend for a day and reconcile when the results land.
 
 Also, I owe Sasha a review on the retry jitter patch from last week. Tomorrow, probably, unless the queue mount flakes again.
+
+One more thing before I forget: the fixture texts themselves are due a trim. Half of them read like they were written to hit a word count, which - fair, they were. I will get to it once the Friday deploy window closes, right after I figure out why the staging disk filled up with orphaned tmp files again.

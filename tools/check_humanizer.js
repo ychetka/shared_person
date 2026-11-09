@@ -42,11 +42,43 @@
 //   E11 regression: a rescore worse than best by > margin reverts to
 //       best text -> done/'reverted';
 //   E12 no external calls in stub mode: httpRequest is never touched
-//       across the whole stub-mode run matrix.
+//       across the whole stub-mode run matrix;
+//   E13 scorer stale claim: a scorer_pending older than
+//       SCORE_STALE_MS gets ONE re-enqueue (score-stale-clear), a
+//       second stale escalates 'scorer_failed';
+//   E14 charge dedupe: a crash between the inbox rename and the run
+//       write re-arms the SAME deterministic task id without
+//       spending the credit a second time;
+//   E15 crash-after-consume: a landed result renamed to .consumed by
+//       a tick that died before its run write is re-read and scored,
+//       not re-enqueued;
+//   E16 vetoed settle: a rewrite_pending nonce that changed under
+//       the in-flight stage call refuses the settle (no apply);
+//   E17 role contract: roles/humanizer-partner.yaml manifest+schema
+//       compile via ajv and enforce the full output shape
+//       (rewritten_text, edits[]{span_original,span_new,reason},
+//       confidence, recommendation, unchanged_reason, caveats,
+//       additionalProperties:false) incl. the plan-mode pass-through;
+//   E18 fixtures: every <tier>/<lang>.txt is >=150 words (Pangram
+//       floor) and every <lang>.spans.json parses with a non-empty
+//       expected_spans;
+//   E19 seed-race guard: a live foreign 'humanizer-seed' lock makes
+//       the tick seed 0 and never touches existing run files;
+//   E20 cross-backend 'best': a best recorded under 'pangram' is not
+//       compared against a 'stub' score - the backend switch resets
+//       to a fresh baseline (best-reset-backend trace) instead of a
+//       false 'reverted';
+//   E21 HUMANIZER_THRESHOLD is clamped to the 0-100 score domain;
+//   E22 the workflow spec ships "active": false (deploy never
+//       activates the eval schedule on its own);
+//   E23 detector_payload contract: the partner input carries
+//       {ai_score, marker_spans:[{text,marker_type,reason}]} - never
+//       the raw last_score blob (checked inside E9).
 //
 // Run:  node tools/check_humanizer.js    (exit 0 = all pass)
 
 const fs = require("node:fs");
+const { createRequire } = require("node:module");
 const path = require("node:path");
 
 const WF = path.join(__dirname, "..", "n8n", "workflows", "sp-humanizer-eval.json");
@@ -448,6 +480,11 @@ const main = async () => {
       JSON.stringify({ st: r?.state, oc: r?.outcome, ls: r?.last_score }),
     );
     check(
+      "E6 pangram: score carries marker_spans:[] (no span data)",
+      Array.isArray(r?.last_score?.marker_spans) && r.last_score.marker_spans.length === 0,
+      JSON.stringify(r?.last_score?.marker_spans),
+    );
+    check(
       "E6 pangram: score row credits_used>0 recorded",
       scoreRows(sc.fakeFs).some(
         (s) => s.run_id === "baseline__clean_human-en" && s.credits_used > 0,
@@ -519,7 +556,11 @@ const main = async () => {
           backend: "gemini",
           json: {
             rewritten_text: `${payload.source_text}\n\nRewritten by partner.`,
-            edits: [{ span: "x", action: "rephrase", reason: "stub" }],
+            edits: [{ span_original: "x", span_new: "y", reason: "stub" }],
+            confidence: "medium",
+            recommendation: "continue",
+            unchanged_reason: null,
+            caveats: [],
           },
         };
       }
@@ -552,6 +593,30 @@ const main = async () => {
           );
         })(),
       JSON.stringify(gwCalls.map((c0) => c0.url)),
+    );
+    // E23 detector_payload contract: {ai_score, marker_spans[]} only -
+    // the contracted scorer view, never the raw last_score blob
+    check(
+      "E23 detector_payload: {ai_score,marker_spans} shape, no raw blob",
+      gwCalls.every((c0) => {
+        const p = JSON.parse(c0.body.input);
+        const d = p.detector_payload;
+        return (
+          d &&
+          typeof d === "object" &&
+          typeof d.ai_score === "number" &&
+          Array.isArray(d.marker_spans) &&
+          d.marker_spans.every(
+            (s) =>
+              s &&
+              typeof s.text === "string" &&
+              typeof s.marker_type === "string" &&
+              typeof s.reason === "string",
+          ) &&
+          Object.keys(d).every((k) => ["ai_score", "marker_spans"].includes(k))
+        );
+      }) && JSON.parse(gwCalls[0].body.input).detector_payload.marker_spans.length > 0,
+      JSON.stringify(gwCalls[0] && JSON.parse(gwCalls[0].body.input).detector_payload),
     );
     check(
       "E9 inhouse: rewrite applied -> rescoring path",
@@ -661,6 +726,396 @@ const main = async () => {
         r.working_text === bestText &&
         (r.trace || []).some((t) => t.action === "revert"),
       JSON.stringify({ st: r?.state, oc: r?.outcome, wt: r?.working_text }),
+    );
+  }
+
+  // --- E13 scorer stale claim: one re-enqueue, then scorer_failed ----
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_SCORER: "pangram", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc.fakeFs, ["clean_human"]);
+    seedHands(sc.fakeFs);
+    await execTick(sc);
+    const id = "baseline__clean_human-en";
+    const backdate = () => {
+      const cur = loadRun(sc.fakeFs, id);
+      cur.scorer_pending.at = new Date(Date.now() - 700000).toISOString();
+      sc.fakeFs.writeFileSync(`${RUNS}/${id}.json`, JSON.stringify(cur));
+    };
+    backdate();
+    await execTick(sc);
+    let r = loadRun(sc.fakeFs, id);
+    check(
+      "E13 stale claim: score-stale-clear + ONE re-enqueue",
+      r?.state === "scoring" &&
+        r.scorer_retries === 1 &&
+        r.scorer_pending?.task === `pangram-${id}-1` &&
+        (r.trace || []).some((t) => t.action === "score-stale-clear") &&
+        dirOf(sc.fakeFs, `${HANDS}/inbox`).includes(`pangram-${id}-1.json`),
+      JSON.stringify({
+        st: r?.state,
+        pend: r?.scorer_pending,
+        inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`),
+      }),
+    );
+    backdate();
+    await execTick(sc);
+    r = loadRun(sc.fakeFs, id);
+    check(
+      "E13 second stale: escalated 'scorer_failed', pending cleared",
+      r?.state === "escalated" && r.outcome === "scorer_failed" && !r.scorer_pending,
+      JSON.stringify({ st: r?.state, oc: r?.outcome, pend: r?.scorer_pending }),
+    );
+  }
+
+  // --- E14 crash-after-charge dedupe (no double credit spend) --------
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_SCORER: "pangram", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc.fakeFs, ["clean_human"]);
+    seedHands(sc.fakeFs);
+    await execTick(sc);
+    const spent1 = readJson(sc.fakeFs, CREDITS)?.est_spent;
+    const id = "baseline__clean_human-en";
+    // simulate the crash window between the inbox rename and the run
+    // write: the charge persisted in the credits ledger but the run
+    // record lost scorer_pending/score_seq/credits_used
+    const cur = loadRun(sc.fakeFs, id);
+    cur.scorer_pending = null;
+    cur.score_seq = 0;
+    cur.credits_used = 0;
+    cur.state = "scoring";
+    sc.fakeFs.writeFileSync(`${RUNS}/${id}.json`, JSON.stringify(cur));
+    await execTick(sc);
+    const c2 = readJson(sc.fakeFs, CREDITS);
+    const r = loadRun(sc.fakeFs, id);
+    check(
+      "E14 charge dedupe: same tid re-armed, est_spent unchanged",
+      c2?.est_spent === spent1 &&
+        Number(c2?.charged?.[`pangram-${id}-0`]) > 0 &&
+        r?.scorer_pending?.task === `pangram-${id}-0`,
+      JSON.stringify({ spent1, c2, pend: r?.scorer_pending }),
+    );
+  }
+
+  // --- E15 crash-after-consume: re-read the consumed result ----------
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_SCORER: "pangram", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc.fakeFs, ["clean_human"]);
+    seedHands(sc.fakeFs);
+    await execTick(sc);
+    const id = "baseline__clean_human-en";
+    const tid = `pangram-${id}-0`;
+    // the worker landed the result and a tick consumed it but died
+    // before its run write - only the .consumed record survives
+    sc.fakeFs.writeFileSync(
+      `${HANDS}/done/${tid}.result.json`,
+      JSON.stringify({ ok: true, hit_ph: "Possibly human", confidence: "95%" }),
+    );
+    sc.fakeFs.renameSync(
+      `${HANDS}/done/${tid}.result.json`,
+      `${HANDS}/done/${tid}.result.json.consumed`,
+    );
+    await runTicks(sc, 2);
+    const r = loadRun(sc.fakeFs, id);
+    check(
+      "E15 crash-after-consume: re-reads .consumed -> scored -> pass",
+      r?.state === "done" &&
+        r.outcome === "pass" &&
+        r.last_score?.via === "pangram" &&
+        (r.trace || []).some((t) => t.action === "score-recovered-consumed"),
+      JSON.stringify({ st: r?.state, oc: r?.outcome, ls: r?.last_score }),
+    );
+  }
+
+  // --- E16 vetoed settle: nonce changed under the in-flight call -----
+  {
+    const sc = mkSc();
+    sc.env = {
+      HUMANIZER_PARTNER: "inhouse",
+      LLM_GATEWAY_URL: "http://llm-gateway:8787",
+    };
+    sc.fakeFs.mkdirSync(RUNS, { recursive: true });
+    const id = "probe__veto-en";
+    const nowIso = new Date().toISOString();
+    sc.fakeFs.writeFileSync(
+      `${RUNS}/${id}.json`,
+      JSON.stringify({
+        run_id: id,
+        fixture: "probe/en",
+        tier: "probe",
+        lang: "en",
+        chain: "editor",
+        stages: ["editor"],
+        state: "rewriting",
+        iteration: 0,
+        cell_stage: "editor",
+        text: "Source text under rewrite.",
+        working_text: "Source text under rewrite.",
+        best: { text: "b", score: 40, stage: "input", backend: "stub", at: nowIso },
+        last_score: {
+          score: 80,
+          label: "AI Generated",
+          confidence: 80,
+          via: "stub",
+          words: 4,
+          marker_spans: [],
+          at: nowIso,
+        },
+        previous_attempts: [],
+        protected_terms: [],
+        persona_context: "",
+        credits_used: 0,
+        score_seq: 0,
+        scorer_retries: 0,
+        scorer_fallback: false,
+        outcome: null,
+        escalation: null,
+        trace: [],
+        seeded_at: nowIso,
+        updated_at: nowIso,
+      }),
+    );
+    sc.httpImpl = async () => {
+      // a competing tick cleared + reclaimed the pending claim while
+      // our stage call was in flight: the on-disk nonce is no longer
+      // ours, so the settle guard must veto (no apply)
+      const cur = loadRun(sc.fakeFs, id);
+      cur.rewrite_pending = { nonce: "foreign", stage: "editor", at: nowIso };
+      sc.fakeFs.writeFileSync(`${RUNS}/${id}.json`, JSON.stringify(cur));
+      return {
+        role: "humanizer-partner",
+        model: "m",
+        backend: "gemini",
+        json: {
+          rewritten_text: "Rewritten text that must NOT land.",
+          edits: [],
+          confidence: "medium",
+          recommendation: "continue",
+          unchanged_reason: null,
+          caveats: [],
+        },
+      };
+    };
+    const out = await execTick(sc);
+    const r = loadRun(sc.fakeFs, id);
+    check(
+      "E16 vetoed settle: nonce mismatch keeps 'rewriting', no apply",
+      out?.[0]?.json?.by_step?.vetoed === 1 &&
+        r?.state === "rewriting" &&
+        r.rewrite_pending?.nonce === "foreign" &&
+        r.working_text === "Source text under rewrite.",
+      JSON.stringify({ bs: out?.[0]?.json?.by_step, st: r?.state, wt: r?.working_text }),
+    );
+  }
+
+  // --- E17 role manifest + output schema contract --------------------
+  {
+    const rolePath = path.join(__dirname, "..", "roles", "humanizer-partner.yaml");
+    const req = createRequire(path.join(__dirname, "..", "llm-gateway", "package.json"));
+    const YAML = req("yaml");
+    const Ajv = req("ajv");
+    const doc = YAML.parse(fs.readFileSync(rolePath, "utf8"));
+    const schema = doc?.output?.schema;
+    let compiled = null;
+    let compErr = null;
+    try {
+      compiled = new Ajv().compile(schema);
+    } catch (e) {
+      compErr = e;
+    }
+    check(
+      "E17 role: manifest + output.schema compile via ajv",
+      doc?.name === "humanizer-partner" && !!compiled && !compErr,
+      String(compErr || ""),
+    );
+    const editReq = schema?.properties?.edits?.items?.required || [];
+    check(
+      "E17 role schema: full contract shape, additionalProperties:false",
+      schema?.additionalProperties === false &&
+        [
+          "rewritten_text",
+          "edits",
+          "confidence",
+          "recommendation",
+          "unchanged_reason",
+          "caveats",
+        ].every((k) => schema.required.includes(k) && k in schema.properties) &&
+        ["span_original", "span_new", "reason"].every(
+          (k) => editReq.includes(k) && k in schema.properties.edits.items.properties,
+        ),
+      JSON.stringify({ req: schema?.required, editReq }),
+    );
+    // plan-mode pass-through: an identical rewritten_text with a
+    // non-null unchanged_reason and planned edits[] is the plan
+    // contract - it must validate under the same schema
+    check(
+      "E17 role schema: plan-mode output validates (pass-through)",
+      !!compiled?.({
+        rewritten_text: "Source text.",
+        edits: [{ span_original: "a", span_new: "b", reason: "planned change" }],
+        confidence: "medium",
+        recommendation: "continue",
+        unchanged_reason: "plan mode - changes not applied",
+        caveats: [],
+      }),
+    );
+    check(
+      "E17 role schema: rejects extra/missing/legacy fields",
+      !compiled?.({
+        rewritten_text: "x",
+        edits: [],
+        confidence: "low",
+        recommendation: "continue",
+        unchanged_reason: null,
+        caveats: [],
+        note: "n",
+      }) &&
+        !compiled?.({
+          rewritten_text: "x",
+          edits: [{ span: "a", action: "strip", reason: "r" }],
+          confidence: "low",
+          recommendation: "continue",
+          unchanged_reason: null,
+          caveats: [],
+        }) &&
+        !compiled?.({
+          rewritten_text: "x",
+          edits: [],
+          recommendation: "continue",
+          unchanged_reason: null,
+          caveats: [],
+        }),
+    );
+  }
+
+  // --- E18 fixtures: pangram floor + spans.json annotations ----------
+  {
+    const bad = [];
+    for (const tier of fs.readdirSync(FIXTURE_SRC)) {
+      for (const lang of ["en", "ru"]) {
+        const tp = path.join(FIXTURE_SRC, tier, `${lang}.txt`);
+        if (!fs.existsSync(tp)) continue;
+        const w = fs.readFileSync(tp, "utf8").split(/\s+/).filter(Boolean).length;
+        if (w < 150) bad.push(`${tier}/${lang} ${w}w`);
+        const sp = path.join(FIXTURE_SRC, tier, `${lang}.spans.json`);
+        if (!fs.existsSync(sp)) continue;
+        try {
+          const ann = JSON.parse(fs.readFileSync(sp, "utf8"));
+          if (!Array.isArray(ann.expected_spans) || ann.expected_spans.length === 0) {
+            bad.push(`${tier}/${lang}.spans.json empty expected_spans`);
+          }
+        } catch (_e) {
+          bad.push(`${tier}/${lang}.spans.json unparsable`);
+        }
+      }
+    }
+    check(
+      "E18 fixtures: every cell >=150 words, spans.json non-empty",
+      bad.length === 0,
+      bad.join(", "),
+    );
+  }
+
+  // --- E19 seed-race guard: busy seed lock -> seed nothing -----------
+  {
+    const sc = mkSc();
+    seedFixtures(sc.fakeFs, ["clean_human"]);
+    sc.fakeFs.mkdirSync(`${STATE}/locks`, { recursive: true });
+    sc.fakeFs.mkdirSync(RUNS, { recursive: true });
+    // a live foreign 'humanizer-seed' lock (exp in the future) plus a
+    // run file a racing seeder must never wipe
+    sc.fakeFs.writeFileSync(
+      `${STATE}/locks/humanizer-seed.lock`,
+      JSON.stringify({ token: "foreign", exp: Date.now() + 60000 }),
+    );
+    sc.fakeFs.writeFileSync(
+      `${RUNS}/editor__clean_human-en.json`,
+      JSON.stringify({ run_id: "editor__clean_human-en", sentinel: "keep" }),
+    );
+    const out = await execTick(sc);
+    const r = readJson(sc.fakeFs, `${RUNS}/editor__clean_human-en.json`);
+    check(
+      "E19 seed-race: busy seed lock -> seeded 0, run file preserved",
+      out?.[0]?.json?.seeded === 0 && r?.sentinel === "keep" && dirOf(sc.fakeFs, RUNS).length === 1,
+      JSON.stringify({ out: out?.[0]?.json, r }),
+    );
+  }
+
+  // --- E20 cross-backend 'best' separation ----------------------------
+  {
+    const sc = mkSc();
+    sc.fakeFs.mkdirSync(RUNS, { recursive: true });
+    const id = "probe__backend-en";
+    const nowIso = new Date().toISOString();
+    sc.fakeFs.writeFileSync(
+      `${RUNS}/${id}.json`,
+      JSON.stringify({
+        run_id: id,
+        fixture: "probe/en",
+        tier: "probe",
+        lang: "en",
+        chain: "editor",
+        stages: ["editor"],
+        state: "decide",
+        iteration: 1,
+        cell_stage: "editor",
+        text: "Original text.",
+        working_text: "Rescored text.",
+        // a 'pangram' best must never be compared against this 'stub'
+        // score - the backend switch resets to a fresh baseline
+        best: { text: "b", score: 40, stage: "input", backend: "pangram", at: nowIso },
+        last_score: {
+          score: 78,
+          label: "AI Generated",
+          confidence: 78,
+          via: "stub",
+          words: 5,
+          marker_spans: [],
+          at: nowIso,
+        },
+        previous_attempts: [],
+        protected_terms: [],
+        persona_context: "",
+        credits_used: 0,
+        score_seq: 0,
+        scorer_retries: 0,
+        scorer_fallback: true,
+        outcome: null,
+        escalation: null,
+        trace: [],
+        seeded_at: nowIso,
+        updated_at: nowIso,
+      }),
+    );
+    await execTick(sc);
+    const r = loadRun(sc.fakeFs, id);
+    check(
+      "E20 cross-backend: pangram best dropped, fresh stub baseline",
+      r?.state === "rewriting" &&
+        r.outcome === null &&
+        r.best?.score === 78 &&
+        r.best?.backend === "stub" &&
+        (r.trace || []).some((t) => t.action === "best-reset-backend"),
+      JSON.stringify({ st: r?.state, oc: r?.outcome, best: r?.best }),
+    );
+  }
+
+  // --- E21 threshold clamp + E22 ships inactive -----------------------
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_THRESHOLD: "250" };
+    const out = await execTick(sc);
+    check(
+      "E21 threshold: HUMANIZER_THRESHOLD clamped to 0-100",
+      out?.[0]?.json?.threshold === 100,
+      JSON.stringify(out?.[0]?.json?.threshold),
+    );
+    check(
+      "E22 deploy: workflow spec ships active:false",
+      spec.active === false,
+      JSON.stringify(spec.active),
     );
   }
 

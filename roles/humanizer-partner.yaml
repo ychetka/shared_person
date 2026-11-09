@@ -15,7 +15,13 @@ output:
   schema:
     type: object
     additionalProperties: false
-    required: ["rewritten_text", "edits"]
+    required:
+      - rewritten_text
+      - edits
+      - confidence
+      - recommendation
+      - unchanged_reason
+      - caveats
     properties:
       rewritten_text:
         type: string
@@ -24,13 +30,31 @@ output:
         items:
           type: object
           additionalProperties: false
-          required: ["span", "action", "reason"]
+          required:
+            - span_original
+            - span_new
+            - reason
           properties:
-            span:
+            span_original:
               type: string
-            action:
+            span_new:
               type: string
             reason:
               type: string
-      note:
-        type: string
+      confidence:
+        enum:
+          - low
+          - medium
+          - high
+      recommendation:
+        enum:
+          - continue
+          - escalate_to_human
+      unchanged_reason:
+        type:
+          - string
+          - "null"
+      caveats:
+        type: array
+        items:
+          type: string

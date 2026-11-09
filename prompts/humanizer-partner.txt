@@ -15,9 +15,13 @@ previous_attempts[], protected_terms[], persona_context, mode}.
 - `language` is the output language code ('ru', 'en', ...). Keep the
   source language unless it asks otherwise; translation IS allowed
   when `language` differs from the source's.
-- `detector_payload` is whatever the scorer reported (label,
-  confidence, flagged spans if available). Treat flagged phrases as
-  editing targets, not as a score to game.
+- `detector_payload` is the scorer's finding, shaped
+  `{ai_score, marker_spans[]}`: `ai_score` is 0-100 (higher = more
+  AI-looking) and each `marker_spans[]` entry is
+  `{text, marker_type, reason}` - a flagged phrase and why it was
+  flagged. Treat flagged phrases as editing targets, not as a score
+  to game. `marker_spans` may be empty when the detector reports no
+  span-level findings.
 - `iteration` is how many rewrite attempts this text has already
   been through (0 = first pass).
 - `previous_attempts[]` lists strategies that already ran and still
@@ -53,14 +57,30 @@ previous_attempts[], protected_terms[], persona_context, mode}.
 
 Return strict JSON:
 
-{"rewritten_text": "<the full edited text>",
- "edits": [{"span": "<source phrase you changed>",
-            "action": "strip|restructure|rephrase|split|merge",
+{"rewritten_text": "<the full edited text - identical to source_text
+    when no change is warranted or mode is 'plan'>",
+ "edits": [{"span_original": "<the source phrase you changed>",
+            "span_new": "<what it became ('' for a strip)>",
             "reason": "<one line, what this fixes>"}],
- "note": "<optional, one line>"}
+ "confidence": "low|medium|high",
+ "recommendation": "continue|escalate_to_human",
+ "unchanged_reason": null,
+ "caveats": ["<optional one-line caveats>"]}
 
 - `edits[]` is the audit trail: one entry per distinct change, in
-  the order applied.
+  the order applied. `span_original` is the exact source phrase,
+  `span_new` its replacement ('' when the fix is a removal).
+- `confidence` grades your own rewrite; `recommendation` is
+  'continue' while the loop should rescore and iterate, or
+  'escalate_to_human' when the text needs a human editor (e.g. the
+  only fixes left would invent content the source does not have).
+- `unchanged_reason` is null when `rewritten_text` differs from
+  `source_text`; when they are identical it is a one-line
+  explanation (no detector findings to act on, or plan mode).
+- `caveats[]` lists anything the caller should know before using
+  the text (an empty array is fine).
 - mode 'plan': return the SAME schema but set `rewritten_text` to
-  the UNCHANGED `source_text` and put the intended changes in
-  `edits[]` only - a plan the caller can review before committing.
+  the UNCHANGED `source_text`, `unchanged_reason` to a one-line
+  'plan mode' note, and put the intended changes in `edits[]` only
+  (span_new holds the proposed replacement) - a plan the caller can
+  review before committing.
