@@ -174,6 +174,24 @@ services:
       # gate and the poller's text-hash re-check both read it via
       # $env, so the two cannot drift. Empty = 20.
       - PANGRAM_DAILY_CREDITS=${PANGRAM_DAILY_CREDITS:-}
+      # humanizer eval loop (issue #78, sp-humanizer-eval): STUB
+      # defaults so a plain deploy burns nothing - the workflow ships
+      # active:false and the deterministic stub scorer/partner runs
+      # the whole matrix offline. HUMANIZER_SCORER=pangram draws on
+      # the shared pangram credits via the hands-queue mount;
+      # HUMANIZER_PARTNER=inhouse routes rewrites through
+      # llm-gateway /run (role humanizer-partner).
+      - HUMANIZER_SCORER=${HUMANIZER_SCORER:-stub}
+      - HUMANIZER_PARTNER=${HUMANIZER_PARTNER:-stub}
+      - HUMANIZER_CHAINS=${HUMANIZER_CHAINS:-baseline,editor}
+      - HUMANIZER_DAILY_CREDITS=${HUMANIZER_DAILY_CREDITS:-}
+      - HUMANIZER_THRESHOLD=${HUMANIZER_THRESHOLD:-}
+      - HUMANIZER_MAX_ITERS=${HUMANIZER_MAX_ITERS:-}
+      # llm-gateway /run endpoint for the inhouse partner stage. All
+      # services run network_mode: host, so the container name is not
+      # resolvable and loopback is the default - same value the
+      # rss-reader service pins below.
+      - LLM_GATEWAY_URL=${LLM_GATEWAY_URL:-http://127.0.0.1:8787}
     volumes:
       - n8n_storage:/home/node/.n8n
       # hands-agent task queue (n8n drops publish tasks into inbox/)
@@ -181,6 +199,10 @@ services:
       # media candidates for moderation sendPhoto (brief media[] paths
       # resolve here: <host>/materials/... -> /home/node/materials/...)
       - ../materials:/home/node/materials:ro
+      # humanizer eval fixture corpus (issue #78): read-only like the
+      # materials mount - the eval tick only READS
+      # /home/node/fixtures/humanizer/<tier>/<lang>.txt
+      - ./fixtures:/home/node/fixtures:ro
 
   llm-gateway:
     image: shared-person/llm-gateway:latest

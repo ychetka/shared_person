@@ -94,7 +94,9 @@ The hands-agent queue is bind-mounted at `/home/node/hands-queue`
 (host: `../hands-agent/queue/`). The project `materials/` directory is
 bind-mounted read-only at `/home/node/materials` (host:
 `../../materials/`) - media candidates from briefs resolve there for
-the moderation `sendPhoto` step.
+the moderation `sendPhoto` step. The fixture corpus is bind-mounted
+read-only at `/home/node/fixtures` (host: `./fixtures/`) - the
+humanizer eval tick reads `<tier>/<lang>.txt` cells from it.
 
 ## Workflows
 
@@ -767,6 +769,83 @@ VK credentials mirror sp-publish: cached `state/vk_token.json`,
 `VK_TOKEN_REFRESH_URL` gated by `VK_TOKEN_SECRET`. A refreshed token
 is kept in memory for the tick only - sp-publish owns the token file
 and its 0o600 write contract.
+
+### sp-humanizer-eval (schedule, every 2 min - SHIPS INACTIVE)
+
+Issue #78 humanizer evaluation loop. The spec deploys with
+`"active": false` ON PURPOSE: activating the schedule is a deliberate
+operator step taken when a live eval run is scheduled, never an
+accidental side effect of `deploy_workflow.js` on a fresh volume.
+To run an eval, deploy as usual, then activate the workflow in the
+n8n UI (or flip `active` and `--update` with intent). Leave it
+inactive afterwards - an idle active workflow still ticks every 2
+minutes against the fixture corpus.
+
+Each tick seeds `<chain>__<tier>-<lang>.json` run records under
+`state/humanizer_runs/` for every fixture cell x enabled chain
+(seeding is serialized under a `humanizer-seed` state lock so
+overlapping ticks cannot wipe progress), then steps each live run
+through `scoring -> decide -> rewriting -> rescoring`. Fixture cells
+are `<tier>/<lang>.txt` under the read-only `/home/node/fixtures`
+mount (host `./fixtures/`; `HUMANIZER_FIXTURES` overrides the path),
+with optional `<lang>.spans.json` marker annotations next to them.
+Texts must be >=150 words - Pangram's own reliability floor, enforced
+in the tick before any enqueue.
+
+Env knobs (compose passes them through; stub defaults mean a plain
+deploy burns nothing):
+
+- `HUMANIZER_SCORER` - `stub` (default, deterministic offline scorer
+  that reports the flagged phrases as `marker_spans`) or `pangram`
+  (enqueues `pangram_check` tasks into the hands-queue mount, charges
+  `ceil(words/100)` into the shared `state/pangram_credits.json`
+  ledger, consumes `done|failed/<task>.result.json`; falls back to
+  stub when the queue mount is missing). A pangram task with no
+  landed artifact after ~10min is a dead claim: one re-enqueue
+  attempt (per-claim budget - a landed score resets it), then
+  `scorer_failed` escalation. Charge dedupe is per task-id, so a
+  crash between the inbox rename and the run write re-arms the same
+  task without spending the credit twice; the `charged[]` ledger is
+  per-day and resets with the daily counter in every credits loader.
+  A once-per-tick sweep consumes `pangram-<run>-<seq>` result files
+  no run still claims (`consumed-late` ledger notes) so late landing
+  artifacts don't pile up.
+- `HUMANIZER_PARTNER` - `stub` (default, one deterministic edit per
+  call) or `inhouse` (POSTs `{role: humanizer-partner, input}` to
+  `LLM_GATEWAY_URL` `/run`; the input carries
+  `detector_payload: {ai_score, marker_spans[]}` - the contracted
+  scorer view, never the raw score blob). The partner's
+  `recommendation: escalate_to_human` is honored - the run escalates
+  `partner_escalate` with the partner's confidence/caveats/
+  unchanged_reason recorded and the rewrite never applied. A
+  byte-identical `rewritten_text` + `unchanged_reason` counts one
+  `partner_unchanged` attempt and stalls into escalation without a
+  rescore (rescoring identical text only re-measures the same score).
+- `HUMANIZER_CHAINS` - comma list, default `baseline,editor`;
+  `baseline` scores only, `editor` rewrites via the configured
+  partner, any other name is a '+'-separated stage list resolved
+  from `HUMANIZER_EXT_<NAME>_URL` (unset = 'unavailable' cell +
+  `stage_unavailable` escalate, no fake calls).
+- `HUMANIZER_DAILY_CREDITS` - this consumer's share of the daily
+  Pangram estimate cap (default 20, explicit 0 = zero).
+- `HUMANIZER_THRESHOLD` - ai_score pass threshold, clamped to 0-100
+  (default 50). `HUMANIZER_MAX_ITERS` - rewrite cap before
+  `max_iterations` escalation with best-so-far (default 2).
+  `LLM_GATEWAY_URL` - inhouse partner endpoint (default
+  `http://127.0.0.1:8787` - all services run `network_mode: host`,
+  so the `llm-gateway` container name is unresolvable).
+
+Terminal runs land `done` (`pass`/`reverted`) or `escalated`
+(`no_rewrite_stage`/`max_iterations`/`partner_failed`/`credit_cap`/
+`scorer_failed`/`scorer_inconclusive`/`stage_unavailable`/
+`partner_escalate`/`partner_unchanged`) carrying
+the best-so-far text+score - best/regression comparisons are only
+made within one scorer backend, so a mid-run pangram->stub fallback
+resets to a fresh baseline (noted in the run trace). Every scored
+cell appends a row to `state/humanizer_scores.jsonl`; escalations
+also log a `humanizer-escalate` line to
+`logs/humanizer-eval.jsonl`. Harness: `tools/check_humanizer.js`
+runs the real Eval Tick jsCode against the real fixtures.
 
 ## Secrets
 

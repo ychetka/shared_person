@@ -1,0 +1,9 @@
+Friday's deploy went mostly fine. The migration script ran in 40 seconds, which honestly surprised me - last time it took six minutes and I still do not know why. One hiccup: the cache warm-up raced the schema swap, so the first dozen requests hit a half-built index. I noticed because p99 jumped to about 900ms for a minute, then settled back down.
+
+The fix was boring. I made the warmer wait on the migration lock, and the whole cutover stayed seamless for users. Cutting-edge it is not, but nobody paged me, and I will take that trade every single time.
+
+Open question I keep circling: the credit counter still resets on UTC rollover, and a run that starts at 23:58 can hit the cap two minutes in. I left a note in the trace instead of fixing it properly. The estimate is charged optimistically at enqueue, so the worst case is we over-report spend for a day and reconcile when the results land.
+
+Also, I owe Sasha a review on the retry jitter patch from last week. Tomorrow, probably, unless the queue mount flakes again.
+
+One more thing before I forget: the fixture texts themselves are due a trim. Half of them read like they were written to hit a word count, which - fair, they were. I will get to it once the Friday deploy window closes, right after I figure out why the staging disk filled up with orphaned tmp files again.

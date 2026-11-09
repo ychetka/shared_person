@@ -53,8 +53,9 @@ const GROUPS = {
   // plain tmp+rename writeJsonAtomic: Handle TG Update, Prepare Draft,
   // Compose Message and Handle Pangram Results (sp-tg-moderation),
   // Generate Drafts (sp-content-gen), Resolve Chat + Webhook
-  // (sp-tg-setup), Analytics Tick (sp-analytics)
-  "write-json-atomic": { expect: 7 },
+  // (sp-tg-setup), Analytics Tick (sp-analytics), Eval Tick
+  // (sp-humanizer-eval)
+  "write-json-atomic": { expect: 8 },
   // Publish Tick's copy is the hardened 0o600 variant - intentionally
   // different from the plain copies, tracked under its own group so
   // the marker itself stays accounted for
@@ -118,10 +119,10 @@ const GROUPS = {
   },
   // withLock tokened fs lock + LockBusyError (issue #70): Prepare
   // Draft, Handle TG Update and Handle Pangram Results
-  // (sp-tg-moderation) plus Publish Tick (sp-publish) - the whole
-  // block is one fixed shape, so the copies compare identical with
-  // no normalization
-  "file-lock": { expect: 4 },
+  // (sp-tg-moderation), Publish Tick (sp-publish) and Eval Tick
+  // (sp-humanizer-eval) - the whole block is one fixed shape, so the
+  // copies compare identical with no normalization
+  "file-lock": { expect: 5 },
   // updateDraft guarded re-read+mutate: Handle TG Update, Prepare
   // Draft and Handle Pangram Results (all sp-tg-moderation). The
   // load/save lines legitimately differ (loadDraft/saveDraft wrappers
@@ -232,14 +233,15 @@ const GROUPS = {
   },
   // mkdirErrs collection prelude: Handle TG Update, Prepare Draft
   // and Handle Pangram Results (all sp-tg-moderation), Resolve Chat
-  // + Webhook (sp-tg-setup), Generate Drafts (sp-content-gen) and
-  // Analytics Tick (sp-analytics). Only the dir list and the loop
-  // variable name differ per node. Publish Tick's plain mkdirSync
-  // swallow is a different contract on purpose (a missing dir
-  // surfaces through mv()/log() failures there, not per-item
-  // refusals) and stays unmarked
+  // + Webhook (sp-tg-setup), Generate Drafts (sp-content-gen),
+  // Analytics Tick (sp-analytics) and Eval Tick
+  // (sp-humanizer-eval). Only the dir list and the loop variable
+  // name differ per node. Publish Tick's plain mkdirSync swallow is
+  // a different contract on purpose (a missing dir surfaces through
+  // mv()/log() failures there, not per-item refusals) and stays
+  // unmarked
   "mkdir-collect": {
-    expect: 6,
+    expect: 7,
     normalize: [
       [/of \[[^\]]*\]/, "of [DIRS]"],
       [/\b(?:d0|d)\b/g, "D"],

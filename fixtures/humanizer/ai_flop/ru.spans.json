@@ -1,0 +1,29 @@
+{
+  "expected_spans": [
+    {
+      "text": "В современном мире",
+      "marker_type": "filler_opener",
+      "reason": "Generic temporal framing opener; carries no information about the actual subject."
+    },
+    {
+      "text": "Важно отметить",
+      "marker_type": "hedging_filler",
+      "reason": "Meta-announcement filler; the statement that follows carries its own weight."
+    },
+    {
+      "text": "играет важнейшую роль",
+      "marker_type": "generic_claim",
+      "reason": "Stock importance phrase; no mechanism or evidence attached."
+    },
+    {
+      "text": "Кроме того,",
+      "marker_type": "connector_filler",
+      "reason": "Additive connector that only pads the transition between two list-like claims."
+    },
+    {
+      "text": "создают условия для долгосрочного устойчивого успеха",
+      "marker_type": "vague_benefit",
+      "reason": "Aspirational closer with no measurable outcome."
+    }
+  ]
+}
