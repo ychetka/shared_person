@@ -229,6 +229,12 @@ Notes for the approver:
       one supervised run; the run itself still follows hands-agent
       UX rules (operator reachable via the bridge, shot audit
       trail, escalate on anything outside the written steps).
+- [ ] PRE-RUN START GATE (developer amendment 2026-11-09, msg_427):
+      building the recipe is authorized by this checklist; RUNNING
+      it is not. Before the actual hands-agent run the operator
+      must request the developer's explicit START approval through
+      the orchestrator bridge and the developer observes the run.
+      Without that consent the recipe stays parked unrun.
 
 ## 6. Sources
 

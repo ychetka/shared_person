@@ -1,0 +1,192 @@
+# X developer-portal onboarding recipe - click-runbook mirror of
+# docs/x-app-onboarding.md (updated in PR #68: escalation contract +
+# steps 2/2b/2c). NOT YET RUN: built for one supervised first run.
+#
+# PRE-RUN GATE: this recipe requires the runbook approval checklist
+# (docs/x-app-onboarding.md section 5) signed off AND an explicit
+# developer START for the run itself - recipe ready -> developer
+# START -> supervised run. No unsupervised queue use.
+#
+# Params: account_name (required), use_case (required), out_dir
+# (operator context only - NOT consumed by any step below; carried
+# for the run-record directory convention, see KEY HANDLING).
+#
+# Preconditions:
+# - Audit Chrome profile (CDP :9223), logged in to x.com as
+#   @varenicX. developer.x.com confirmed to redirect to
+#   console.x.com/onboarding (exploration 2026-11-08) - onboarding
+#   was never completed, no apps/keys exist.
+# - EN UI. Portal DOM past the onboarding form is UNEXPLORED: phases
+#   3-5 below are FIRST-RUN CLICK-SKELETONS - navigation clicks +
+#   audit shots only, no typing. The recipe is EXPECTED to fail
+#   closed at the first portal form that needs text input (project/
+#   app creation asks app_name/website_url/description fields); a
+#   miss or a typing wall ends the run as a failed task (step error
+#   -> queue/failed/), which IS the abort convention. Steps to type
+#   the app metadata (draft values in runbook section 3, future
+#   app_name/website_url params) are a deliberate follow-up - not
+#   written until the live DOM is seen once.
+#
+# EARLY-EXIT / ESCALATION CONVENTION (the DSL has no park/resume):
+# - Any wall the recipe cannot cross ends the run as a failed task:
+#   the shot trail names where it stopped, the operator writes the
+#   task result file with status "operator_required" (or "aborted")
+#   and escalates via the orchestrator bridge. Resuming = operator
+#   acts in the live browser, then the recipe is re-enqueued.
+# - CAPTCHA -> operator_required + bridge escalation; the recipe
+#   never solves a CAPTCHA.
+# - Phone verification (runbook step 2b) -> operator_required, NOT
+#   an abort: the developer enters number + SMS code HIMSELF in the
+#   audit browser; resume only on the operator's bridge reply.
+# - Paid-plan/payment wall (runbook step 2c) -> ABORT; record the
+#   EXACT plan name + price verbatim from the paywall copy into the
+#   result file for the developer's budget decision. The recipe
+#   never enters payment details.
+# - Sign-in wall, a portal dashboard with existing apps, or anything
+#   outside the written steps -> abort-and-escalate "unexpected
+#   state".
+#
+# KEY HANDLING: credential values NEVER enter the recipe log, the
+# chat, queue payloads or shot PNGs - the recipe deliberately takes
+# NO screenshot of the Keys-and-tokens page (a keys PNG would commit
+# API secrets into queue/done/, which lives in the repo). The recipe
+# only navigates there; extraction/copy is operator-side: the four
+# values move into ../ENV (repo-external env file, never committed -
+# runbook section 4) as X_API_KEY/X_API_SECRET/X_ACCESS_TOKEN/
+# X_ACCESS_SECRET. {out_dir} remains operator context; no step reads
+# it.
+name: x_app_onboarding
+steps:
+  # ---- Phase 1: open the portal -------------------------------------
+  - action: shot
+    name: xonb_0_start.png
+  # No navigate action exists in the DSL - OS-level navigation via the
+  # address bar on the current audit-profile tab.
+  - action: key
+    keys: ctrl+l
+  - action: type
+    text: "https://developer.x.com"
+  - action: key
+    keys: Return
+  - action: wait
+    seconds: 5
+  # VERIFY (runbook step 1): expect the console.x.com/onboarding
+  # redirect. A dashboard with existing apps = "unexpected state" ->
+  # abort-and-escalate. A sign-in wall = abort-and-escalate.
+  - action: shot
+    name: xonb_1_landed.png
+  # ---- Phase 2: onboarding form (runbook step 2) --------------------
+  # Account name field - placeholder "Enter account name" per the
+  # exploration notes; UNVERIFIED exact placeholder, re-check at run.
+  - action: click_dom
+    url: console.x.com
+    target: "Enter account name"
+  - action: type
+    text: "{account_name}"
+  - action: shot
+    name: xonb_2_name.png
+  # Use-case textarea (required, "data protection" style rationale).
+  # UNVERIFIED label/placeholder text - if "use case" misses, inspect
+  # the xonb_2_name.png shot and fix the target before resuming.
+  - action: click_dom
+    url: console.x.com
+    target: "use case"
+  - action: type
+    text: "{use_case}"
+  - action: shot
+    name: xonb_3_usecase.png
+  # Developer Agreement checkbox - operator-approved acceptance per
+  # the runbook checklist. PRIMARY path = vision locate + OS click:
+  # click_dom "Developer Agreement" would hit the agreement HYPERLINK
+  # and navigate away mid-form. (click_dom fallback if locate ever
+  # misses: a longer label-text target like "I agree to" avoids the
+  # link collision - verify the exact label wording at run.) The next
+  # shot audits the tick.
+  - action: locate
+    target: "Developer Agreement checkbox"
+    hint: "onboarding form, below the use-case textarea"
+    into: pos
+  - action: click
+    pos: pos
+  - action: wait
+    seconds: 1
+  # Marketing/updates checkbox: left UNTICKED by design - no step.
+  - action: shot
+    name: xonb_4_agreement.png
+  - action: click_dom
+    url: console.x.com
+    target: "Submit"
+  - action: wait
+    seconds: 5
+  # POST-SUBMIT GATE: inspect this shot before continuing - phone
+  # verification (2b -> operator_required), CAPTCHA (operator_required
+  # + bridge), paid-plan wall (2c -> abort + record plan/price).
+  - action: shot
+    name: xonb_5_submitted.png
+  # ---- Phase 3: Project + App creation (runbook step 3) -------------
+  # UNVERIFIED portal targets from here on - the portal past
+  # onboarding has not been explored. Reuse {account_name} as the App
+  # name and {use_case} if the portal re-asks (one consistent
+  # identity, per runbook section 3).
+  - action: click_dom
+    url: console.x.com
+    target: "Create Project"
+  - action: wait
+    seconds: 3
+  - action: shot
+    name: xonb_6_project.png
+  - action: click_dom
+    url: console.x.com
+    target: "Create App"
+  - action: wait
+    seconds: 3
+  - action: shot
+    name: xonb_7_app.png
+  # ---- Phase 4: User authentication settings (runbook step 4) -------
+  # Set app permissions to "Read and write" - required for
+  # POST /2/tweets + media upload. ORDER MATTERS (runbook step 6):
+  # permissions BEFORE token generation, or the user tokens must be
+  # regenerated.
+  - action: click_dom
+    url: console.x.com
+    target: "User authentication settings"
+  - action: wait
+    seconds: 3
+  - action: click_dom
+    url: console.x.com
+    target: "Read and write"
+  - action: wait
+    seconds: 1
+  - action: shot
+    name: xonb_8_permissions.png
+  - action: click_dom
+    url: console.x.com
+    target: "Save"
+  - action: wait
+    seconds: 3
+  - action: shot
+    name: xonb_9_saved.png
+  # ---- Phase 5: Keys and tokens (runbook steps 5-7) ------------------
+  # Navigate to the keys page only - NO shot here: a keys-page PNG
+  # would commit API secrets into queue/done/ (secrets find, PR #73).
+  # The click_dom + wait prove navigation; operator extraction of API
+  # Key/Secret + Access Token/Secret into ../ENV IS the audit (see
+  # KEY HANDLING in the header).
+  - action: click_dom
+    url: console.x.com
+    target: "Keys and tokens"
+  - action: wait
+    seconds: 3
+  # ---- Phase 6: handle verify (runbook step 8) ----------------------
+  # Confirm X_HANDLE = "varenicX" (no @) on the profile page; a
+  # mismatch = abort-and-escalate (wrong account). Final audit shot.
+  - action: key
+    keys: ctrl+l
+  - action: type
+    text: "https://x.com/varenicX"
+  - action: key
+    keys: Return
+  - action: wait
+    seconds: 4
+  - action: shot
+    name: xonb_11_done.png
