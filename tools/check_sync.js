@@ -51,10 +51,10 @@ const PLATFORM_TOKEN_RE =
 // word matches must yield the same SET on every copy's raw text.
 const GROUPS = {
   // plain tmp+rename writeJsonAtomic: Handle TG Update, Prepare Draft,
-  // Compose Message (sp-tg-moderation), Generate Drafts
-  // (sp-content-gen), Resolve Chat + Webhook (sp-tg-setup),
-  // Analytics Tick (sp-analytics)
-  "write-json-atomic": { expect: 6 },
+  // Compose Message and Handle Pangram Results (sp-tg-moderation),
+  // Generate Drafts (sp-content-gen), Resolve Chat + Webhook
+  // (sp-tg-setup), Analytics Tick (sp-analytics)
+  "write-json-atomic": { expect: 7 },
   // Publish Tick's copy is the hardened 0o600 variant - intentionally
   // different from the plain copies, tracked under its own group so
   // the marker itself stays accounted for
@@ -117,17 +117,18 @@ const GROUPS = {
     normalize: [[/^\s+/gm, ""]],
   },
   // withLock tokened fs lock + LockBusyError (issue #70): Prepare
-  // Draft and Handle TG Update (sp-tg-moderation) plus Publish Tick
-  // (sp-publish) - the whole block is one fixed shape, so the copies
-  // compare identical with no normalization
-  "file-lock": { expect: 3 },
-  // updateDraft guarded re-read+mutate: Handle TG Update and Prepare
-  // Draft (both sp-tg-moderation). The load/save lines legitimately
-  // differ (loadDraft/saveDraft wrappers vs inline
-  // readFileSync/writeJsonAtomic) and normalize to LOAD/SAVE
+  // Draft, Handle TG Update and Handle Pangram Results
+  // (sp-tg-moderation) plus Publish Tick (sp-publish) - the whole
+  // block is one fixed shape, so the copies compare identical with
+  // no normalization
+  "file-lock": { expect: 4 },
+  // updateDraft guarded re-read+mutate: Handle TG Update, Prepare
+  // Draft and Handle Pangram Results (all sp-tg-moderation). The
+  // load/save lines legitimately differ (loadDraft/saveDraft wrappers
+  // vs inline readFileSync/writeJsonAtomic) and normalize to LOAD/SAVE
   // placeholders; the guard/mutate contract must stay identical
   "update-draft": {
-    expect: 2,
+    expect: 3,
     normalize: [
       [/const cur = loadDraft\(id\);/, "const cur = LOAD;"],
       [
@@ -156,14 +157,23 @@ const GROUPS = {
     ],
   },
   // scrubSecrets secret masking: Generate Drafts (sp-content-gen),
-  // Handle TG Update (sp-tg-moderation), Resolve Chat + Webhook
-  // (sp-tg-setup) and Analytics Tick (sp-analytics). The >=8 length
-  // floor lives inside the loop in all four copies; SECRET_VALUES
-  // collection itself legitimately differs per node and stays
-  // outside the markers. Publish Tick's scrub/KNOWN_TOKENS is
-  // INTENTIONALLY divergent (a dynamic token set plus access_token=
-  // form masking) and must NOT get a copy here
-  "scrub-secrets": { expect: 4 },
+  // Handle TG Update and Handle Pangram Results (sp-tg-moderation),
+  // Resolve Chat + Webhook (sp-tg-setup) and Analytics Tick
+  // (sp-analytics). The >=8 length floor lives inside the loop in all
+  // five copies; SECRET_VALUES collection itself legitimately differs
+  // per node and stays outside the markers. Publish Tick's
+  // scrub/KNOWN_TOKENS is INTENTIONALLY divergent (a dynamic token
+  // set plus access_token= form masking) and must NOT get a copy
+  // here
+  "scrub-secrets": { expect: 5 },
+  // Pangram AI-check warn-gate prelude (issue #76): the PANGRAM_*
+  // env reads, the whitespace-split word count, the text FNV-1a and
+  // the daily-credits counter loader - identical copies in Prepare
+  // Draft (fresh-check enqueue) and Handle Pangram Results (result
+  // replies, credit re-sync, the text-hash re-check), both
+  // sp-tg-moderation. WARN-mode only: a drifted copy would split the
+  // gate's accounting between the two readers
+  "pangram-gate": { expect: 2 },
   // the 5MB per-file media cap: Prepare Draft and Fan Out Album (both
   // sp-tg-moderation). Fan Out Album's re-read fallback must cap at
   // exactly the bound Prepare Draft filtered the album's paths by -
@@ -221,23 +231,24 @@ const GROUPS = {
     normalize: [[/^\s+/gm, ""]],
   },
   // mkdirErrs collection prelude: Handle TG Update, Prepare Draft
-  // (both sp-tg-moderation), Resolve Chat + Webhook (sp-tg-setup),
-  // Generate Drafts (sp-content-gen) and Analytics Tick
-  // (sp-analytics). Only the dir list and the loop variable name
-  // differ per node. Publish Tick's plain mkdirSync swallow is a
-  // different contract on purpose (a missing dir surfaces through
-  // mv()/log() failures there, not per-item refusals) and stays
-  // unmarked
+  // and Handle Pangram Results (all sp-tg-moderation), Resolve Chat
+  // + Webhook (sp-tg-setup), Generate Drafts (sp-content-gen) and
+  // Analytics Tick (sp-analytics). Only the dir list and the loop
+  // variable name differ per node. Publish Tick's plain mkdirSync
+  // swallow is a different contract on purpose (a missing dir
+  // surfaces through mv()/log() failures there, not per-item
+  // refusals) and stays unmarked
   "mkdir-collect": {
-    expect: 5,
+    expect: 6,
     normalize: [
       [/of \[[^\]]*\]/, "of [DIRS]"],
       [/\b(?:d0|d)\b/g, "D"],
     ],
   },
-  // the api.telegram.org request contract shared by the five tg()
+  // the api.telegram.org request contract shared by the six tg()
   // helpers (Publish Tick, Handle TG Update, Compose Message,
-  // Resolve Chat + Webhook, Analytics Tick) and Generate Drafts'
+  // Handle Pangram Results, Resolve Chat + Webhook, Analytics Tick)
+  // and Generate Drafts'
   // notify() sendMessage: POST + bot-token URL + json:true +
   // explicit 30s timeout - an unbounded httpRequest hangs the node
   // behind it. Call-opening lines (return await / return / await)
@@ -247,7 +258,7 @@ const GROUPS = {
   // then polices the contract tokens every copy must share on the
   // RAW text
   "tg-timeout": {
-    expect: 6,
+    expect: 7,
     maxClasses: 2,
     tokenSet: /api\.telegram\.org|method: 'POST'|json: true|timeout: [0-9]+/g,
     normalize: [
