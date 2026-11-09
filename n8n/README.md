@@ -796,11 +796,20 @@ Env knobs (compose passes them through; stub defaults mean a plain
 deploy burns nothing):
 
 - `HUMANIZER_SCORER` - `stub` (default, deterministic offline scorer
-  that reports the flagged phrases as `marker_spans`) or `pangram`
+  that reports the flagged phrases as `marker_spans`), `pangram`
   (enqueues `pangram_check` tasks into the hands-queue mount, charges
   `ceil(words/100)` into the shared `state/pangram_credits.json`
   ledger, consumes `done|failed/<task>.result.json`; falls back to
-  stub when the queue mount is missing). A pangram task with no
+  stub when the queue mount is missing), or `rubric` (issue #80:
+  synchronous `POST $RUBRIC_URL/score` on the new
+  `shared-person-rubric` compose service - `RUBRIC_URL` defaults to
+  `http://127.0.0.1:8790`; local+fast, no queue. Rubric findings map
+  onto `marker_spans [{text, marker_type: rule, reason: suggestion}]`
+  so the partner finally gets span-level evidence. An unreachable
+  service or a bad response shape escalates `scorer_failed` honestly
+  - there is NO stub fallback for this backend. A `scorer_claim`
+  left by a crashed tick gets one re-claim before `scorer_failed`,
+  same bound as the pangram pending path). A pangram task with no
   landed artifact after ~10min is a dead claim: one re-enqueue
   attempt (per-claim budget - a landed score resets it), then
   `scorer_failed` escalation. Charge dedupe is per task-id, so a
@@ -834,6 +843,15 @@ deploy burns nothing):
   `LLM_GATEWAY_URL` - inhouse partner endpoint (default
   `http://127.0.0.1:8787` - all services run `network_mode: host`,
   so the `llm-gateway` container name is unresolvable).
+  `RUBRIC_URL` - rubric scorer endpoint (default
+  `http://127.0.0.1:8790`).
+
+Deploy note: `HUMANIZER_SCORER=rubric` requires the
+`shared-person-rubric` service (`docker compose --env-file ../../ENV
+up -d rubric`; image build needs `rubric-lint/fetch_python.sh` run on
+the host first - the n8n-local base ships node only). `stub` (the
+default) needs nothing extra and keeps the whole eval inert on a
+plain deploy.
 
 Terminal runs land `done` (`pass`/`reverted`) or `escalated`
 (`no_rewrite_stage`/`max_iterations`/`partner_failed`/`credit_cap`/

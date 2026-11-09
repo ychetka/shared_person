@@ -9,3 +9,10 @@ extend-exclude = [
 
 [lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "BLE", "RUF"]
+
+[lint.per-file-ignores]
+# the RU rule layer and its harness carry Cyrillic ON PURPOSE -
+# RUF001/002/003's confusable-unicode audit reads every RU string as a
+# spoofing suspect
+"rubric-lint/rubric_lint.py" = ["RUF001", "RUF002", "RUF003"]
+"tools/check_rubric.py" = ["RUF001", "RUF002", "RUF003"]

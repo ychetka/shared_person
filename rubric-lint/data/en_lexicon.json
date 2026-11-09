@@ -1,0 +1,3188 @@
+{
+ "ai_patterns": [
+  {
+   "name": "negative-parallelism",
+   "pattern": "\\bn(?:ot|[''’]t) (?:just|only|merely|simply|about) [^.!?\\n]{1,80}?[,;.:—–-] ?(?:it[''’]s|it is|this is|that[''’]s|they[''’]re|but rather)\\b|\\b(?:it|this|that)(?:[''’]s| is) not (?:a|an|the) [^.!?\\n]{1,60}?[.;,—–] ?(?:it|this|that)(?:[''’]s| is) (?:a|an|the)\\b",
+   "reason": "\"It's not just X — it's Y\" negative parallelism is a signature LLM construction (WP:AISIGNS; Kriss/NYT 2025)"
+  },
+  {
+   "name": "not-only-but-also",
+   "pattern": "\\bnot only\\b[^.!?\\n]{2,80}?\\bbut also\\b",
+   "reason": "\"not only... but also\" is heavily overused by LLMs of every generation (Russell 2025; WP:AISIGNS)"
+  },
+  {
+   "name": "trailing-participial-analysis",
+   "pattern": ",\\s+(?:further |thereby |ultimately )?(?:highlighting|underscoring|showcasing|reflecting|emphasi[sz]ing|demonstrating|signall?ing|illustrating|cementing|solidifying|reinforcing|exemplifying|epitomizing|symbolizing|embodying|heralding)\\b",
+   "reason": "Trailing \", highlighting/underscoring/showcasing...\" significance clauses are the best-evidenced syntactic AI tell (Reinhart PNAS 2025; WP:AISIGNS)"
+  },
+  {
+   "name": "vague-attribution",
+   "pattern": "\\b(?:experts|critics|observers|scholars|analysts|commentators|industry (?:reports|experts|leaders|insiders)) (?:have )?(?:widely )?(?:argued?s?|agreed?s?|suggests?|suggested|believed?s?|noted?s?|cited?s?|claims?|claimed|warns?|warned|say|pointed? out)\\b|\\bstudies (?:show|suggest|indicate|have shown)\\b|\\bresearch (?:shows|suggests|indicates|has shown)\\b",
+   "reason": "Vague authority attribution (\"experts agree\", \"studies show\") without a named source is a documented AI weasel pattern (WP:AISIGNS)"
+  },
+  {
+   "name": "audience-hedge",
+   "pattern": "\\bwhether you[''’]re (?:a|an|new|just|looking|building|running)\\b[^.!?\\n]{1,80}?\\bor\\b",
+   "reason": "\"Whether you're a X or a Y\" audience-flattening openers are an AI content-marketing formula"
+  },
+  {
+   "name": "despite-challenges",
+   "pattern": "\\bdespite (?:its|these|their|the)\\b[^.!?\\n]{1,60}?\\b(?:faces?|faced|continues? to face|remains?)\\b[^.!?\\n]{0,40}?\\bchallenges\\b",
+   "reason": "The \"Despite its X, [subject] faces challenges\" formula is a documented AI outline habit (WP:AISIGNS; Russell 2025)"
+  },
+  {
+   "name": "copula-puffery",
+   "pattern": "\\bstands as an?\\b|\\bholds the distinction of\\b|\\bserves as a (?:testament|beacon|reminder|symbol|cornerstone)\\b",
+   "reason": "Inflated copulas (\"stands as a\", \"serves as a testament\") replace plain \"is\" in AI prose (WP:AISIGNS; Geng & Trotta 2025)"
+  },
+  {
+   "name": "pivotal-role-claim",
+   "pattern": "\\bplay(?:s|ed|ing)? an? (?:crucial|pivotal|vital|key|critical|essential|significant|central|integral|major|prominent|important) (?:role|part)\\b",
+   "reason": "\"plays a crucial/vital/key role\" is an AI significance cliche (WP:AISIGNS grandiose-phrase list)"
+  },
+  {
+   "name": "false-range",
+   "pattern": "\\bfrom [^,.;!?\\n]{2,40} to [^,.;!?\\n]{2,40}, (?:and )?from [^,.;!?\\n]{2,40} to\\b",
+   "reason": "Chained \"from X to Y, from Z to W\" false ranges are a documented AI comprehensiveness gesture (WP:AISIGNS)"
+  },
+  {
+   "name": "unfilled-placeholder",
+   "pattern": "\\[(?:your (?:name|username|email|company(?: name)?)|company name|insert [^\\]\\n]{2,40}|[a-z ]{0,20}goes here)\\]",
+   "reason": "Unfilled template placeholders (\"[Your Name]\", \"[insert X]\") are AI draft output left incomplete (WP:AISIGNS)"
+  },
+  {
+   "name": "meta-announcement",
+   "pattern": "\\bthis (?:article|blog post|post|essay|guide) (?:aims|seeks) to\\b",
+   "reason": "\"This article aims to explore...\" meta-announcements are ~50x more frequent in AI text (GPTZero)"
+  },
+  {
+   "name": "dance-metaphor",
+   "pattern": "\\b(?:intricate|delicate|complex|careful) dance\\b",
+   "reason": "The \"delicate dance between X and Y\" metaphor is a documented LLM favorite"
+  }
+ ],
+ "ai_phrases": [
+  {
+   "phrase": "as an ai language model",
+   "reason": "Chatbot self-disclosure left in pasted output"
+  },
+  {
+   "phrase": "as a large language model",
+   "reason": "Chatbot self-disclosure left in pasted output"
+  },
+  {
+   "phrase": "as of my last knowledge update",
+   "reason": "Knowledge-cutoff disclaimer left in pasted output (WP:AISIGNS)"
+  },
+  {
+   "phrase": "my knowledge cutoff",
+   "reason": "Knowledge-cutoff disclaimer left in pasted output"
+  },
+  {
+   "phrase": "my training data",
+   "reason": "Chatbot self-reference left in pasted output"
+  },
+  {
+   "phrase": "i don't have access to real-time",
+   "reason": "Chatbot capability disclaimer left in pasted output"
+  },
+  {
+   "phrase": "in the provided search results",
+   "reason": "RAG-chatbot source disclaimer left in pasted output (WP:AISIGNS)"
+  },
+  {
+   "phrase": "while specific details are limited",
+   "reason": "RAG-chatbot hedge for missing sources (WP:AISIGNS)"
+  },
+  {
+   "phrase": "regenerate response",
+   "reason": "Chat-UI button label copied along with the answer"
+  },
+  {
+   "phrase": "i hope this helps",
+   "reason": "Assistant sign-off left in pasted output"
+  },
+  {
+   "phrase": "i hope this message finds you well",
+   "reason": "AI form-letter opener (WP:AISIGNS)"
+  },
+  {
+   "phrase": "would you like me to",
+   "reason": "Assistant follow-up offer left in pasted output"
+  },
+  {
+   "phrase": "is there anything else i can",
+   "reason": "Assistant closing offer left in pasted output"
+  },
+  {
+   "phrase": "let me know if you'd like",
+   "reason": "Assistant follow-up offer left in pasted output"
+  },
+  {
+   "phrase": "feel free to customize",
+   "reason": "Assistant template handoff left in pasted output"
+  },
+  {
+   "phrase": "feel free to personalize",
+   "reason": "Assistant template handoff left in pasted output"
+  },
+  {
+   "phrase": "you're absolutely right",
+   "reason": "Chatbot sycophancy artifact (2025-era models)"
+  },
+  {
+   "phrase": "great question",
+   "reason": "Sycophantic AI opener — humans rarely say this in writing"
+  },
+  {
+   "phrase": "excellent question",
+   "reason": "Sycophantic AI opener"
+  },
+  {
+   "phrase": "glad you asked",
+   "reason": "AI conversational filler"
+  },
+  {
+   "phrase": "it's important to note that",
+   "reason": "AI hedging preamble — add the point directly"
+  },
+  {
+   "phrase": "it's worth noting that",
+   "reason": "AI hedging filler"
+  },
+  {
+   "phrase": "it's worth mentioning that",
+   "reason": "AI hedging filler — just mention it"
+  },
+  {
+   "phrase": "it is essential to",
+   "reason": "AI importance-framing — say why, or drop it"
+  },
+  {
+   "phrase": "it's essential to",
+   "reason": "AI importance-framing — say why, or drop it"
+  },
+  {
+   "phrase": "it is evident that",
+   "reason": "AI-academic hedge — show the evidence instead"
+  },
+  {
+   "phrase": "in today's fast-paced world",
+   "reason": "AI cliche opener — 107x more in AI text than human"
+  },
+  {
+   "phrase": "in today's digital age",
+   "reason": "AI cliche opener"
+  },
+  {
+   "phrase": "in today's rapidly evolving",
+   "reason": "AI cliche opener variant"
+  },
+  {
+   "phrase": "in today's world",
+   "reason": "AI scene-setting cliche opener"
+  },
+  {
+   "phrase": "in the realm of",
+   "reason": "AI filler phrase — 50x overrepresentation"
+  },
+  {
+   "phrase": "in an era of",
+   "reason": "AI scene-setting cliche"
+  },
+  {
+   "phrase": "at its core",
+   "reason": "AI emphasis filler — often adds nothing"
+  },
+  {
+   "phrase": "when it comes to",
+   "reason": "AI transition filler — overused as topic introducer"
+  },
+  {
+   "phrase": "first and foremost",
+   "reason": "AI list-opener filler — \"first\" alone works"
+  },
+  {
+   "phrase": "furthermore,",
+   "reason": "AI transition — \"also\" or \"and\" is more natural"
+  },
+  {
+   "phrase": "moreover,",
+   "reason": "AI transition overuse"
+  },
+  {
+   "phrase": "additionally,",
+   "reason": "AI transition overuse — \"also\" is more natural"
+  },
+  {
+   "phrase": "in conclusion,",
+   "reason": "AI structural cliche — rarely needed"
+  },
+  {
+   "phrase": "in summary,",
+   "reason": "AI wrap-up formula (WP:AISIGNS section summaries)"
+  },
+  {
+   "phrase": "to summarize,",
+   "reason": "AI wrap-up formula"
+  },
+  {
+   "phrase": "in essence,",
+   "reason": "AI restatement filler"
+  },
+  {
+   "phrase": "key takeaway",
+   "reason": "AI summary-listicle framing"
+  },
+  {
+   "phrase": "let's dive in",
+   "reason": "AI conversational filler"
+  },
+  {
+   "phrase": "let's explore",
+   "reason": "AI conversational filler — just explore it"
+  },
+  {
+   "phrase": "let's delve",
+   "reason": "AI filler combining two tells"
+  },
+  {
+   "phrase": "let's break this down",
+   "reason": "AI structural filler"
+  },
+  {
+   "phrase": "without further ado",
+   "reason": "AI filler phrase before getting to the point"
+  },
+  {
+   "phrase": "here's the kicker",
+   "reason": "AI faux-candor pivot (2024+ chatty register)"
+  },
+  {
+   "phrase": "a testament to",
+   "reason": "AI emphasis cliche"
+  },
+  {
+   "phrase": "it's not just about",
+   "reason": "AI negation-pivot opener"
+  },
+  {
+   "phrase": "cannot be overstated",
+   "reason": "AI importance inflation (\"the importance of X cannot be overstated\")"
+  },
+  {
+   "phrase": "highlights the importance of",
+   "reason": "AI significance-framing formula (Juzek 2026 cross-lingual study)"
+  },
+  {
+   "phrase": "underscores the importance of",
+   "reason": "AI significance-framing formula"
+  },
+  {
+   "phrase": "sheds light on",
+   "reason": "AI-academic illumination cliche"
+  },
+  {
+   "phrase": "gain a deeper understanding",
+   "reason": "AI-academic filler — what specifically is understood?"
+  },
+  {
+   "phrase": "opens new avenues",
+   "reason": "AI-academic outlook cliche (Kobak 2025 excess phrase)"
+  },
+  {
+   "phrase": "aims to explore",
+   "reason": "AI meta-announcement — ~50x more frequent in AI text (GPTZero)"
+  },
+  {
+   "phrase": "valuable insights",
+   "reason": "AI insight-inflation collocation (WP:AISIGNS; Geng & Trotta 2025)"
+  },
+  {
+   "phrase": "actionable insights",
+   "reason": "AI business-speak collocation"
+  },
+  {
+   "phrase": "rich tapestry",
+   "reason": "AI ornamental metaphor"
+  },
+  {
+   "phrase": "rich cultural heritage",
+   "reason": "AI travel-brochure puffery (WP:AISIGNS)"
+  },
+  {
+   "phrase": "treasure trove",
+   "reason": "AI ornamental metaphor"
+  },
+  {
+   "phrase": "hidden gem",
+   "reason": "AI travel-listicle cliche"
+  },
+  {
+   "phrase": "faces several challenges",
+   "reason": "AI challenges-formula prose (WP:AISIGNS)"
+  },
+  {
+   "phrase": "faced numerous challenges",
+   "reason": "AI challenges-formula prose (WP:AISIGNS)"
+  },
+  {
+   "phrase": "no discussion would be complete without",
+   "reason": "AI completeness-formula filler"
+  },
+  {
+   "phrase": "unlock the potential",
+   "reason": "AI marketing cliche"
+  },
+  {
+   "phrase": "unlock the full potential",
+   "reason": "AI marketing cliche"
+  },
+  {
+   "phrase": "unlock the power",
+   "reason": "AI marketing cliche"
+  },
+  {
+   "phrase": "harness the power",
+   "reason": "AI marketing cliche"
+  },
+  {
+   "phrase": "to the next level",
+   "reason": "AI marketing cliche (\"take X to the next level\")"
+  },
+  {
+   "phrase": "to new heights",
+   "reason": "AI marketing cliche"
+  },
+  {
+   "phrase": "push the boundaries of",
+   "reason": "AI marketing cliche"
+  },
+  {
+   "phrase": "look no further",
+   "reason": "AI sales-copy cliche"
+  },
+  {
+   "phrase": "supercharge your",
+   "reason": "AI marketing hype"
+  },
+  {
+   "phrase": "secret sauce",
+   "reason": "AI business-blog cliche"
+  },
+  {
+   "phrase": "deep dive",
+   "reason": "AI content-marketing cliche"
+  },
+  {
+   "phrase": "embrace the",
+   "reason": "AI call-to-action cliche (\"embrace the future\")"
+  },
+  {
+   "phrase": "navigate the complexities",
+   "reason": "AI closing cliche"
+  },
+  {
+   "phrase": "navigating the complexities",
+   "reason": "AI closing cliche"
+  },
+  {
+   "phrase": "pave the way for",
+   "reason": "AI forward-looking cliche"
+  },
+  {
+   "phrase": "the possibilities are endless",
+   "reason": "AI optimism cliche"
+  }
+ ],
+ "ai_vocab": [
+  {
+   "reason": "\"delve\" is the canonical AI verb — massively overrepresented in LLM text (Kobak 2025; Juzek & Ward 2025)",
+   "variants": [
+    "delves",
+    "delved",
+    "delving"
+   ],
+   "word": "delve"
+  },
+  {
+   "reason": "\"tapestry\" (metaphorical) is a strong AI vocabulary marker",
+   "variants": [
+    "tapestries"
+   ],
+   "word": "tapestry"
+  },
+  {
+   "reason": "\"multifaceted\" is heavily overrepresented in AI writing",
+   "word": "multifaceted"
+  },
+  {
+   "reason": "\"commendable\" is a classic AI praise word (Liang 2024 reviewer study)",
+   "word": "commendable"
+  },
+  {
+   "reason": "\"meticulous(ly)\" appears far more often in AI than human text (Liang 2024)",
+   "variants": [
+    "meticulously"
+   ],
+   "word": "meticulous"
+  },
+  {
+   "reason": "\"intricate\" is disproportionately used by AI models (Liang 2024; Kobak 2025)",
+   "variants": [
+    "intricacies",
+    "intricately"
+   ],
+   "word": "intricate"
+  },
+  {
+   "reason": "\"showcase/showcasing\" is a top AI verb that persists in the newest models (Juzek 2025; Kobak 2025)",
+   "variants": [
+    "showcases",
+    "showcased",
+    "showcasing"
+   ],
+   "word": "showcase"
+  },
+  {
+   "reason": "\"emphasize/emphasizing\" is overused by every model generation to date (Juzek 2025; Kobak 2025)",
+   "variants": [
+    "emphasizes",
+    "emphasized",
+    "emphasizing",
+    "emphasise",
+    "emphasises",
+    "emphasised",
+    "emphasising"
+   ],
+   "word": "emphasize"
+  },
+  {
+   "reason": "\"boasts\" (meaning \"has\") is AI copula-avoidance (WP:AISIGNS; Juzek & Ward 2025)",
+   "variants": [
+    "boasts",
+    "boasted",
+    "boasting"
+   ],
+   "word": "boast"
+  },
+  {
+   "reason": "\"indelible\" (\"left an indelible mark\") is an extreme AI marker in narrative prose",
+   "word": "indelible"
+  },
+  {
+   "reason": "\"nuanced\" is a frequent AI filler adjective",
+   "word": "nuanced"
+  },
+  {
+   "reason": "\"comprehensive\" is overused by AI as a generic intensifier",
+   "word": "comprehensive"
+  },
+  {
+   "reason": "\"pivotal\" is disproportionately favored by AI (Liang 2024)",
+   "word": "pivotal"
+  },
+  {
+   "reason": "\"holistic\" appears far more in AI text than human writing",
+   "word": "holistic"
+  },
+  {
+   "reason": "\"groundbreaking\" is AI hyperbole",
+   "word": "groundbreaking"
+  },
+  {
+   "reason": "\"transformative\" is a strong AI vocabulary signal",
+   "word": "transformative"
+  },
+  {
+   "reason": "\"encompasses\" is overrepresented in AI-generated text",
+   "variants": [
+    "encompass",
+    "encompassing",
+    "encompassed"
+   ],
+   "word": "encompasses"
+  },
+  {
+   "reason": "\"embark\" (especially \"embark on a journey\") is a known AI tell",
+   "variants": [
+    "embarks",
+    "embarked",
+    "embarking"
+   ],
+   "word": "embark"
+  },
+  {
+   "reason": "\"fostering\" is used far more by AI models than human writers",
+   "variants": [
+    "fosters",
+    "fostered"
+   ],
+   "word": "fostering"
+  },
+  {
+   "reason": "\"spearheading\" is a classic AI action verb",
+   "variants": [
+    "spearheaded",
+    "spearheads"
+   ],
+   "word": "spearheading"
+  },
+  {
+   "reason": "\"underscores\" is overused by AI for emphasis (Kobak 2025; still overused by 2026-era models)",
+   "variants": [
+    "underscored",
+    "underscoring"
+   ],
+   "word": "underscores"
+  },
+  {
+   "reason": "\"underpins\" is disproportionately AI-favored",
+   "variants": [
+    "underpinned",
+    "underpinning"
+   ],
+   "word": "underpins"
+  },
+  {
+   "reason": "\"leveraging\" is AI-corporate jargon rarely used naturally",
+   "variants": [
+    "leverages",
+    "leveraged"
+   ],
+   "word": "leveraging"
+  },
+  {
+   "reason": "\"landscape\" (metaphorical) is a known AI tell",
+   "variants": [
+    "landscapes"
+   ],
+   "word": "landscape"
+  },
+  {
+   "reason": "\"testament\" is overused by AI (\"a testament to...\")",
+   "word": "testament"
+  },
+  {
+   "reason": "\"noteworthy\" is disproportionately AI-generated (Liang 2024)",
+   "word": "noteworthy"
+  },
+  {
+   "reason": "\"invaluable\" is overrepresented in AI text (Liang 2024)",
+   "word": "invaluable"
+  },
+  {
+   "reason": "\"elevate\" is a frequent AI verb",
+   "variants": [
+    "elevates",
+    "elevating"
+   ],
+   "word": "elevate"
+  },
+  {
+   "reason": "\"garner\" (\"garnered significant attention\") is AI-favored (Juzek 2025; Kobak 2025)",
+   "variants": [
+    "garners",
+    "garnered",
+    "garnering"
+   ],
+   "word": "garner"
+  },
+  {
+   "reason": "\"vibrant\" is AI promotional language (Reinhart PNAS 2025; WP:AISIGNS)",
+   "word": "vibrant"
+  },
+  {
+   "reason": "\"nestled\" is classic AI travel-guide puffery (WP:AISIGNS)",
+   "word": "nestled"
+  },
+  {
+   "reason": "\"interplay\" is overrepresented in AI text (Kobak 2025)",
+   "word": "interplay"
+  },
+  {
+   "reason": "\"enhance\" is overused by every model generation to date (Kobak 2025; Russell 2025)",
+   "variants": [
+    "enhances",
+    "enhanced",
+    "enhancing"
+   ],
+   "word": "enhance"
+  },
+  {
+   "reason": "\"innovative\" is a top AI praise adjective (Liang 2024)",
+   "word": "innovative"
+  },
+  {
+   "reason": "\"seamless(ly)\" is AI marketing-speak (Liang 2024; vendor corpus lists)",
+   "variants": [
+    "seamlessly"
+   ],
+   "word": "seamless"
+  },
+  {
+   "reason": "\"revolutionize\" is AI hype vocabulary",
+   "variants": [
+    "revolutionizes",
+    "revolutionized",
+    "revolutionizing",
+    "revolutionise",
+    "revolutionises",
+    "revolutionised",
+    "revolutionising"
+   ],
+   "word": "revolutionize"
+  },
+  {
+   "reason": "\"cutting-edge\" is AI tech-hype vocabulary",
+   "word": "cutting-edge"
+  },
+  {
+   "reason": "\"ever-evolving\" is an AI cliche modifier (\"ever-evolving landscape\")",
+   "word": "ever-evolving"
+  },
+  {
+   "reason": "\"game-changer\" is AI marketing hyperbole",
+   "variants": [
+    "game-changing",
+    "game changer"
+   ],
+   "word": "game-changer"
+  },
+  {
+   "reason": "\"empower\" is overrepresented in AI marketing prose",
+   "variants": [
+    "empowers",
+    "empowered",
+    "empowering"
+   ],
+   "word": "empower"
+  },
+  {
+   "reason": "\"unleash\" (\"unleash the power of\") is AI hype vocabulary",
+   "variants": [
+    "unleashes",
+    "unleashed",
+    "unleashing"
+   ],
+   "word": "unleash"
+  },
+  {
+   "reason": "\"unwavering\" (\"unwavering commitment\") is an AI intensifier",
+   "word": "unwavering"
+  },
+  {
+   "reason": "\"paramount\" is AI-formal where \"most important\" would do",
+   "word": "paramount"
+  },
+  {
+   "reason": "\"stark\" (\"a stark reminder/contrast\") is overrepresented in AI text (Kobak 2025)",
+   "word": "stark"
+  },
+  {
+   "reason": "\"utilize\" is stiff AI diction — humans write \"use\"",
+   "variants": [
+    "utilizes",
+    "utilized",
+    "utilizing",
+    "utilise",
+    "utilises",
+    "utilised",
+    "utilising"
+   ],
+   "word": "utilize"
+  },
+  {
+   "reason": "\"synergy\" is AI corporate-speak",
+   "variants": [
+    "synergies"
+   ],
+   "word": "synergy"
+  },
+  {
+   "reason": "\"poignant\" is overrepresented in AI narrative prose (Kobak 2025)",
+   "word": "poignant"
+  },
+  {
+   "reason": "\"surpass\" is AI-favored comparative language (Kobak 2025)",
+   "variants": [
+    "surpasses",
+    "surpassed",
+    "surpassing"
+   ],
+   "word": "surpass"
+  },
+  {
+   "reason": "\"versatile\" is a top AI praise adjective (Liang 2024)",
+   "variants": [
+    "versatility"
+   ],
+   "word": "versatile"
+  },
+  {
+   "reason": "\"robust\" is AI jargon — humans rarely use it outside engineering",
+   "word": "robust"
+  },
+  {
+   "reason": "\"streamline\" is overrepresented in AI-generated content",
+   "variants": [
+    "streamlines",
+    "streamlined",
+    "streamlining"
+   ],
+   "word": "streamline"
+  },
+  {
+   "reason": "\"crucial\" is overused by AI where \"important\" would do (Liang 2024)",
+   "word": "crucial"
+  },
+  {
+   "reason": "\"realm\" (metaphorical, \"in the realm of\") is AI-favored (Liang 2024)",
+   "variants": [
+    "realms"
+   ],
+   "word": "realm"
+  },
+  {
+   "reason": "\"paradigm\" is overrepresented in AI text",
+   "variants": [
+    "paradigms"
+   ],
+   "word": "paradigm"
+  },
+  {
+   "reason": "\"myriad\" is disproportionately AI-generated",
+   "word": "myriad"
+  },
+  {
+   "reason": "\"plethora\" is a known AI vocabulary marker",
+   "word": "plethora"
+  },
+  {
+   "reason": "\"beacon\" (metaphorical) is AI-overused (\"a beacon of hope\")",
+   "word": "beacon"
+  },
+  {
+   "reason": "\"bustling\" is overrepresented in AI descriptions",
+   "word": "bustling"
+  },
+  {
+   "reason": "\"camaraderie\" appears ~150x more in ChatGPT text (CMU/PNAS study)",
+   "word": "camaraderie"
+  },
+  {
+   "reason": "\"resonate\" is disproportionately AI",
+   "variants": [
+    "resonates",
+    "resonated",
+    "resonating"
+   ],
+   "word": "resonate"
+  },
+  {
+   "reason": "\"bespoke\" is overrepresented in AI writing",
+   "word": "bespoke"
+  },
+  {
+   "reason": "\"esteemed\" is AI-formal language rarely used naturally",
+   "word": "esteemed"
+  },
+  {
+   "reason": "\"unparalleled\" is AI superlative overuse",
+   "word": "unparalleled"
+  },
+  {
+   "reason": "\"harnessing\" (metaphorical) is AI-overused (\"harnessing the power of\")",
+   "variants": [
+    "harnessed"
+   ],
+   "word": "harnessing"
+  },
+  {
+   "reason": "\"adept\" is disproportionately AI-generated",
+   "word": "adept"
+  },
+  {
+   "reason": "\"aligns\" / \"aligns with\" is AI transition overuse",
+   "word": "aligns"
+  },
+  {
+   "reason": "\"burgeoning\" is overrepresented in AI text (Kobak 2025)",
+   "word": "burgeoning"
+  },
+  {
+   "reason": "\"renowned\" is AI promotional puffery (WP:AISIGNS)",
+   "word": "renowned"
+  },
+  {
+   "reason": "\"breathtaking\" is AI promotional language (WP:AISIGNS)",
+   "word": "breathtaking"
+  },
+  {
+   "reason": "\"profound\" is AI-favored gravitas (WP:AISIGNS puffery list)",
+   "word": "profound"
+  },
+  {
+   "reason": "\"enduring\" (\"enduring legacy\") is AI legacy-puffery (Kobak 2025; WP:AISIGNS)",
+   "word": "enduring"
+  },
+  {
+   "reason": "\"bolster\" is overrepresented in AI text (Kobak 2025)",
+   "variants": [
+    "bolsters",
+    "bolstered",
+    "bolstering"
+   ],
+   "word": "bolster"
+  },
+  {
+   "reason": "\"excels\" is AI praise language (\"the tool excels at...\")",
+   "word": "excels"
+  },
+  {
+   "reason": "\"captivate/captivating\" is AI narrative puffery",
+   "variants": [
+    "captivates",
+    "captivated",
+    "captivating"
+   ],
+   "word": "captivate"
+  },
+  {
+   "reason": "\"daunting\" is overrepresented in AI text (Kobak 2025)",
+   "word": "daunting"
+  },
+  {
+   "reason": "\"demystify\" is AI blog-title vocabulary",
+   "variants": [
+    "demystifies",
+    "demystified",
+    "demystifying"
+   ],
+   "word": "demystify"
+  },
+  {
+   "reason": "\"elucidate\" is stiff AI-academic diction",
+   "variants": [
+    "elucidates",
+    "elucidated",
+    "elucidating"
+   ],
+   "word": "elucidate"
+  },
+  {
+   "reason": "\"exemplary\" is AI praise vocabulary",
+   "word": "exemplary"
+  },
+  {
+   "reason": "\"exemplifies\" is AI significance-framing (WP:AISIGNS puffery list)",
+   "variants": [
+    "exemplified"
+   ],
+   "word": "exemplifies"
+  },
+  {
+   "reason": "\"kaleidoscope\" (metaphorical) is AI ornamental vocabulary",
+   "word": "kaleidoscope"
+  },
+  {
+   "reason": "\"symphony\" (metaphorical, \"a symphony of flavors\") is AI ornamental vocabulary",
+   "word": "symphony"
+  },
+  {
+   "reason": "\"linchpin\" is overrepresented in AI analysis prose",
+   "word": "linchpin"
+  },
+  {
+   "reason": "\"multitude\" (\"a multitude of\") is AI quantity inflation",
+   "word": "multitude"
+  },
+  {
+   "reason": "\"nascent\" is AI-academic diction (Kobak 2025)",
+   "word": "nascent"
+  },
+  {
+   "reason": "\"uncharted\" (\"uncharted waters/territory\") is an AI cliche",
+   "word": "uncharted"
+  },
+  {
+   "reason": "\"unveil\" is AI announcement diction (Kobak 2025)",
+   "variants": [
+    "unveils",
+    "unveiled",
+    "unveiling"
+   ],
+   "word": "unveil"
+  },
+  {
+   "reason": "\"insightful\" is a top AI praise adjective (Liang 2024)",
+   "word": "insightful"
+  },
+  {
+   "reason": "\"compelling\" is AI praise vocabulary (Liang 2024)",
+   "word": "compelling"
+  },
+  {
+   "reason": "\"laudable\" is AI praise vocabulary (Liang 2024 reviewer study)",
+   "word": "laudable"
+  },
+  {
+   "reason": "\"ingenious\" is AI praise vocabulary",
+   "word": "ingenious"
+  },
+  {
+   "reason": "\"aforementioned\" is stiff AI-formal backreference — humans write \"this\" or \"that\"",
+   "word": "aforementioned"
+  },
+  {
+   "reason": "\"cognizant\" is stiff AI-formal diction — humans write \"aware\"",
+   "word": "cognizant"
+  },
+  {
+   "reason": "\"endeavor\" (noun) is AI-formal where \"effort\" or \"project\" would do",
+   "variants": [
+    "endeavors",
+    "endeavour",
+    "endeavours"
+   ],
+   "word": "endeavor"
+  },
+  {
+   "reason": "\"facilitate\" is AI business-speak — humans write \"help\" or \"enable\"",
+   "variants": [
+    "facilitates",
+    "facilitated",
+    "facilitating"
+   ],
+   "word": "facilitate"
+  },
+  {
+   "reason": "\"skyrocket\" is AI marketing hyperbole",
+   "variants": [
+    "skyrockets",
+    "skyrocketed",
+    "skyrocketing"
+   ],
+   "word": "skyrocket"
+  },
+  {
+   "reason": "\"comprehend\" is stiff AI diction — humans write \"understand\"",
+   "word": "comprehend"
+  },
+  {
+   "reason": "\"revitalize\" is AI marketing vocabulary",
+   "variants": [
+    "revitalizes",
+    "revitalized",
+    "revitalizing"
+   ],
+   "word": "revitalize"
+  },
+  {
+   "reason": "\"illuminates\" (figurative) is AI-academic framing",
+   "variants": [
+    "illuminating"
+   ],
+   "word": "illuminates"
+  }
+ ],
+ "cliches": [
+  "American as apple pie",
+  "Hobson's choice",
+  "I beg to differ",
+  "Jack of all trades",
+  "a chip off the old block",
+  "a clean slate",
+  "a dark and stormy night",
+  "a far cry",
+  "a fate worse than death",
+  "a fine kettle of fish",
+  "a loose cannon",
+  "a penny saved is a penny earned",
+  "a tough row to hoe",
+  "a watershed moment",
+  "a word to the wise",
+  "ace in the hole",
+  "acid test",
+  "add insult to injury",
+  "against all odds",
+  "air your dirty laundry",
+  "alas and alack",
+  "all fun and games",
+  "all hell broke loose",
+  "all in a day's work",
+  "all talk, no action",
+  "all thumbs",
+  "all your eggs in one basket",
+  "all's fair in love and war",
+  "all's well that ends well",
+  "almighty dollar",
+  "amplifies the need for",
+  "an axe to grind",
+  "another day, another dollar",
+  "armed to the teeth",
+  "as luck would have it",
+  "as old as time",
+  "as the crow flies",
+  "as we move forward",
+  "at a pivotal moment",
+  "at loose ends",
+  "at my wits end",
+  "at the end of the day",
+  "avoid like the plague",
+  "babe in the woods",
+  "back against the wall",
+  "back in the saddle",
+  "back to square one",
+  "back to the drawing board",
+  "bad to the bone",
+  "badge of honor",
+  "bald faced liar",
+  "bald-faced lie",
+  "ballpark figure",
+  "banging your head against a brick wall",
+  "baptism by fire",
+  "barking up the wrong tree",
+  "bat out of hell",
+  "be all and end all",
+  "beacon of hope",
+  "beat a dead horse",
+  "beat around the bush",
+  "been there, done that",
+  "beggars can't be choosers",
+  "behind the eight ball",
+  "bend over backwards",
+  "benefit of the doubt",
+  "bent out of shape",
+  "best thing since sliced bread",
+  "bet your bottom dollar",
+  "better half",
+  "better late than never",
+  "better mousetrap",
+  "better safe than sorry",
+  "between Scylla and Charybdis",
+  "between a rock and a hard place",
+  "between the devil and the deep blue see",
+  "betwixt and between",
+  "beyond the pale",
+  "bide your time",
+  "big as life",
+  "big cheese",
+  "big fish in a small pond",
+  "big man on campus",
+  "bigger they are the harder they fall",
+  "bird in the hand",
+  "bird's eye view",
+  "birds and the bees",
+  "birds of a feather flock together",
+  "bit the hand that feeds you",
+  "bite the bullet",
+  "bite the dust",
+  "bitten off more than he can chew",
+  "black as coal",
+  "black as pitch",
+  "black as the ace of spades",
+  "blast from the past",
+  "bleeding heart",
+  "blessing in disguise",
+  "blind ambition",
+  "blind as a bat",
+  "blind leading the blind",
+  "blissful ignorance",
+  "blood is thicker than water",
+  "blood sweat and tears",
+  "blow a fuse",
+  "blow off steam",
+  "blow your own horn",
+  "blushing bride",
+  "boils down to",
+  "bolt from the blue",
+  "bone to pick",
+  "bored stiff",
+  "bored to tears",
+  "bottomless pit",
+  "boys will be boys",
+  "bright and early",
+  "brings home the bacon",
+  "brings to the fore",
+  "broad across the beam",
+  "broken record",
+  "brought back to reality",
+  "bulk large",
+  "bull by the horns",
+  "bull in a china shop",
+  "burn the midnight oil",
+  "burning question",
+  "burning the candle at both ends",
+  "burst your bubble",
+  "bury the hatchet",
+  "busy as a bee",
+  "but that's another story",
+  "by hook or by crook",
+  "call a spade a spade",
+  "called onto the carpet",
+  "calm before the storm",
+  "can of worms",
+  "can't cut the mustard",
+  "can't hold a candle to",
+  "case of mistaken identity",
+  "cast aspersions",
+  "cat got your tongue",
+  "cat's meow",
+  "caught in the crossfire",
+  "caught red-handed",
+  "cements its place as",
+  "charts a new course",
+  "chase a red herring",
+  "checkered past",
+  "chomping at the bit",
+  "cleanliness is next to godliness",
+  "clear as a bell",
+  "clear as mud",
+  "close to the vest",
+  "cock and bull story",
+  "cold shoulder",
+  "come hell or high water",
+  "comparing apples and oranges",
+  "compleat",
+  "conspicuous by its absence",
+  "contributing to the fabric of",
+  "cool as a cucumber",
+  "cool, calm, and collected",
+  "cost a king's ransom",
+  "count your blessings",
+  "crack of dawn",
+  "crash course",
+  "creature comforts",
+  "cross that bridge when you come to it",
+  "crushing blow",
+  "cry like a baby",
+  "cry me a river",
+  "cry over spilt milk",
+  "crystal clear",
+  "curiosity killed the cat",
+  "cut and dried",
+  "cut through the red tape",
+  "cut to the chase",
+  "cute as a bugs ear",
+  "cute as a button",
+  "cute as a puppy",
+  "cuts to the quick",
+  "cutting edge",
+  "dark before the dawn",
+  "day in, day out",
+  "dead as a doornail",
+  "decision-making process",
+  "devil is in the details",
+  "dime a dozen",
+  "discover the wonders of",
+  "divide and conquer",
+  "dog and pony show",
+  "dog days",
+  "dog eat dog",
+  "dog tired",
+  "don't burn your bridges",
+  "don't count your chickens",
+  "don't look a gift horse in the mouth",
+  "don't rock the boat",
+  "don't step on anyone's toes",
+  "don't take any wooden nickels",
+  "down and out",
+  "down at the heels",
+  "down in the dumps",
+  "down the hatch",
+  "down to earth",
+  "draw the line",
+  "dressed to kill",
+  "dressed to the nines",
+  "drive engagement",
+  "drives home the point",
+  "drives me up the wall",
+  "dubious distinction",
+  "dull as dishwater",
+  "duly authorized",
+  "dyed in the wool",
+  "eagle eye",
+  "ear to the ground",
+  "early bird catches the worm",
+  "easier said than done",
+  "easy as pie",
+  "eat your heart out",
+  "eat your words",
+  "eleventh hour",
+  "embodies the spirit of",
+  "embrace the journey",
+  "empower individuals to",
+  "even the playing field",
+  "every dog has its day",
+  "every fiber of my being",
+  "everything but the kitchen sink",
+  "everything happens for a reason",
+  "eye for an eye",
+  "eyes peeled",
+  "face the music",
+  "facts of life",
+  "fair weather friend",
+  "fall by the wayside",
+  "fan the flames",
+  "far be it from me",
+  "fast and loose",
+  "feast or famine",
+  "feather your nest",
+  "feathered friends",
+  "few and far between",
+  "fifteen minutes of fame",
+  "fills the bill",
+  "filthy vermin",
+  "fine kettle of fish",
+  "first and foremost",
+  "fish out of water",
+  "fishing for a compliment",
+  "fit as a fiddle",
+  "fit the bill",
+  "fit to be tied",
+  "flash in the pan",
+  "flat as a pancake",
+  "flip your lid",
+  "flog a dead horse",
+  "fly by night",
+  "fly the coop",
+  "follow your heart",
+  "for all intents and purposes",
+  "for free",
+  "for the birds",
+  "for what it's worth",
+  "force of nature",
+  "force to be reckoned with",
+  "forgive and forget",
+  "fox in the henhouse",
+  "free and easy",
+  "free as a bird",
+  "fresh as a daisy",
+  "full steam ahead",
+  "fun in the sun",
+  "gain a comprehensive understanding",
+  "gain valuable insights",
+  "garbage in, garbage out",
+  "gentle as a lamb",
+  "get a kick out of",
+  "get a leg up",
+  "get down and dirty",
+  "get the lead out",
+  "get to the bottom of",
+  "get with the program",
+  "get your feet wet",
+  "gets my goat",
+  "gilding the lily",
+  "give and take",
+  "go against the grain",
+  "go at it tooth and nail",
+  "go for broke",
+  "go him one better",
+  "go the extra mile",
+  "go with the flow",
+  "goes without saying",
+  "good as gold",
+  "good deed for the day",
+  "good things come to those who wait",
+  "good time was had by all",
+  "good times were had by all",
+  "greased lightning",
+  "greek to me",
+  "green thumb",
+  "green-eyed monster",
+  "grist for the mill",
+  "growing like a weed",
+  "hair of the dog",
+  "hand to mouth",
+  "happy as a clam",
+  "happy as a lark",
+  "harness the power of",
+  "has something for everyone",
+  "has transformed the landscape of",
+  "hasn't a clue",
+  "have a nice day",
+  "have a short fuse",
+  "have high hopes",
+  "have the last laugh",
+  "haven't got a row to hoe",
+  "he's got his hands full",
+  "head honcho",
+  "head over heels",
+  "hear a pin drop",
+  "heard it through the grapevine",
+  "heart's content",
+  "heavy as lead",
+  "hem and haw",
+  "heralds a new era",
+  "high and dry",
+  "high and mighty",
+  "high as a kite",
+  "his own worst enemy",
+  "his work cut out for him",
+  "hit paydirt",
+  "hither and yon",
+  "hold your head up high",
+  "hold your horses",
+  "hold your own",
+  "hold your tongue",
+  "holds the key to",
+  "honest as the day is long",
+  "horns of a dilemma",
+  "horse of a different color",
+  "hot under the collar",
+  "hour of need",
+  "icing on the cake",
+  "if the shoe fits",
+  "if the shoe were on the other foot",
+  "if you catch my drift",
+  "immerse yourself in",
+  "in a jam",
+  "in a jiffy",
+  "in a nutshell",
+  "in a pig's eye",
+  "in a pinch",
+  "in a word",
+  "in hot water",
+  "in the gutter",
+  "in the last analysis",
+  "in the nick of time",
+  "in the not-too-distant future",
+  "in the thick of it",
+  "in your dreams",
+  "innocent bystander",
+  "into sharp focus",
+  "into sharp relief",
+  "it ain't over till the fat lady sings",
+  "it takes all kinds",
+  "it takes one to know one",
+  "it's a small world",
+  "it's not what you know, it's who you know",
+  "it's only a matter of time",
+  "ivory tower",
+  "jockey for position",
+  "jog your memory",
+  "joined at the hip",
+  "judge a book by its cover",
+  "jump down your throat",
+  "jump in with both feet",
+  "jump on the bandwagon",
+  "jump the gun",
+  "jump to conclusions",
+  "just a hop, skip, and a jump",
+  "just the ticket",
+  "justice is blind",
+  "keep a stiff upper lip",
+  "keep an eye on",
+  "keep it simple, stupid",
+  "keep the home fires burning",
+  "keep up with the Joneses",
+  "keep your chin up",
+  "keep your fingers crossed",
+  "kick the bucket",
+  "kick up your heels",
+  "kick your feet up",
+  "kid in a candy store",
+  "kill two birds with one stone",
+  "kiss of death",
+  "knock it out of the park",
+  "knock on wood",
+  "knock your socks off",
+  "know him from Adam",
+  "know the ropes",
+  "know the score",
+  "knuckle down",
+  "knuckle sandwich",
+  "knuckle under",
+  "labor of love",
+  "ladder of success",
+  "land on your feet",
+  "lap of luxury",
+  "last but not least",
+  "last hurrah",
+  "last-ditch effort",
+  "law of the jungle",
+  "law of the land",
+  "lay down the law",
+  "leaps and bounds",
+  "leave no stone unturned",
+  "leaves an indelible mark",
+  "left an indelible mark",
+  "let sleeping dogs lie",
+  "let the cat out of the bag",
+  "let the good times roll",
+  "let your hair down",
+  "let's talk turkey",
+  "letter perfect",
+  "lick your wounds",
+  "lies like a rug",
+  "life's a bitch",
+  "life's a grind",
+  "light at the end of the tunnel",
+  "lighter than a feather",
+  "lighter than air",
+  "like clockwork",
+  "like father like son",
+  "like taking candy from a baby",
+  "like the plague",
+  "like there's no tomorrow",
+  "lion's share",
+  "live and learn",
+  "live and let live",
+  "long and short of it",
+  "long lost love",
+  "look before you leap",
+  "look down your nose",
+  "look what the cat dragged in",
+  "looking a gift horse in the mouth",
+  "looks like death warmed over",
+  "loose cannon",
+  "lose your head",
+  "lose your temper",
+  "loud as a horn",
+  "lounge lizard",
+  "loved and lost",
+  "low man on the totem pole",
+  "luck of the Irish",
+  "luck of the draw",
+  "make a mockery of",
+  "make hay while the sun shines",
+  "make money hand over fist",
+  "make my day",
+  "make the best of a bad situation",
+  "make the best of it",
+  "make your blood boil",
+  "male chauvinism",
+  "man of few words",
+  "man's best friend",
+  "mark my words",
+  "meaningful dialogue",
+  "missed the boat on that one",
+  "moment in the sun",
+  "moment of glory",
+  "moment of truth",
+  "money to burn",
+  "more in sorrow than in anger",
+  "more power to you",
+  "more sinned against than sinning",
+  "more than one way to skin a cat",
+  "movers and shakers",
+  "moving experience",
+  "my better half",
+  "naked as a jaybird",
+  "naked truth",
+  "navigate the complexities of",
+  "neat as a pin",
+  "needle in a haystack",
+  "needless to say",
+  "neither here nor there",
+  "nestled in the heart of",
+  "never look back",
+  "never say never",
+  "nip and tuck",
+  "nip in the bud",
+  "nip it in the bud",
+  "no guts, no glory",
+  "no love lost",
+  "no pain, no gain",
+  "no skin off my back",
+  "no stone unturned",
+  "no time like the present",
+  "no use crying over spilled milk",
+  "nose to the grindstone",
+  "not a hope in hell",
+  "not a minute's peace",
+  "not in my backyard",
+  "not playing with a full deck",
+  "not the end of the world",
+  "not written in stone",
+  "nothing to sneeze at",
+  "nothing ventured nothing gained",
+  "now we're cooking",
+  "off the top of my head",
+  "off the wagon",
+  "off the wall",
+  "offers valuable insights",
+  "old hat",
+  "olden days",
+  "older and wiser",
+  "older than Methuselah",
+  "older than dirt",
+  "on a roll",
+  "on cloud nine",
+  "on pins and needles",
+  "on the bandwagon",
+  "on the money",
+  "on the nose",
+  "on the rocks",
+  "on the same page",
+  "on the spot",
+  "on the tip of my tongue",
+  "on the wagon",
+  "on thin ice",
+  "once bitten, twice shy",
+  "one bad apple doesn't spoil the bushel",
+  "one born every minute",
+  "one brick short",
+  "one foot in the grave",
+  "one in a million",
+  "one red cent",
+  "only game in town",
+  "open a can of worms",
+  "open and shut case",
+  "open the flood gates",
+  "opportunity doesn't knock twice",
+  "out of pocket",
+  "out of sight, out of mind",
+  "out of the frying pan into the fire",
+  "out of the woods",
+  "out on a limb",
+  "over a barrel",
+  "over the hump",
+  "pain and suffering",
+  "paints a vivid picture of",
+  "panic button",
+  "par for the course",
+  "part and parcel",
+  "party pooper",
+  "pass the buck",
+  "patience is a virtue",
+  "paves the way for",
+  "pay through the nose",
+  "penny pincher",
+  "perfect storm",
+  "pig in a poke",
+  "pile it on",
+  "pillar of the community",
+  "pin your hopes on",
+  "pitter patter of little feet",
+  "plain as day",
+  "plain as the nose on your face",
+  "play by the rules",
+  "play your cards right",
+  "playing the field",
+  "playing with fire",
+  "plays a pivotal role in shaping",
+  "pleased as punch",
+  "plenty of fish in the sea",
+  "point with pride",
+  "poor as a church mouse",
+  "pot calling the kettle black",
+  "presidential timber",
+  "pretty as a picture",
+  "pull a fast one",
+  "pull your punches",
+  "pulled no punches",
+  "pulling your leg",
+  "pure as the driven snow",
+  "put it in a nutshell",
+  "put one over on you",
+  "put the cart before the horse",
+  "put the pedal to the metal",
+  "put your best foot forward",
+  "put your foot down",
+  "quantum jump",
+  "quantum leap",
+  "quick as a bunny",
+  "quick as a lick",
+  "quick as a wink",
+  "quick as lightning",
+  "quiet as a dormouse",
+  "rags to riches",
+  "raining buckets",
+  "raining cats and dogs",
+  "rank and file",
+  "rat race",
+  "reap what you sow",
+  "red as a beet",
+  "red herring",
+  "redefines the boundaries of",
+  "redound to one's credit",
+  "redound to the benefit of",
+  "reflects a broader",
+  "reinvent the wheel",
+  "represents a paradigm shift",
+  "reshapes the landscape",
+  "resonate with audiences",
+  "revolutionized the way we",
+  "rich and famous",
+  "rich cultural tapestry",
+  "rings a bell",
+  "ripe old age",
+  "ripped me off",
+  "rise and shine",
+  "road to hell is paved with good intentions",
+  "rob Peter to pay Paul",
+  "roll over in the grave",
+  "rub the wrong way",
+  "ruled the roost",
+  "running in circles",
+  "sad but true",
+  "sadder but wiser",
+  "salt of the earth",
+  "scared stiff",
+  "scared to death",
+  "sea change",
+  "sealed with a kiss",
+  "second to none",
+  "see eye to eye",
+  "seen the light",
+  "seize the day",
+  "serves as a reminder that",
+  "serves as a testament to",
+  "set the record straight",
+  "set the world on fire",
+  "set your teeth on edge",
+  "sharp as a tack",
+  "sheds light on",
+  "shines a spotlight on",
+  "shirked his duties",
+  "shoot for the moon",
+  "shoot the breeze",
+  "shot in the dark",
+  "shoulder to the wheel",
+  "sick as a dog",
+  "sigh of relief",
+  "signals a seismic shift",
+  "signed, sealed, and delivered",
+  "significant contributions to the field",
+  "sink or swim",
+  "six of one, half a dozen of another",
+  "six of one, half a dozen of the other",
+  "skating on thin ice",
+  "slept like a log",
+  "slinging mud",
+  "slippery as an eel",
+  "slow as molasses",
+  "smart as a whip",
+  "smooth as a baby's bottom",
+  "sneaking suspicion",
+  "snug as a bug in a rug",
+  "sow wild oats",
+  "spare the rod, spoil the child",
+  "speak of the devil",
+  "speaks volumes about",
+  "spilled the beans",
+  "spinning your wheels",
+  "spitting image of",
+  "spoke with relish",
+  "spread like wildfire",
+  "spring to life",
+  "squeaky wheel gets the grease",
+  "stands as a beacon of",
+  "stands as a testament to",
+  "stands out like a sore thumb",
+  "start from scratch",
+  "step out of your comfort zone",
+  "stick in the mud",
+  "still waters run deep",
+  "stitch in time",
+  "stop and smell the roses",
+  "straight as an arrow",
+  "straw that broke the camel's back",
+  "stretched to the breaking point",
+  "strong as an ox",
+  "stubborn as a mule",
+  "stuff that dreams are made of",
+  "stuffed shirt",
+  "sweating blood",
+  "sweating bullets",
+  "take a load off",
+  "take one for the team",
+  "take the bait",
+  "take the bull by the horns",
+  "take the plunge",
+  "takes center stage",
+  "takes one to know one",
+  "takes two to tango",
+  "than you can shake a stick at",
+  "the cream of the crop",
+  "the cream rises to the top",
+  "the more the merrier",
+  "the real McCoy",
+  "the real deal",
+  "the red carpet treatment",
+  "the same old story",
+  "the stakes have never been higher",
+  "the straw that broke the camel's back",
+  "there is no accounting for taste",
+  "there is no one-size-fits-all answer",
+  "thick as a brick",
+  "thick as thieves",
+  "thin as a rail",
+  "think outside of the box",
+  "thinking outside the box",
+  "third time's the charm",
+  "this changes everything",
+  "this day and age",
+  "this hurts me worse than it hurts you",
+  "thought leaders?",
+  "three sheets to the wind",
+  "thriving ecosystem of",
+  "through thick and thin",
+  "throw in the towel",
+  "throw the baby out with the bathwater",
+  "tie one on",
+  "tighter than a drum",
+  "time and time again",
+  "time is of the essence",
+  "tip of the iceberg",
+  "tired but happy",
+  "to coin a phrase",
+  "to each his own",
+  "to make a long story short",
+  "to the best of my knowledge",
+  "toe the line",
+  "tongue in cheek",
+  "too good to be true",
+  "too hot to handle",
+  "too numerous to mention",
+  "touch with a ten foot pole",
+  "tough as nails",
+  "treasure trove of",
+  "trial and error",
+  "trials and tribulations",
+  "tried and true",
+  "trip down memory lane",
+  "twist of fate",
+  "two cents worth",
+  "two peas in a pod",
+  "ugly as sin",
+  "under the counter",
+  "under the gun",
+  "under the same roof",
+  "under the weather",
+  "unlock the potential of",
+  "unlock your true potential",
+  "until the cows come home",
+  "unvarnished truth",
+  "up the creek",
+  "uphill battle",
+  "upper crust",
+  "upset the applecart",
+  "ushers in a new era",
+  "vain attempt",
+  "vain effort",
+  "vanquish the enemy",
+  "various and sundry",
+  "vested interest",
+  "viable alternative",
+  "vibrant hub of",
+  "waiting for the other shoe to drop",
+  "wakeup call",
+  "warm welcome",
+  "watch your p's and q's",
+  "watch your tongue",
+  "watching the clock",
+  "water under the bridge",
+  "wax eloquent",
+  "wax poetic",
+  "we stand at a crossroads",
+  "we've got a situation here",
+  "weather the storm",
+  "weed them out",
+  "week of Sundays",
+  "went belly up",
+  "wet behind the ears",
+  "what goes around comes around",
+  "what you see is what you get",
+  "when it rains, it pours",
+  "when push comes to shove",
+  "when the cat's away",
+  "when the going gets tough, the tough get going",
+  "whet the appetite",
+  "whet your appetite",
+  "white as a sheet",
+  "whole ball of wax",
+  "whole hog",
+  "whole nine yards",
+  "wild goose chase",
+  "will wonders never cease?",
+  "wisdom of the ages",
+  "wise as an owl",
+  "wolf at the door",
+  "wool pulled over our eyes",
+  "words fail me",
+  "work like a dog",
+  "world weary",
+  "worst nightmare",
+  "worth its weight in gold",
+  "writ large",
+  "wrong side of the bed",
+  "yanking your chain",
+  "yappy as a dog",
+  "years young",
+  "you are what you eat",
+  "you can run but you can't hide",
+  "you only live once",
+  "you're the boss",
+  "young and foolish",
+  "young and vibrant"
+ ],
+ "corporate_speak": [
+  "all hands on deck",
+  "activate the right levers",
+  "apples to apples",
+  "bang for your buck",
+  "circle back around",
+  "customer-centric innovation",
+  "cross-functional stakeholders",
+  "double-click on",
+  "drill-down",
+  "elephant in the room",
+  "flywheel of trust",
+  "future-proof the experience",
+  "get my manager's blessing",
+  "get the ball rolling",
+  "game-changer",
+  "hit the ground running",
+  "ai-native customer journey",
+  "authentic storytelling",
+  "i don't have the bandwidth",
+  "it's on my radar",
+  "let's touch base",
+  "low-hanging fruit",
+  "move the goal post",
+  "move the needle",
+  "next horizon",
+  "next-generation growth",
+  "north-star narrative",
+  "no brainer",
+  "on my plate",
+  "operationalize learnings",
+  "ping me",
+  "socialize the proposal",
+  "synergies across the value chain",
+  "synergy",
+  "take this offline",
+  "table stakes",
+  "next-level",
+  "supercharge",
+  "world-class",
+  "best-in-class",
+  "north star",
+  "think outside the box",
+  "thrown under the bus",
+  "unlock our full potential",
+  "unlock their full potential",
+  "unlock your full potential",
+  "win-win",
+  "secret sauce",
+  "force multiplier",
+  "boil the ocean",
+  "best-of-breed",
+  "go-to-market motion",
+  "bleeding-edge",
+  "drive value",
+  "deliver impact",
+  "move fast and break things",
+  "10x your",
+  "data-driven insights",
+  "actionable insights",
+  "empower your team",
+  "ecosystem of partners",
+  "innovate at the speed of",
+  "reimagine the future of",
+  "built for the enterprise",
+  "10x growth",
+  "30,000-foot view",
+  "agile methodology",
+  "brand storytelling",
+  "core competencies",
+  "cross-functional alignment",
+  "cross-pollination of ideas",
+  "data-driven decisions",
+  "digital transformation",
+  "ducks in a row",
+  "eating your own dog food",
+  "end-to-end solution",
+  "excited to share",
+  "future-proof your",
+  "headwinds",
+  "ideation session",
+  "keep all stakeholders aligned",
+  "learnings",
+  "leverage synergies",
+  "move at the speed of business",
+  "open the kimono",
+  "out-of-the-box thinking",
+  "revolutionizing the way",
+  "rightsizing",
+  "robust ecosystem",
+  "robust pipeline",
+  "run it up the flagpole",
+  "scale our operations",
+  "seamless integration",
+  "stakeholder buy-in",
+  "strategic alignment",
+  "streamline processes",
+  "tailwinds",
+  "talent pipeline",
+  "that's where we come in",
+  "thought leader",
+  "thought leadership",
+  "tiger team"
+ ],
+ "filler_adverbs": [
+  "absolutely",
+  "accordingly",
+  "admittedly",
+  "altogether",
+  "assuredly",
+  "categorically",
+  "chronically",
+  "collectively",
+  "comparably",
+  "compellingly",
+  "conclusively",
+  "consequently",
+  "consistently",
+  "constantly",
+  "continually",
+  "critically",
+  "decidedly",
+  "demonstrably",
+  "desperately",
+  "disproportionately",
+  "drastically",
+  "effectively",
+  "effortlessly",
+  "emphatically",
+  "enormously",
+  "entirely",
+  "especially",
+  "excitedly",
+  "exclusively",
+  "exponentially",
+  "extraordinarily",
+  "faithfully",
+  "fortunately",
+  "fundamentally",
+  "genuinely",
+  "globally",
+  "gracefully",
+  "greatly",
+  "hastily",
+  "historically",
+  "honestly",
+  "hopefully",
+  "hugely",
+  "ideally",
+  "immensely",
+  "immediately",
+  "impossibly",
+  "incidentally",
+  "incredibly",
+  "independently",
+  "indisputably",
+  "inevitably",
+  "infinitely",
+  "inherently",
+  "insanely",
+  "instantly",
+  "irrefutably",
+  "ironically",
+  "markedly",
+  "massively",
+  "materially",
+  "measurably",
+  "mercifully",
+  "merely",
+  "miraculously",
+  "monumentally",
+  "naturally",
+  "necessarily",
+  "noticeably",
+  "objectively",
+  "obscurely",
+  "overwhelmingly",
+  "overly",
+  "painfully",
+  "paradoxically",
+  "particularly",
+  "perfectly",
+  "permanently",
+  "personally",
+  "plainly",
+  "plausibly",
+  "positively",
+  "practically",
+  "precisely",
+  "predictably",
+  "predominantly",
+  "primarily",
+  "principally",
+  "profoundly",
+  "progressively",
+  "promptly",
+  "proportionally",
+  "purely",
+  "radically",
+  "rapidly",
+  "regrettably",
+  "reliably",
+  "repeatedly",
+  "reportedly",
+  "respectively",
+  "ridiculously",
+  "routinely",
+  "sadly",
+  "seriously",
+  "severely",
+  "sharply",
+  "singularly",
+  "solely",
+  "specifically",
+  "spectacularly",
+  "steadily",
+  "strikingly",
+  "strongly",
+  "stubbornly",
+  "sufficiently",
+  "surely",
+  "suspiciously",
+  "technically",
+  "thankfully",
+  "thoroughly",
+  "tirelessly",
+  "totally",
+  "tremendously",
+  "truly",
+  "unanimously",
+  "unconditionally",
+  "undeniably",
+  "understandably",
+  "unfortunately",
+  "uniformly",
+  "uniquely",
+  "universally",
+  "unnecessarily",
+  "unreasonably",
+  "utterly",
+  "vastly",
+  "vigorously",
+  "wholly",
+  "wildly"
+ ],
+ "hedges": [
+  "it seems",
+  "it appears",
+  "it would seem",
+  "it would appear",
+  "it could be said",
+  "it might be said",
+  "it may be said",
+  "it could be argued",
+  "it might be argued",
+  "it is possible that",
+  "it is likely that",
+  "it is conceivable that",
+  "it is worth noting",
+  "it should be noted",
+  "it must be noted",
+  "it is interesting to note",
+  "it goes without saying",
+  "one could argue",
+  "one might argue",
+  "one might say",
+  "one could say",
+  "one would think",
+  "one would expect",
+  "in my opinion",
+  "in my view",
+  "needless to say",
+  "it stands to reason",
+  "there is a chance that",
+  "there is a possibility that",
+  "there is reason to believe",
+  "there is some evidence",
+  "the evidence suggests",
+  "this suggests that",
+  "this seems to indicate",
+  "this appears to show",
+  "this would suggest",
+  "this might indicate",
+  "this could mean",
+  "this may imply",
+  "remains to be seen",
+  "time will tell"
+ ],
+ "llm_disclaimer_expansions": {
+  "contains": [
+   "up to my last training"
+  ],
+  "startsWith": [
+   "as an ai",
+   "as of my last cutoff",
+   "i cannot browse",
+   "my last knowledge update was",
+   "my knowledge cutoff is",
+   "up to my last training"
+  ]
+ },
+ "nominalizations": [
+  {
+   "suggestion": "use",
+   "word": "utilization"
+  },
+  {
+   "suggestion": "implement",
+   "word": "implementation"
+  },
+  {
+   "suggestion": "optimize",
+   "word": "optimization"
+  },
+  {
+   "suggestion": "document",
+   "word": "documentation"
+  },
+  {
+   "suggestion": "authorize",
+   "word": "authorization"
+  },
+  {
+   "suggestion": "authenticate",
+   "word": "authentication"
+  },
+  {
+   "suggestion": "configure",
+   "word": "configuration"
+  },
+  {
+   "suggestion": "initialize",
+   "word": "initialization"
+  },
+  {
+   "suggestion": "modify",
+   "word": "modification"
+  },
+  {
+   "suggestion": "specify",
+   "word": "specification"
+  },
+  {
+   "suggestion": "determine",
+   "word": "determination"
+  },
+  {
+   "suggestion": "establish",
+   "word": "establishment"
+  },
+  {
+   "suggestion": "continue",
+   "word": "continuation"
+  },
+  {
+   "suggestion": "examine",
+   "word": "examination"
+  },
+  {
+   "suggestion": "investigate",
+   "word": "investigation"
+  },
+  {
+   "suggestion": "facilitate",
+   "word": "facilitation"
+  },
+  {
+   "suggestion": "notify",
+   "word": "notification"
+  },
+  {
+   "suggestion": "visualize",
+   "word": "visualization"
+  },
+  {
+   "suggestion": "demonstrate",
+   "word": "demonstration"
+  },
+  {
+   "suggestion": "transform",
+   "word": "transformation"
+  },
+  {
+   "suggestion": "simplify",
+   "word": "simplification"
+  },
+  {
+   "suggestion": "maximize",
+   "word": "maximization"
+  },
+  {
+   "suggestion": "minimize",
+   "word": "minimization"
+  },
+  {
+   "suggestion": "finalize",
+   "word": "finalization"
+  },
+  {
+   "suggestion": "prioritize",
+   "word": "prioritization"
+  },
+  {
+   "suggestion": "customize",
+   "word": "customization"
+  },
+  {
+   "suggestion": "generate",
+   "word": "generation"
+  },
+  {
+   "suggestion": "consume",
+   "word": "consumption"
+  },
+  {
+   "suggestion": "acquire",
+   "word": "acquisition"
+  },
+  {
+   "suggestion": "distribute",
+   "word": "distribution"
+  },
+  {
+   "suggestion": "accumulate",
+   "word": "accumulation"
+  },
+  {
+   "suggestion": "accelerate",
+   "word": "acceleration"
+  },
+  {
+   "suggestion": "collaborate",
+   "word": "collaboration"
+  },
+  {
+   "suggestion": "communicate",
+   "word": "communication"
+  },
+  {
+   "suggestion": "recommend",
+   "word": "recommendation"
+  },
+  {
+   "suggestion": "consider",
+   "word": "consideration"
+  },
+  {
+   "suggestion": "interpret",
+   "word": "interpretation"
+  },
+  {
+   "suggestion": "consolidate",
+   "word": "consolidation"
+  },
+  {
+   "suggestion": "validate",
+   "word": "validation"
+  },
+  {
+   "suggestion": "verify",
+   "word": "verification"
+  },
+  {
+   "suggestion": "integrate",
+   "word": "integration"
+  },
+  {
+   "suggestion": "migrate",
+   "word": "migration"
+  },
+  {
+   "suggestion": "allocate",
+   "word": "allocation"
+  },
+  {
+   "suggestion": "calculate",
+   "word": "calculation"
+  },
+  {
+   "suggestion": "delegate",
+   "word": "delegation"
+  },
+  {
+   "suggestion": "duplicate",
+   "word": "duplication"
+  },
+  {
+   "suggestion": "eliminate",
+   "word": "elimination"
+  },
+  {
+   "suggestion": "evaluate",
+   "word": "evaluation"
+  },
+  {
+   "suggestion": "formulate",
+   "word": "formulation"
+  },
+  {
+   "suggestion": "indicate",
+   "word": "indication"
+  },
+  {
+   "suggestion": "install",
+   "word": "installation"
+  },
+  {
+   "suggestion": "introduce",
+   "word": "introduction"
+  },
+  {
+   "suggestion": "manipulate",
+   "word": "manipulation"
+  },
+  {
+   "suggestion": "negotiate",
+   "word": "negotiation"
+  },
+  {
+   "suggestion": "observe",
+   "word": "observation"
+  },
+  {
+   "suggestion": "operate",
+   "word": "operation"
+  },
+  {
+   "suggestion": "prepare",
+   "word": "preparation"
+  },
+  {
+   "suggestion": "present",
+   "word": "presentation"
+  },
+  {
+   "suggestion": "preserve",
+   "word": "preservation"
+  },
+  {
+   "suggestion": "prevent",
+   "word": "prevention"
+  },
+  {
+   "suggestion": "produce",
+   "word": "production"
+  },
+  {
+   "suggestion": "protect",
+   "word": "protection"
+  },
+  {
+   "suggestion": "publish",
+   "word": "publication"
+  },
+  {
+   "suggestion": "regulate",
+   "word": "regulation"
+  },
+  {
+   "suggestion": "register",
+   "word": "registration"
+  },
+  {
+   "suggestion": "replicate",
+   "word": "replication"
+  },
+  {
+   "suggestion": "represent",
+   "word": "representation"
+  },
+  {
+   "suggestion": "resolve",
+   "word": "resolution"
+  },
+  {
+   "suggestion": "restore",
+   "word": "restoration"
+  },
+  {
+   "suggestion": "restrict",
+   "word": "restriction"
+  },
+  {
+   "suggestion": "separate",
+   "word": "separation"
+  },
+  {
+   "suggestion": "simulate",
+   "word": "simulation"
+  },
+  {
+   "suggestion": "stimulate",
+   "word": "stimulation"
+  },
+  {
+   "suggestion": "substitute",
+   "word": "substitution"
+  },
+  {
+   "suggestion": "terminate",
+   "word": "termination"
+  },
+  {
+   "suggestion": "translate",
+   "word": "translation"
+  },
+  {
+   "suggestion": "vary",
+   "word": "variation"
+  },
+  {
+   "suggestion": "violate",
+   "word": "violation"
+  },
+  {
+   "suggestion": "aggregate",
+   "word": "aggregation"
+  },
+  {
+   "suggestion": "annotate",
+   "word": "annotation"
+  },
+  {
+   "suggestion": "approximate",
+   "word": "approximation"
+  },
+  {
+   "suggestion": "centralize",
+   "word": "centralization"
+  },
+  {
+   "suggestion": "classify",
+   "word": "classification"
+  },
+  {
+   "suggestion": "compensate",
+   "word": "compensation"
+  },
+  {
+   "suggestion": "complete",
+   "word": "completion"
+  },
+  {
+   "suggestion": "compress",
+   "word": "compression"
+  },
+  {
+   "suggestion": "concatenate",
+   "word": "concatenation"
+  },
+  {
+   "suggestion": "confirm",
+   "word": "confirmation"
+  },
+  {
+   "suggestion": "connect",
+   "word": "connection"
+  },
+  {
+   "suggestion": "construct",
+   "word": "construction"
+  },
+  {
+   "suggestion": "convert",
+   "word": "conversion"
+  },
+  {
+   "suggestion": "coordinate",
+   "word": "coordination"
+  },
+  {
+   "suggestion": "create",
+   "word": "creation"
+  },
+  {
+   "suggestion": "decorate",
+   "word": "decoration"
+  },
+  {
+   "suggestion": "define",
+   "word": "definition"
+  },
+  {
+   "suggestion": "derive",
+   "word": "derivation"
+  },
+  {
+   "suggestion": "describe",
+   "word": "description"
+  },
+  {
+   "suggestion": "destroy",
+   "word": "destruction"
+  },
+  {
+   "suggestion": "detect",
+   "word": "detection"
+  },
+  {
+   "suggestion": "deviate",
+   "word": "deviation"
+  },
+  {
+   "suggestion": "differentiate",
+   "word": "differentiation"
+  },
+  {
+   "suggestion": "digitize",
+   "word": "digitization"
+  },
+  {
+   "suggestion": "escalate",
+   "word": "escalation"
+  },
+  {
+   "suggestion": "estimate",
+   "word": "estimation"
+  },
+  {
+   "suggestion": "execute",
+   "word": "execution"
+  },
+  {
+   "suggestion": "expand",
+   "word": "expansion"
+  },
+  {
+   "suggestion": "explore",
+   "word": "exploration"
+  },
+  {
+   "suggestion": "export",
+   "word": "exportation"
+  },
+  {
+   "suggestion": "extract",
+   "word": "extraction"
+  },
+  {
+   "suggestion": "fabricate",
+   "word": "fabrication"
+  },
+  {
+   "suggestion": "identify",
+   "word": "identification"
+  },
+  {
+   "suggestion": "illustrate",
+   "word": "illustration"
+  },
+  {
+   "suggestion": "import",
+   "word": "importation"
+  },
+  {
+   "suggestion": "improvise",
+   "word": "improvisation"
+  },
+  {
+   "suggestion": "incorporate",
+   "word": "incorporation"
+  },
+  {
+   "suggestion": "iterate",
+   "word": "iteration"
+  },
+  {
+   "suggestion": "justify",
+   "word": "justification"
+  },
+  {
+   "suggestion": "legalize",
+   "word": "legalization"
+  },
+  {
+   "suggestion": "modernize",
+   "word": "modernization"
+  },
+  {
+   "suggestion": "monetize",
+   "word": "monetization"
+  },
+  {
+   "suggestion": "normalize",
+   "word": "normalization"
+  },
+  {
+   "suggestion": "organize",
+   "word": "organization"
+  },
+  {
+   "suggestion": "originate",
+   "word": "origination"
+  },
+  {
+   "suggestion": "participate",
+   "word": "participation"
+  },
+  {
+   "suggestion": "personalize",
+   "word": "personalization"
+  },
+  {
+   "suggestion": "polarize",
+   "word": "polarization"
+  },
+  {
+   "suggestion": "privatize",
+   "word": "privatization"
+  },
+  {
+   "suggestion": "proliferate",
+   "word": "proliferation"
+  },
+  {
+   "suggestion": "rationalize",
+   "word": "rationalization"
+  },
+  {
+   "suggestion": "reconcile",
+   "word": "reconciliation"
+  },
+  {
+   "suggestion": "remediate",
+   "word": "remediation"
+  },
+  {
+   "suggestion": "renovate",
+   "word": "renovation"
+  },
+  {
+   "suggestion": "reorganize",
+   "word": "reorganization"
+  },
+  {
+   "suggestion": "serialize",
+   "word": "serialization"
+  },
+  {
+   "suggestion": "standardize",
+   "word": "standardization"
+  },
+  {
+   "suggestion": "synchronize",
+   "word": "synchronization"
+  },
+  {
+   "suggestion": "use",
+   "word": "utilisation"
+  },
+  {
+   "suggestion": "visualise",
+   "word": "visualisation"
+  },
+  {
+   "suggestion": "optimise",
+   "word": "optimisation"
+  },
+  {
+   "suggestion": "organise",
+   "word": "organisation"
+  },
+  {
+   "suggestion": "authorise",
+   "word": "authorisation"
+  },
+  {
+   "suggestion": "initialise",
+   "word": "initialisation"
+  },
+  {
+   "suggestion": "prioritise",
+   "word": "prioritisation"
+  },
+  {
+   "suggestion": "customise",
+   "word": "customisation"
+  },
+  {
+   "suggestion": "normalise",
+   "word": "normalisation"
+  },
+  {
+   "suggestion": "serialise",
+   "word": "serialisation"
+  },
+  {
+   "suggestion": "standardise",
+   "word": "standardisation"
+  },
+  {
+   "suggestion": "synchronise",
+   "word": "synchronisation"
+  },
+  {
+   "suggestion": "centralise",
+   "word": "centralisation"
+  },
+  {
+   "suggestion": "personalise",
+   "word": "personalisation"
+  },
+  {
+   "suggestion": "modernise",
+   "word": "modernisation"
+  },
+  {
+   "suggestion": "monetise",
+   "word": "monetisation"
+  },
+  {
+   "suggestion": "digitise",
+   "word": "digitisation"
+  },
+  {
+   "suggestion": "improve",
+   "word": "improvement"
+  },
+  {
+   "suggestion": "develop",
+   "word": "development"
+  },
+  {
+   "suggestion": "achieve",
+   "word": "achievement"
+  },
+  {
+   "suggestion": "replace",
+   "word": "replacement"
+  },
+  {
+   "suggestion": "require",
+   "word": "requirement"
+  },
+  {
+   "suggestion": "measure",
+   "word": "measurement"
+  },
+  {
+   "suggestion": "assess",
+   "word": "assessment"
+  },
+  {
+   "suggestion": "deploy",
+   "word": "deployment"
+  },
+  {
+   "suggestion": "engage",
+   "word": "engagement"
+  },
+  {
+   "suggestion": "enhance",
+   "word": "enhancement"
+  },
+  {
+   "suggestion": "enforce",
+   "word": "enforcement"
+  },
+  {
+   "suggestion": "involve",
+   "word": "involvement"
+  },
+  {
+   "suggestion": "manage",
+   "word": "management"
+  },
+  {
+   "suggestion": "arrange",
+   "word": "arrangement"
+  },
+  {
+   "suggestion": "advance",
+   "word": "advancement"
+  },
+  {
+   "suggestion": "abandon",
+   "word": "abandonment"
+  },
+  {
+   "suggestion": "accomplish",
+   "word": "accomplishment"
+  },
+  {
+   "suggestion": "acknowledge",
+   "word": "acknowledgement"
+  },
+  {
+   "suggestion": "acknowledge",
+   "word": "acknowledgment"
+  },
+  {
+   "suggestion": "adjust",
+   "word": "adjustment"
+  },
+  {
+   "suggestion": "agree",
+   "word": "agreement"
+  },
+  {
+   "suggestion": "align",
+   "word": "alignment"
+  },
+  {
+   "suggestion": "amaze",
+   "word": "amazement"
+  },
+  {
+   "suggestion": "amuse",
+   "word": "amusement"
+  },
+  {
+   "suggestion": "announce",
+   "word": "announcement"
+  },
+  {
+   "suggestion": "attach",
+   "word": "attachment"
+  },
+  {
+   "suggestion": "attain",
+   "word": "attainment"
+  },
+  {
+   "suggestion": "bewilder",
+   "word": "bewilderment"
+  },
+  {
+   "suggestion": "commit",
+   "word": "commitment"
+  },
+  {
+   "suggestion": "contain",
+   "word": "containment"
+  },
+  {
+   "suggestion": "detach",
+   "word": "detachment"
+  },
+  {
+   "suggestion": "discourage",
+   "word": "discouragement"
+  },
+  {
+   "suggestion": "displace",
+   "word": "displacement"
+  },
+  {
+   "suggestion": "embody",
+   "word": "embodiment"
+  },
+  {
+   "suggestion": "empower",
+   "word": "empowerment"
+  },
+  {
+   "suggestion": "encourage",
+   "word": "encouragement"
+  },
+  {
+   "suggestion": "endanger",
+   "word": "endangerment"
+  },
+  {
+   "suggestion": "enrich",
+   "word": "enrichment"
+  },
+  {
+   "suggestion": "entangle",
+   "word": "entanglement"
+  },
+  {
+   "suggestion": "entertain",
+   "word": "entertainment"
+  },
+  {
+   "suggestion": "entitle",
+   "word": "entitlement"
+  },
+  {
+   "suggestion": "excite",
+   "word": "excitement"
+  },
+  {
+   "suggestion": "fulfill",
+   "word": "fulfillment"
+  },
+  {
+   "suggestion": "fulfil",
+   "word": "fulfilment"
+  },
+  {
+   "suggestion": "imprison",
+   "word": "imprisonment"
+  },
+  {
+   "suggestion": "induce",
+   "word": "inducement"
+  },
+  {
+   "suggestion": "invest",
+   "word": "investment"
+  },
+  {
+   "suggestion": "judge",
+   "word": "judgment"
+  },
+  {
+   "suggestion": "judge",
+   "word": "judgement"
+  },
+  {
+   "suggestion": "mismanage",
+   "word": "mismanagement"
+  },
+  {
+   "suggestion": "postpone",
+   "word": "postponement"
+  },
+  {
+   "suggestion": "procure",
+   "word": "procurement"
+  },
+  {
+   "suggestion": "punish",
+   "word": "punishment"
+  },
+  {
+   "suggestion": "resent",
+   "word": "resentment"
+  },
+  {
+   "suggestion": "retire",
+   "word": "retirement"
+  },
+  {
+   "suggestion": "settle",
+   "word": "settlement"
+  },
+  {
+   "suggestion": "state",
+   "word": "statement"
+  },
+  {
+   "suggestion": "treat",
+   "word": "treatment"
+  },
+  {
+   "suggestion": "accept",
+   "word": "acceptance"
+  },
+  {
+   "suggestion": "allow",
+   "word": "allowance"
+  },
+  {
+   "suggestion": "appear",
+   "word": "appearance"
+  },
+  {
+   "suggestion": "assist",
+   "word": "assistance"
+  },
+  {
+   "suggestion": "avoid",
+   "word": "avoidance"
+  },
+  {
+   "suggestion": "comply",
+   "word": "compliance"
+  },
+  {
+   "suggestion": "depend",
+   "word": "dependence"
+  },
+  {
+   "suggestion": "disappear",
+   "word": "disappearance"
+  },
+  {
+   "suggestion": "disturb",
+   "word": "disturbance"
+  },
+  {
+   "suggestion": "dominate",
+   "word": "dominance"
+  },
+  {
+   "suggestion": "emerge",
+   "word": "emergence"
+  },
+  {
+   "suggestion": "endure",
+   "word": "endurance"
+  },
+  {
+   "suggestion": "exist",
+   "word": "existence"
+  },
+  {
+   "suggestion": "govern",
+   "word": "governance"
+  },
+  {
+   "suggestion": "guide",
+   "word": "guidance"
+  },
+  {
+   "suggestion": "hinder",
+   "word": "hindrance"
+  },
+  {
+   "suggestion": "inherit",
+   "word": "inheritance"
+  },
+  {
+   "suggestion": "insist",
+   "word": "insistence"
+  },
+  {
+   "suggestion": "interfere",
+   "word": "interference"
+  },
+  {
+   "suggestion": "maintain",
+   "word": "maintenance"
+  },
+  {
+   "suggestion": "occur",
+   "word": "occurrence"
+  },
+  {
+   "suggestion": "perform",
+   "word": "performance"
+  },
+  {
+   "suggestion": "persist",
+   "word": "persistence"
+  },
+  {
+   "suggestion": "prefer",
+   "word": "preference"
+  },
+  {
+   "suggestion": "prevail",
+   "word": "prevalence"
+  },
+  {
+   "suggestion": "refer",
+   "word": "reference"
+  },
+  {
+   "suggestion": "rely",
+   "word": "reliance"
+  },
+  {
+   "suggestion": "hesitate",
+   "word": "reluctance"
+  },
+  {
+   "suggestion": "remember",
+   "word": "remembrance"
+  },
+  {
+   "suggestion": "resemble",
+   "word": "resemblance"
+  },
+  {
+   "suggestion": "resist",
+   "word": "resistance"
+  },
+  {
+   "suggestion": "tolerate",
+   "word": "tolerance"
+  },
+  {
+   "suggestion": "utter",
+   "word": "utterance"
+  },
+  {
+   "suggestion": "vary",
+   "word": "variance"
+  }
+ ],
+ "prohibited_phrases": [
+  "in conclusion",
+  "in today's fast-paced world",
+  "in a world where",
+  "it's important to note",
+  "let's dive in",
+  "now more than ever",
+  "the future belongs to",
+  "the key takeaway is",
+  "the path forward is clear",
+  "turn ambiguity into momentum"
+ ],
+ "seo_filler": [
+  "as the world continues to evolve",
+  "as we look to the future",
+  "as we navigate",
+  "as we've explored",
+  "has a profound impact",
+  "in an era characterized by",
+  "in an ever-evolving landscape",
+  "in the digital age",
+  "in this comprehensive guide",
+  "in today's competitive landscape",
+  "in today's digital age",
+  "in today's fast-paced",
+  "in today's rapidly evolving landscape",
+  "it is no secret that",
+  "it is vital for",
+  "it's no secret that",
+  "join us as we",
+  "join us as we explore",
+  "let's deep dive",
+  "let's delve into",
+  "more than ever before",
+  "navigating the complexities of",
+  "navigating the world of",
+  "take a deep dive into",
+  "the ultimate guide to",
+  "this guide will cover",
+  "this has never been more important",
+  "we hope this article",
+  "we hope this guide",
+  "welcome to this article",
+  "welcome to this guide",
+  "whether you're a beginner or"
+ ],
+ "weasel_attribution": [
+  "a growing body of evidence suggests",
+  "a growing body of research suggests",
+  "according to health professionals",
+  "according to medical experts",
+  "analysts suggest",
+  "countless studies have shown",
+  "doctors say",
+  "economists say",
+  "health experts say",
+  "industry experts say",
+  "industry insiders say",
+  "industry leaders agree",
+  "it has been demonstrated that",
+  "it is commonly understood that",
+  "it is generally understood that",
+  "it is universally accepted that",
+  "leading experts say",
+  "many experts agree",
+  "many experts believe",
+  "most experts agree",
+  "multiple studies have found",
+  "new research suggests",
+  "new studies show",
+  "numerous studies have shown",
+  "numerous studies suggest",
+  "nutritionists say",
+  "observers have suggested",
+  "psychologists say",
+  "recent research has found",
+  "science confirms",
+  "science tells us",
+  "some researchers argue",
+  "some scientists believe",
+  "some would argue",
+  "the scientific community agrees"
+ ]
+}

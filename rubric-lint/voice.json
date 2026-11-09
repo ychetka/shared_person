@@ -1,0 +1,34 @@
+{
+ "_meta": {
+  "source": "tools/learn_voice.py over fixtures/humanizer/clean_human/{en,ru}.txt",
+  "use": "flat_for_you = stdev_words < rhythm.stdev_words * FLAT_FOR_YOU (vendored nomisread convention)"
+ },
+ "en": {
+  "rhythm": {
+   "band_share": 0.38,
+   "longest": 25,
+   "mean_words": 15,
+   "shortest": 3,
+   "stdev_words": 7.0
+  },
+  "samples": {
+   "files": 1,
+   "sentences": 16,
+   "words": 243
+  }
+ },
+ "ru": {
+  "rhythm": {
+   "band_share": 0.25,
+   "longest": 23,
+   "mean_words": 12.7,
+   "shortest": 5,
+   "stdev_words": 5.4
+  },
+  "samples": {
+   "files": 1,
+   "sentences": 16,
+   "words": 208
+  }
+ }
+}
