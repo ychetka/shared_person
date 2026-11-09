@@ -37,10 +37,15 @@
 //       stubbed retracted value is whatever the REAL recipe's emit
 //       line produces (typed YAML pass-through), so a quoted "true"
 //       regression fails here;
-//   H11 recipe failure classification by step FACT: last_step <
-//       publish_step -> definite failed (no maybe_live); last_step >=
-//       publish_step -> failed + maybe_live; a bare failed/ task file
-//       stays ambiguous -> maybe_live;
+//   H11 recipe failure classification by step FACT: a complete
+//       last_step < publish_step pair -> definite failed (no
+//       maybe_live); last_step >= publish_step -> failed +
+//       maybe_live; a bare failed/ task file or a crash result
+//       carrying no step facts stays ambiguous -> maybe_live. The
+//       REAL worker log carries the blocked-surface probe targets
+//       verbatim - an escalation haystack that scanned it would
+//       false-positive every ordinary failure into
+//       operator_escalation;
 //   H12 blocked-surface abort -> operator_escalation status, no
 //       retry, no maybe_live (the recipe's own abort_reason emit is
 //       the evidence);
@@ -96,15 +101,35 @@ const RECIPE = fs.readFileSync(
 );
 let PUBLISH_STEP = -1;
 let FAIL_STEP = -1;
+// indices of the blocked-surface dom_text probes and the first
+// composer click - needed to build result.log lines the way the
+// REAL worker writes them (`step<i> <action> '<target>' -> ...`),
+// because the probe targets ('captcha', 'Войти', the sandbox
+// read-back) are exactly the strings the driver's escalation
+// regexes look for
+let CAPTCHA_PROBE = -1;
+let LOGIN_PROBE = -1;
+let SANDBOX_PROBE = -1;
+let TITLE_STEP = -1;
 {
   let stepIdx = -1;
+  let action = "";
   for (const line of RECIPE.split("\n")) {
     const m = /^\s*-\s*action:\s*(\S+)\s*$/.exec(line);
     if (m) {
       stepIdx++;
+      action = m[1];
       if (m[1] === "fail" && FAIL_STEP < 0) FAIL_STEP = stepIdx;
     }
     if (/^\s*marks:\s*publish\s*$/.test(line)) PUBLISH_STEP = stepIdx;
+    if (action === "dom_text") {
+      if (/target:\s*"?captcha"?\s*$/.test(line)) CAPTCHA_PROBE = stepIdx;
+      if (/target:\s*"?Войти"?\s*$/.test(line)) LOGIN_PROBE = stepIdx;
+      if (/url:\s*"?habr\.com\/ru\/sandbox/.test(line)) SANDBOX_PROBE = stepIdx;
+    }
+    if (action === "click_dom" && /target:\s*"?Заголовок"?\s*$/.test(line)) {
+      TITLE_STEP = stepIdx;
+    }
   }
 }
 const emitValue = (key) => {
@@ -897,6 +922,73 @@ const main = async () => {
       at(fakeFs, "failed").includes("h1.json") &&
         ledger.some((r) => r && r.status === "failed" && r.maybe_live === true),
       JSON.stringify(ledger),
+    );
+  }
+  {
+    // the log array the REAL worker writes for a pre-click habr_post
+    // failure - the case the hand-written stubs above could not
+    // express: every optional dom_text probe ran and MISSED (a
+    // negative probe answer lands '' in ctx, a legitimate result,
+    // not a step error), so the probe targets sit verbatim inside
+    // result.log. An escalation haystack that scans the log
+    // self-triggers the captcha/войти/sandbox regexes on a plain
+    // composer-fill miss - a false operator_escalation with a
+    // misleading CAPTCHA telegram. abort_reason is the verdict; the
+    // log only feeds the post-click 'Опубликовать' heuristic.
+    const { fakeFs, ledger } = await runTick({
+      env: { HABR_PROFILE_URL: "" },
+      failResult: {
+        error: `step${TITLE_STEP}: element not found: Заголовок`,
+        log: [
+          "step0 shot -> /opt/hands/queue/done/habr_0_start.png",
+          "step0 shot ok",
+          `step${CAPTCHA_PROBE} dom_text 'captcha' -> `,
+          `step${CAPTCHA_PROBE} dom_text ok`,
+          `step${LOGIN_PROBE} dom_text 'Войти' -> `,
+          `step${LOGIN_PROBE} dom_text ok`,
+          `step${SANDBOX_PROBE} dom_text 'location' -> `,
+          `step${SANDBOX_PROBE} dom_text ok`,
+          `step${FAIL_STEP} skipped (if -> '')`,
+        ],
+        // skipped steps never advance last_done - the sandbox probe
+        // is the last step that completed before the title click died
+        last_step: SANDBOX_PROBE,
+        publish_step: PUBLISH_STEP,
+      },
+    });
+    check(
+      "H11 real probe log: recipe_failed, not operator_escalation",
+      at(fakeFs, "failed").includes("h1.json") &&
+        status(fakeFs)?.status === "recipe_failed" &&
+        !ledger.some((r) => r && r.status === "failed" && r.maybe_live === true) &&
+        !ledger.some((r) => r && r.status === "maybe-live"),
+      JSON.stringify({ status: status(fakeFs), ledger }),
+    );
+  }
+  {
+    // worker-level crash result: the queue boundary caught an
+    // exception and wrote {"error": ...} with NO step facts at all -
+    // nothing proves the click never fired, so the spec's bare-
+    // failed/ ambiguity rule applies: maybe_live + orphan probe,
+    // not a definite pre-click recipe_failed
+    const { fakeFs, ledger } = await runTick({
+      env: {
+        HABR_PROFILE_URL: "https://habr.com/ru/users/devin/publications/articles/",
+      },
+      failResult: { error: "recipe runner died: browser window gone" },
+      probeFail: { error: "no match" },
+    });
+    check(
+      "H11 crash result without step facts: ambiguous -> maybe_live",
+      at(fakeFs, "failed").includes("h1.json") &&
+        status(fakeFs)?.status === "recipe_failed" &&
+        ledger.some((r) => r && r.status === "failed" && r.maybe_live === true),
+      JSON.stringify({ status: status(fakeFs), ledger }),
+    );
+    check(
+      "H11 crash result: orphan probe task enqueued",
+      hq(fakeFs, "failed").some((f) => f.startsWith("habr-probe-")),
+      JSON.stringify(hq(fakeFs, "failed")),
     );
   }
 
