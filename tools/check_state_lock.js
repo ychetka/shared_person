@@ -700,8 +700,11 @@ const main = async () => {
         c.method === "sendMessage" &&
         /busy in a parallel update - resend the corrected text/.test(String(c.body.text)),
     );
-    check("E1 replace-busy: resend hint sent", !!busy,
-      JSON.stringify(sc.tgCalls.map((c) => c.body.text)));
+    check(
+      "E1 replace-busy: resend hint sent",
+      !!busy,
+      JSON.stringify(sc.tgCalls.map((c) => c.body.text)),
+    );
     check(
       "E1 replace-busy: 'edit-replace-lock-busy' logged",
       logLines(sc.fakeFs).some((l) => l.action === "edit-replace-lock-busy"),
@@ -742,8 +745,11 @@ const main = async () => {
         c.method === "sendMessage" &&
         /busy in a parallel update - resend the comments/.test(String(c.body.text)),
     );
-    check("E2 comment-busy: resend hint sent", !!busy,
-      JSON.stringify(sc.tgCalls.map((c) => c.body.text)));
+    check(
+      "E2 comment-busy: resend hint sent",
+      !!busy,
+      JSON.stringify(sc.tgCalls.map((c) => c.body.text)),
+    );
     check(
       "E2 comment-busy: 'edit-lock-busy' logged",
       logLines(sc.fakeFs).some((l) => l.action === "edit-lock-busy"),
