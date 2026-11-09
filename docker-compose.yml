@@ -187,6 +187,11 @@ services:
       - HUMANIZER_DAILY_CREDITS=${HUMANIZER_DAILY_CREDITS:-}
       - HUMANIZER_THRESHOLD=${HUMANIZER_THRESHOLD:-}
       - HUMANIZER_MAX_ITERS=${HUMANIZER_MAX_ITERS:-}
+      # llm-gateway /run endpoint for the inhouse partner stage. All
+      # services run network_mode: host, so the container name is not
+      # resolvable and loopback is the default - same value the
+      # rss-reader service pins below.
+      - LLM_GATEWAY_URL=${LLM_GATEWAY_URL:-http://127.0.0.1:8787}
     volumes:
       - n8n_storage:/home/node/.n8n
       # hands-agent task queue (n8n drops publish tasks into inbox/)

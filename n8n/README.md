@@ -802,14 +802,25 @@ deploy burns nothing):
   ledger, consumes `done|failed/<task>.result.json`; falls back to
   stub when the queue mount is missing). A pangram task with no
   landed artifact after ~10min is a dead claim: one re-enqueue
-  attempt, then `scorer_failed` escalation. Charge dedupe is per
-  task-id, so a crash between the inbox rename and the run write
-  re-arms the same task without spending the credit twice.
+  attempt (per-claim budget - a landed score resets it), then
+  `scorer_failed` escalation. Charge dedupe is per task-id, so a
+  crash between the inbox rename and the run write re-arms the same
+  task without spending the credit twice; the `charged[]` ledger is
+  per-day and resets with the daily counter in every credits loader.
+  A once-per-tick sweep consumes `pangram-<run>-<seq>` result files
+  no run still claims (`consumed-late` ledger notes) so late landing
+  artifacts don't pile up.
 - `HUMANIZER_PARTNER` - `stub` (default, one deterministic edit per
   call) or `inhouse` (POSTs `{role: humanizer-partner, input}` to
   `LLM_GATEWAY_URL` `/run`; the input carries
   `detector_payload: {ai_score, marker_spans[]}` - the contracted
-  scorer view, never the raw score blob).
+  scorer view, never the raw score blob). The partner's
+  `recommendation: escalate_to_human` is honored - the run escalates
+  `partner_escalate` with the partner's confidence/caveats/
+  unchanged_reason recorded and the rewrite never applied. A
+  byte-identical `rewritten_text` + `unchanged_reason` counts one
+  `partner_unchanged` attempt and stalls into escalation without a
+  rescore (rescoring identical text only re-measures the same score).
 - `HUMANIZER_CHAINS` - comma list, default `baseline,editor`;
   `baseline` scores only, `editor` rewrites via the configured
   partner, any other name is a '+'-separated stage list resolved
@@ -821,11 +832,13 @@ deploy burns nothing):
   (default 50). `HUMANIZER_MAX_ITERS` - rewrite cap before
   `max_iterations` escalation with best-so-far (default 2).
   `LLM_GATEWAY_URL` - inhouse partner endpoint (default
-  `http://llm-gateway:8787`).
+  `http://127.0.0.1:8787` - all services run `network_mode: host`,
+  so the `llm-gateway` container name is unresolvable).
 
 Terminal runs land `done` (`pass`/`reverted`) or `escalated`
 (`no_rewrite_stage`/`max_iterations`/`partner_failed`/`credit_cap`/
-`scorer_failed`/`scorer_inconclusive`/`stage_unavailable`) carrying
+`scorer_failed`/`scorer_inconclusive`/`stage_unavailable`/
+`partner_escalate`/`partner_unchanged`) carrying
 the best-so-far text+score - best/regression comparisons are only
 made within one scorer backend, so a mid-run pangram->stub fallback
 resets to a fresh baseline (noted in the run trace). Every scored

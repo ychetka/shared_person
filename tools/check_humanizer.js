@@ -32,10 +32,12 @@
 //       escalates 'credit_cap' with ZERO inbox writes;
 //   E8  pangram queue missing: no hands-queue dirs -> the scorer
 //       falls back to stub, stamped scorer_fallback + a trace note;
-//   E9  inhouse partner: POST http://llm-gateway:8787/run
+//   E9  inhouse partner: POST http://127.0.0.1:8787/run
 //       {role:'humanizer-partner', input:<json payload>} drives the
-//       rewrite; a 422-class failure records a failed attempt and
-//       escalates 'partner_failed';
+//       rewrite (loopback default - all compose services run
+//       network_mode:host so 'llm-gateway' is unresolvable); a
+//       422-class failure records a failed attempt and escalates
+//       'partner_failed';
 //   E10 external stage: chain 'writehuman' with no
 //       HUMANIZER_EXT_WRITEHUMAN_URL -> 'unavailable' cell +
 //       escalate 'stage_unavailable' with ZERO http calls;
@@ -73,7 +75,33 @@
 //       activates the eval schedule on its own);
 //   E23 detector_payload contract: the partner input carries
 //       {ai_score, marker_spans:[{text,marker_type,reason}]} - never
-//       the raw last_score blob (checked inside E9).
+//       the raw last_score blob (checked inside E9);
+//   E24 credits rollover: a stale-dated credits file with a charged[]
+//       entry for the SAME tid still charges fresh on re-arm - every
+//       loader that rolls the shared counter resets the per-day
+//       dedupe ledger (all three copies: Eval Tick + the SYNC'd
+//       pangram-gate pair in sp-tg-moderation);
+//   E25 partner recommendation honored: escalate_to_human -> the run
+//       escalates 'partner_escalate' with confidence/caveats/
+//       unchanged_reason recorded and the rewrite NEVER applied;
+//   E26 unchanged pass-through: byte-identical rewritten_text +
+//       unchanged_reason counts one 'partner_unchanged' attempt and
+//       stalls into escalation with ZERO rescore credit burned;
+//   E27 scorer_retries is a per-claim-attempt bound: a landed score
+//       resets the stale-claim budget;
+//   E28 late-result sweep: done|failed pangram-<run>-<seq>.result.json
+//       artifacts no run still claims are consumed to .consumed and
+//       noted 'consumed-late' - pending claims and warn-gate draft
+//       tasks are left alone;
+//   E29 chain id fold: '+' folds to '_' in run filenames and a
+//       fold collision ('a+b' vs 'a_b') skips+logs instead of
+//       silently merging two chains into one run;
+//   E30 marker_spans carry the ORIGINAL source casing, not the
+//       lowercase canonical needle;
+//   E31 plan mode: the role schema accepts a pass-through plan
+//       response (rewritten_text === source, edits describe the
+//       plan) and the escalate_to_human arm - schema-level, no
+//       live model call.
 //
 // Run:  node tools/check_humanizer.js    (exit 0 = all pass)
 
@@ -217,6 +245,7 @@ const mkFs = () => {
 };
 
 const STATE = "/home/node/.n8n/state";
+const LOGD = "/home/node/.n8n/logs";
 const RUNS = `${STATE}/humanizer_runs`;
 const SCORES = `${STATE}/humanizer_scores.jsonl`;
 const CREDITS = `${STATE}/pangram_credits.json`;
@@ -267,6 +296,17 @@ const scoreRows = (fakeFs) => {
   try {
     return fakeFs
       .readFileSync(SCORES, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+  } catch (_e) {
+    return [];
+  }
+};
+const logLines = (fakeFs) => {
+  try {
+    return fakeFs
+      .readFileSync(`${LOGD}/humanizer-eval.jsonl`, "utf8")
       .split("\n")
       .filter(Boolean)
       .map((l) => JSON.parse(l));
@@ -538,16 +578,18 @@ const main = async () => {
   }
 
   // --- E9 inhouse partner: happy path + 422 escalate -------------------
+  // no LLM_GATEWAY_URL anywhere: every compose service runs
+  // network_mode:host, so the default endpoint must be the loopback
+  // sibling - the 'llm-gateway' container name is unresolvable
   {
     const sc = mkSc();
     sc.env = {
       HUMANIZER_PARTNER: "inhouse",
       HUMANIZER_CHAINS: "editor",
-      LLM_GATEWAY_URL: "http://llm-gateway:8787",
     };
     seedFixtures(sc.fakeFs, ["ai_flop"]);
     sc.httpImpl = async (o) => {
-      if (o.url === "http://llm-gateway:8787/run") {
+      if (o.url === "http://127.0.0.1:8787/run") {
         const body = typeof o.body === "string" ? JSON.parse(o.body) : o.body;
         const payload = JSON.parse(body.input);
         return {
@@ -568,7 +610,7 @@ const main = async () => {
     };
     await runTicks(sc, 6);
     const r = loadRun(sc.fakeFs, "editor__ai_flop-en");
-    const gwCalls = sc.calls.filter((c0) => c0.url === "http://llm-gateway:8787/run");
+    const gwCalls = sc.calls.filter((c0) => c0.url === "http://127.0.0.1:8787/run");
     // 2 runs (en+ru) x <=2 rewrite iterations each: every call must
     // hit /run with the role contract - never another host
     check(
@@ -624,8 +666,8 @@ const main = async () => {
       JSON.stringify({ it: r?.iteration, st: r?.state }),
     );
     check(
-      "E9 inhouse: calls only to llm-gateway",
-      sc.calls.every((c0) => c0.url.startsWith("http://llm-gateway:8787")),
+      "E9 inhouse: calls only to llm-gateway loopback default",
+      sc.calls.every((c0) => c0.url.startsWith("http://127.0.0.1:8787")),
       JSON.stringify(sc.calls.map((c0) => c0.url)),
     );
 
@@ -633,7 +675,7 @@ const main = async () => {
     sc2.env = {
       HUMANIZER_PARTNER: "inhouse",
       HUMANIZER_CHAINS: "editor",
-      LLM_GATEWAY_URL: "http://llm-gateway:8787",
+      LLM_GATEWAY_URL: "http://127.0.0.1:8787",
     };
     seedFixtures(sc2.fakeFs, ["ai_flop"]);
     sc2.httpImpl = async () => {
@@ -834,7 +876,7 @@ const main = async () => {
     const sc = mkSc();
     sc.env = {
       HUMANIZER_PARTNER: "inhouse",
-      LLM_GATEWAY_URL: "http://llm-gateway:8787",
+      LLM_GATEWAY_URL: "http://127.0.0.1:8787",
     };
     sc.fakeFs.mkdirSync(RUNS, { recursive: true });
     const id = "probe__veto-en";
@@ -960,6 +1002,36 @@ const main = async () => {
         unchanged_reason: "plan mode - changes not applied",
         caveats: [],
       }),
+    );
+    // E31 plan mode end-to-end shape: the schema-level coverage for
+    // the mode the eval loop doesn't drive - a plan response is a
+    // byte-identical rewritten_text whose edits[] DESCRIBE the plan,
+    // plus the escalate_to_human enum arm
+    const planSource = "Source text with a marker.";
+    check(
+      "E31 plan mode: pass-through plan + escalate arm both validate",
+      !!compiled?.({
+        rewritten_text: planSource,
+        edits: [
+          {
+            span_original: "a marker",
+            span_new: "",
+            reason: "planned filler strip - applied on the next pass",
+          },
+        ],
+        confidence: "medium",
+        recommendation: "continue",
+        unchanged_reason: "plan mode - edits described, not applied",
+        caveats: ["plan only, text untouched"],
+      }) &&
+        !!compiled?.({
+          rewritten_text: planSource,
+          edits: [],
+          confidence: "low",
+          recommendation: "escalate_to_human",
+          unchanged_reason: "a rewrite would degrade the text",
+          caveats: [],
+        }),
     );
     check(
       "E17 role schema: rejects extra/missing/legacy fields",
@@ -1116,6 +1188,379 @@ const main = async () => {
       "E22 deploy: workflow spec ships active:false",
       spec.active === false,
       JSON.stringify(spec.active),
+    );
+  }
+
+  // --- E24 credits rollover: charged[] resets with the daily date ----
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_SCORER: "pangram", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc.fakeFs, ["clean_human"]);
+    seedHands(sc.fakeFs);
+    await execTick(sc);
+    const id = "baseline__clean_human-en";
+    const tid = `pangram-${id}-0`;
+    // midnight passed between the original charge and the
+    // crash-repair re-arm: the counter file still carries yesterday's
+    // date AND yesterday's charged[tid] entry. Every credits loader
+    // must roll the dedupe ledger with the date or the same-tid
+    // re-arm dedupes against a stale entry and re-enqueues a real
+    // task UNCHARGED
+    const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    sc.fakeFs.writeFileSync(
+      CREDITS,
+      JSON.stringify({
+        date: yest,
+        est_spent: 5,
+        last_seen_left: null,
+        charged: { [tid]: 2 },
+      }),
+    );
+    const cur = loadRun(sc.fakeFs, id);
+    cur.scorer_pending = null;
+    cur.score_seq = 0;
+    cur.state = "scoring";
+    sc.fakeFs.writeFileSync(`${RUNS}/${id}.json`, JSON.stringify(cur));
+    await execTick(sc);
+    const cost = Math.ceil(
+      fixtureText("clean_human", "en").split(/\s+/).filter(Boolean).length / 100,
+    );
+    const c = readJson(sc.fakeFs, CREDITS);
+    const r = loadRun(sc.fakeFs, id);
+    check(
+      "E24 rollover: stale charged[] ignored - same-tid re-arm charges fresh",
+      c?.date === new Date().toISOString().slice(0, 10) &&
+        c.est_spent === cost &&
+        Number(c?.charged?.[tid]) === cost &&
+        r?.scorer_pending?.task === tid &&
+        dirOf(sc.fakeFs, `${HANDS}/inbox`).includes(`${tid}.json`),
+      JSON.stringify({ c, pend: r?.scorer_pending, cost }),
+    );
+    // the reset must hold in EVERY loader that rolls the shared
+    // counter file - the warn-gate copies are SYNC'd identical
+    // (check_sync.js pangram-gate), but only the text itself proves
+    // the charged reset is present in all three
+    const modSpec = JSON.parse(
+      fs.readFileSync(
+        path.join(__dirname, "..", "n8n", "workflows", "sp-tg-moderation.json"),
+        "utf8",
+      ),
+    );
+    const loaders = modSpec.nodes
+      .map((n) => n.parameters?.jsCode || "")
+      .filter((code) => code.includes("pangramLoadCredits"));
+    check(
+      "E24 rollover: every credits loader copy resets charged[]",
+      loaders.length === 2 &&
+        loaders.every((code) => code.includes("c.charged = {}")) &&
+        node0.parameters.jsCode.includes("c.charged = {}"),
+      JSON.stringify({ loaders: loaders.length }),
+    );
+  }
+
+  // --- E25 partner recommendation escalate_to_human -------------------
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_PARTNER: "inhouse", HUMANIZER_CHAINS: "editor" };
+    seedFixtures(sc.fakeFs, ["ai_flop"]);
+    sc.httpImpl = async (o) => {
+      // no LLM_GATEWAY_URL env - the host-mode loopback default must
+      // resolve, never the unresolvable container name
+      if (o.url === "http://127.0.0.1:8787/run") {
+        const body = typeof o.body === "string" ? JSON.parse(o.body) : o.body;
+        const payload = JSON.parse(body.input);
+        return {
+          role: "humanizer-partner",
+          model: "m",
+          backend: "gemini",
+          json: {
+            rewritten_text: `${payload.source_text}\n\nRewrite that must NOT land.`,
+            edits: [],
+            confidence: "low",
+            recommendation: "escalate_to_human",
+            unchanged_reason: "source already reads human; a rewrite would inject errors",
+            caveats: ["detector flag is likely a false positive"],
+          },
+        };
+      }
+      throw new Error(`unexpected ${o.url}`);
+    };
+    await runTicks(sc, 6);
+    const r = loadRun(sc.fakeFs, "editor__ai_flop-en");
+    check(
+      "E25 escalate_to_human: escalated 'partner_escalate', rewrite never applied",
+      r?.state === "escalated" &&
+        r.outcome === "partner_escalate" &&
+        r.working_text === r.text &&
+        r.iteration === 0 &&
+        r.escalation?.partner_confidence === "low" &&
+        String(r.escalation?.unchanged_reason || "").includes("already reads human") &&
+        Array.isArray(r.escalation?.partner_caveats) &&
+        r.escalation.partner_caveats.length === 1,
+      JSON.stringify({ st: r?.state, oc: r?.outcome, esc: r?.escalation }),
+    );
+    check(
+      "E25 escalate_to_human: partner telemetry lands in trace",
+      (r?.trace || []).some(
+        (t) =>
+          t.action === "partner-result" &&
+          t.recommendation === "escalate_to_human" &&
+          t.confidence === "low" &&
+          Array.isArray(t.caveats),
+      ),
+      JSON.stringify((r?.trace || []).map((t) => t.action)),
+    );
+    check(
+      "E25 gateway default: /run calls hit 127.0.0.1 loopback",
+      sc.calls.length === 2 && sc.calls.every((c0) => c0.url === "http://127.0.0.1:8787/run"),
+      JSON.stringify(sc.calls.map((c0) => c0.url)),
+    );
+  }
+
+  // --- E26 partner unchanged pass-through: attempt, no rescore --------
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_PARTNER: "inhouse", HUMANIZER_CHAINS: "editor" };
+    seedFixtures(sc.fakeFs, ["ai_flop"]);
+    sc.httpImpl = async (o) => {
+      if (o.url === "http://127.0.0.1:8787/run") {
+        const body = typeof o.body === "string" ? JSON.parse(o.body) : o.body;
+        const payload = JSON.parse(body.input);
+        return {
+          role: "humanizer-partner",
+          model: "m",
+          backend: "gemini",
+          json: {
+            // byte-identical pass-through WITH a stated reason: an
+            // honest no-op attempt, not a rewrite
+            rewritten_text: payload.source_text,
+            edits: [],
+            confidence: "high",
+            recommendation: "continue",
+            unchanged_reason: "no safe edits - every flagged span is load-bearing",
+            caveats: [],
+          },
+        };
+      }
+      throw new Error(`unexpected ${o.url}`);
+    };
+    await runTicks(sc, 6);
+    const r = loadRun(sc.fakeFs, "editor__ai_flop-en");
+    check(
+      "E26 partner_unchanged: attempt counts, stalled run escalates",
+      r?.state === "escalated" &&
+        r.outcome === "partner_unchanged" &&
+        r.iteration === 1 &&
+        r.working_text === r.text &&
+        (r.previous_attempts || []).some(
+          (a) =>
+            a.note === "partner_unchanged" &&
+            String(a.unchanged_reason || "").includes("load-bearing") &&
+            a.confidence === "high",
+        ) &&
+        r.escalation?.partner_confidence === "high" &&
+        r.escalation?.unchanged_reason?.includes("load-bearing"),
+      JSON.stringify({ st: r?.state, oc: r?.outcome, pa: r?.previous_attempts }),
+    );
+    check(
+      "E26 partner_unchanged: no rescore credit burned",
+      scoreRows(sc.fakeFs).filter((s) => s.run_id === "editor__ai_flop-en").length === 1,
+      JSON.stringify(scoreRows(sc.fakeFs).filter((s) => s.run_id === "editor__ai_flop-en")),
+    );
+  }
+
+  // --- E27 scorer_retries: per-claim bound resets on a landed score ---
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_SCORER: "pangram", HUMANIZER_CHAINS: "baseline" };
+    seedHands(sc.fakeFs);
+    sc.fakeFs.mkdirSync(RUNS, { recursive: true });
+    const id = "probe__retries-en";
+    const tid = `pangram-${id}-0`;
+    const nowIso = new Date().toISOString();
+    // a run that already burned its one stale-claim retry - a landed
+    // result proves the queue end-to-end, so the budget must reset
+    // for the NEXT claim instead of accumulating for the run's life
+    sc.fakeFs.writeFileSync(
+      `${RUNS}/${id}.json`,
+      JSON.stringify({
+        run_id: id,
+        fixture: "probe/en",
+        tier: "probe",
+        lang: "en",
+        chain: "baseline",
+        stages: [],
+        state: "scoring",
+        iteration: 0,
+        cell_stage: "input",
+        text: "Source text.",
+        working_text: "Source text.",
+        mode: "rewrite",
+        best: null,
+        last_score: null,
+        last_edits: [],
+        scorer_pending: { task: tid, words: 200, cost: 2, at: nowIso },
+        rewrite_pending: null,
+        previous_attempts: [],
+        protected_terms: [],
+        persona_context: "",
+        credits_used: 2,
+        score_seq: 1,
+        scorer_retries: 1,
+        scorer_fallback: false,
+        outcome: null,
+        escalation: null,
+        trace: [],
+        seeded_at: nowIso,
+        updated_at: nowIso,
+      }),
+    );
+    sc.fakeFs.writeFileSync(
+      `${HANDS}/done/${tid}.result.json`,
+      JSON.stringify({ ok: true, hit_ph: "Possibly human", confidence: "92%" }),
+    );
+    await execTick(sc);
+    const r = loadRun(sc.fakeFs, id);
+    check(
+      "E27 retries reset: a landed score clears the stale-claim budget",
+      r?.scorer_retries === 0 && r.state === "decide" && r.last_score?.via === "pangram",
+      JSON.stringify({ rt: r?.scorer_retries, st: r?.state, via: r?.last_score?.via }),
+    );
+  }
+
+  // --- E28 orphaned late results: sweep consumes unclaimed artifacts --
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_SCORER: "pangram", HUMANIZER_CHAINS: "baseline" };
+    seedHands(sc.fakeFs);
+    sc.fakeFs.mkdirSync(RUNS, { recursive: true });
+    sc.fakeFs.mkdirSync(`${STATE}/drafts`, { recursive: true });
+    const nowIso = new Date().toISOString();
+    const mkRun = (id, extra) => ({
+      run_id: id,
+      fixture: "probe/en",
+      tier: "probe",
+      lang: "en",
+      chain: "baseline",
+      stages: [],
+      state: "escalated",
+      iteration: 0,
+      cell_stage: "input",
+      text: "Source text.",
+      working_text: "Source text.",
+      mode: "rewrite",
+      best: null,
+      last_score: null,
+      last_edits: [],
+      scorer_pending: null,
+      rewrite_pending: null,
+      previous_attempts: [],
+      protected_terms: [],
+      persona_context: "",
+      credits_used: 2,
+      score_seq: 1,
+      scorer_retries: 0,
+      scorer_fallback: false,
+      outcome: "scorer_failed",
+      escalation: null,
+      trace: [],
+      seeded_at: nowIso,
+      updated_at: nowIso,
+      ...(extra || {}),
+    });
+    // an escalated run - its task landed AFTER the stale retraction
+    sc.fakeFs.writeFileSync(`${RUNS}/probe__late-en.json`, JSON.stringify(mkRun("probe__late-en")));
+    // a run still claiming its tid - the pending claim wins over the
+    // sweep even though the state itself is 'decide'
+    sc.fakeFs.writeFileSync(
+      `${RUNS}/probe__claim-en.json`,
+      JSON.stringify(
+        mkRun("probe__claim-en", {
+          state: "decide",
+          outcome: null,
+          last_score: {
+            score: 10,
+            label: "Possibly human",
+            confidence: 90,
+            via: "pangram",
+            words: 200,
+            at: nowIso,
+          },
+          scorer_pending: {
+            task: "pangram-probe__claim-en-0",
+            words: 200,
+            cost: 2,
+            at: nowIso,
+          },
+        }),
+      ),
+    );
+    // a warn-gate draft whose id ends in -<digits> owns its own task
+    sc.fakeFs.writeFileSync(`${STATE}/drafts/wgd-7.json`, JSON.stringify({ draft_id: "wgd-7" }));
+    for (const f of [
+      "pangram-probe__late-en-0.result.json",
+      "pangram-gone-3.result.json",
+      "pangram-probe__claim-en-0.result.json",
+      "pangram-wgd-7.result.json",
+      "pangram-draftx.result.json",
+    ]) {
+      sc.fakeFs.writeFileSync(`${HANDS}/done/${f}`, JSON.stringify({ ok: true }));
+    }
+    const out = await execTick(sc);
+    const done = dirOf(sc.fakeFs, `${HANDS}/done`);
+    const late = logLines(sc.fakeFs).filter((l) => l.action === "consumed-late");
+    check(
+      "E28 late sweep: unclaimed results consumed, claimed ones kept",
+      out?.[0]?.json?.consumed_late === 2 &&
+        done.includes("pangram-probe__late-en-0.result.json.consumed") &&
+        done.includes("pangram-gone-3.result.json.consumed") &&
+        done.includes("pangram-probe__claim-en-0.result.json") &&
+        done.includes("pangram-wgd-7.result.json") &&
+        done.includes("pangram-draftx.result.json") &&
+        late.length === 2 &&
+        late.every((l) => typeof l.task === "string" && typeof l.run_state === "string"),
+      JSON.stringify({ done, late, cl: out?.[0]?.json?.consumed_late }),
+    );
+  }
+
+  // --- E29 chain id fold: '+' -> '_' + collision guard -----------------
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_CHAINS: "writehuman+editor" };
+    seedFixtures(sc.fakeFs, ["clean_human"]);
+    await execTick(sc);
+    const r = loadRun(sc.fakeFs, "writehuman_editor__clean_human-en");
+    check(
+      "E29 id fold: '+' chain folds to '_' run id, stages preserved",
+      r?.chain === "writehuman+editor" && (r.stages || []).join("+") === "writehuman+editor",
+      JSON.stringify(r && { chain: r.chain, stages: r.stages }),
+    );
+    const sc2 = mkSc();
+    sc2.env = { HUMANIZER_CHAINS: "a+b,a_b" };
+    seedFixtures(sc2.fakeFs, ["clean_human"]);
+    await execTick(sc2);
+    const kept = loadRun(sc2.fakeFs, "a_b__clean_human-en");
+    const coll = logLines(sc2.fakeFs).filter((l) => l.action === "seed-id-collision");
+    check(
+      "E29 fold collision: distinct folded chain skipped + logged, never merged",
+      kept?.chain === "a+b" && coll.some((l) => l.chain === "a_b" && l.held_by === "a+b"),
+      JSON.stringify({ chain: kept?.chain, coll }),
+    );
+  }
+
+  // --- E30 marker_spans: original source casing -------------------------
+  {
+    const sc = mkSc();
+    seedFixtures(sc.fakeFs, ["ai_flop"]);
+    await execTick(sc);
+    const r = loadRun(sc.fakeFs, "editor__ai_flop-en");
+    const texts = (r?.last_score?.marker_spans || []).map((s) => s.text);
+    check(
+      "E30 marker_spans: source casing emitted, not the lowercase needle",
+      texts.includes("In today's fast-paced world") &&
+        texts.includes("It is important to note") &&
+        texts.includes("Furthermore"),
+      JSON.stringify(texts),
     );
   }
 
