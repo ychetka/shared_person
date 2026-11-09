@@ -54,6 +54,14 @@
 //       pangram_gate 'disabled' on the poll answer;
 //   G18 PANGRAM_DAILY_CREDITS='0' means ZERO: the first enqueue is
 //       credit-capped, never silently defaulted back to 20.
+//   G19 failed result carrying abort_reason ('wrong_scan_panel' -
+//       the recipe's post-click identity probe refused a foreign
+//       panel) -> the warn reply AND the ai_check stamp quote it next
+//       to the step error;
+//   G20 transient re-arm covers 'enqueue_failed' (prep-time lock/io
+//       fault): a 'skipped'/'enqueue_failed' stamp re-enqueues once
+//       the blocker clears; a settled 'failed' stamp (error, no
+//       reason) NEVER re-arms - the dead-branch guard.
 //
 // Run:  node tools/check_pangram.js    (exit 0 = all pass)
 
@@ -976,6 +984,105 @@ const main = async () => {
         d.ai_check.reason === "credit_cap" &&
         dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0,
       JSON.stringify({ ai: d && d.ai_check, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
+    );
+  }
+
+  // --- G19 abort_reason quoted in the warn reply + stamp -----------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    const text = words(160);
+    seedDraft(sc.fakeFs, "g19", {
+      text,
+      ai_check_pending: {
+        task: "pangram-g19",
+        text_fnv: fnv(text),
+        words: 160,
+        cost: 2,
+        at: new Date().toISOString(),
+      },
+    });
+    sc.fakeFs.writeFileSync(
+      `${HANDS}/failed/pangram-g19.result.json`,
+      JSON.stringify({
+        ok: false,
+        error: "step14: element not found: w0 w1 w2",
+        abort_reason: "wrong_scan_panel",
+      }),
+    );
+    await runPoll(sc);
+    const sent = sc.tgCalls.filter((c) => c.method === "sendMessage");
+    check(
+      "G19 abort_reason: warn reply quotes it",
+      sent.length === 1 &&
+        /check failed.*WARN/.test(String(sent[0].body.text)) &&
+        sent[0].body.text.includes("wrong_scan_panel"),
+      JSON.stringify(sent.map((c) => c.body.text)),
+    );
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g19.json`);
+    check(
+      "G19 abort_reason: ai_check.error carries it too",
+      d?.ai_check?.status === "failed" &&
+        String(d.ai_check.error || "").includes("wrong_scan_panel"),
+      JSON.stringify(d && d.ai_check),
+    );
+  }
+
+  // --- G20 enqueue_failed re-arm; 'failed' stamp stays terminal ----
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    const text = words(160);
+    seedDraft(sc.fakeFs, "g20", {
+      text,
+      ai_check: {
+        status: "skipped",
+        reason: "enqueue_failed",
+        words: 160,
+        text_fnv: fnv(text),
+        rechecks: 0,
+        at: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    await runPoll(sc);
+    check(
+      "G20 re-arm: enqueue_failed skip re-enqueues",
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).includes("pangram-g20.json"),
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).join(","),
+    );
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g20.json`);
+    check(
+      "G20 re-arm: pending armed, rearmed_on stamped",
+      d?.ai_check_pending?.task === "pangram-g20" && d.ai_check.rearmed_on === today(),
+      JSON.stringify({ ai: d && d.ai_check, pend: d && d.ai_check_pending }),
+    );
+    // dead-branch guard: a settled 'failed' stamp carries 'error',
+    // not 'reason' - TRANSIENT_SKIP has nothing to match, so the
+    // record stays terminal even with a same-day poll
+    const sc2 = mkSc();
+    seed(sc2.fakeFs);
+    seedDraft(sc2.fakeFs, "g20b", {
+      text,
+      ai_check: {
+        status: "failed",
+        error: "step8: element not found: Check for AI",
+        words: 160,
+        text_fnv: fnv(text),
+        rechecks: 0,
+        at: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    await runPoll(sc2);
+    const d2 = readJson(sc2.fakeFs, `${DRAFTS}/g20b.json`);
+    check(
+      "G20 terminal: a 'failed' stamp never re-arms",
+      dirOf(sc2.fakeFs, `${HANDS}/inbox`).length === 0 &&
+        !d2?.ai_check_pending &&
+        d2?.ai_check?.status === "failed",
+      JSON.stringify({
+        inbox: dirOf(sc2.fakeFs, `${HANDS}/inbox`),
+        ai: d2 && d2.ai_check,
+      }),
     );
   }
 
