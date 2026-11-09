@@ -97,6 +97,31 @@ def scroll(amount=3, direction="down"):
     _xd("click", "5" if direction == "down" else "4", "--repeat", amount)
 
 
+def set_clipboard(text):
+    """Load the X CLIPBOARD selection via PyGObject Gtk.Clipboard so a
+    following `key ctrl+v` pastes `text` as a normal OS paste event
+    (trusted input - the target app cannot tell it from a human paste).
+    This is the long-body path the README's 'OS-level input' survey
+    picked: xclip/xsel are absent on this box, python3-gi is installed.
+
+    The selection stays owned by THIS process - fine, because the
+    caller is the long-running mcp_server and the paste happens while
+    it is alive. cb.store() additionally asks the clipboard manager to
+    persist it; harmless when no manager runs.
+    """
+    import gi
+
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gdk, Gtk
+
+    os.environ.setdefault("DISPLAY", ENV["DISPLAY"])
+    os.environ.setdefault("XAUTHORITY", ENV["XAUTHORITY"])
+    Gtk.init([])
+    cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+    cb.set_text(str(text), -1)
+    cb.store()
+
+
 def wait_for_image(template_path, timeout=10, confidence=0.85):
     """Poll the screen until template appears; returns (x,y) center or None."""
     from vision import find_on_screen

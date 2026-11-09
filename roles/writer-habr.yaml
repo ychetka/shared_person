@@ -1,0 +1,15 @@
+name: writer-habr
+description: Pass-2 writer - Habr RU article/post from extracted facts (markdown body + title/hubs for the hands-agent composer)
+backend: gemini
+model: gemini-3.1-pro-preview
+fallback_models:
+  - gemini-3.6-flash
+  - gemini-3.5-flash
+temperature: 0.7
+max_tokens: 4096
+prompt: writer-habr
+context_slots:
+  - writer_style
+  - style_guide
+output:
+  type: json

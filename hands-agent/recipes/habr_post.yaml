@@ -1,0 +1,229 @@
+name: habr_post
+# Habr publish recipe (docs/habr-driver-spec.md): drives the logged-in
+# desktop browser profile through the Habr composer - title, hubs,
+# markdown body with <habracut>, optional КДПВ image and inline
+# figures - and completes it INCLUDING the final publish click. No
+# write API exists; this recipe IS the whole external layer.
+#
+# Params (from the sp-publish driver's queue payload):
+#   kind        - 'article' (default) or 'post'
+#   post_kind   - true for kind=post (gates the short-form URL block)
+#   title       - article title (empty for kind=post)
+#   hubs        - hub list (1-5)
+#   text_md     - markdown body, carries the literal <habracut> marker
+#   tags        - optional tag list
+#   image_path  - optional КДПВ (host path - already translated)
+#   media       - optional inline figures (host paths)
+#   test        - when true, after the URL read-back the recipe
+#                 retracts the publication back to drafts and reports
+#                 {retracted:true} (a real boolean - emit passes
+#                 non-string YAML literals through typed)
+#
+# Result: {ok, url, retracted?, media_attached?, abort_reason?,
+# last_step, publish_step} - url comes from the post-publish location
+# read-back (emit page url), which IS the verification the driver
+# records.
+#
+# CLICK BOUNDARY: the 'Опубликовать' click_dom carries `marks:
+# publish` - the worker records its index as publish_step next to
+# last_step (index of the last completed step) in EVERY result. The
+# driver classifies last_step >= publish_step as a post-click crash
+# (maybe_live + orphan probe) and anything earlier as a definite
+# pre-click failure. Do not move or rename the mark.
+#
+# BLOCKED SURFACES: the optional dom_text probes right after the
+# composer load look for CAPTCHA/verification, login-wall and
+# sandbox-tier markers. A hit emits abort_reason and the gated `fail`
+# step aborts the run immediately - emits survive into the failed
+# result, which is how the driver's operator_escalation classification
+# gets its evidence instead of regexing a generic 'element not found'.
+#
+# HONEST STATUS: this is a scaffold - the composer DOM targets below
+# follow Habr's current RU UI labels but the recipe has NOT been run
+# against a live profile end-to-end. Verify on the desktop browser
+# (DISPLAY :1) before enabling PUBLISH_PLATFORMS+=habr; tune targets
+# with shot evidence the way linkedin_post.yaml was verified.
+steps:
+  # ---------- open the composer ----------
+  # article: /ru/articles/new/ gated on {title} (present only for
+  # kind=article); post short form: /ru/posts/new/ gated on
+  # {post_kind} (the driver sends it true - 'kind' alone cannot
+  # express 'not article' in the if-semantics). Adjust the post URL
+  # after a verified run if Habr routes posts elsewhere.
+  - action: shot
+    name: habr_0_start.png
+  - action: key
+    keys: "ctrl+l"
+    if: "{title}"
+  - action: set_clipboard
+    text: "https://habr.com/ru/articles/new/"
+    if: "{title}"
+  - action: key
+    keys: "ctrl+v"
+    if: "{title}"
+  - action: key
+    keys: "Return"
+    if: "{title}"
+  - action: key
+    keys: "ctrl+l"
+    if: "{post_kind}"
+  - action: set_clipboard
+    text: "https://habr.com/ru/posts/new/"
+    if: "{post_kind}"
+  - action: key
+    keys: "ctrl+v"
+    if: "{post_kind}"
+  - action: key
+    keys: "Return"
+    if: "{post_kind}"
+  - action: wait
+    seconds: 6
+  - action: shot
+    name: habr_1_composer.png
+  # ---------- blocked-surface probes ----------
+  # A CAPTCHA/verification wall, a logged-out composer, or the
+  # ReadOnly sandbox-tier redirect all surface right after navigation.
+  # Each optional probe lands its hit (or '') in ctx; a hit emits
+  # abort_reason and the single gated `fail` step then aborts the run
+  # on a named reason - the failed result carries both, so the driver
+  # escalates to the operator (spec 2.3/2.8) instead of retrying a
+  # composer fill that can never succeed. All probes are read-only.
+  - action: dom_text
+    url: habr.com
+    target: "captcha"
+    into: blk_captcha
+    optional: true
+  - action: emit
+    key: abort_reason
+    value: "CAPTCHA/verification surface visible: {blk_captcha}"
+    if: "{blk_captcha}"
+  - action: dom_text
+    url: habr.com
+    target: "Войти"
+    into: blk_login
+    optional: true
+  - action: emit
+    key: abort_reason
+    value: "logged-out/login wall visible: {blk_login}"
+    if: "{blk_login}"
+  # the sandbox redirect is a LOCATION fact, not a text marker: an
+  # empty target on the sandbox tab reads its url back
+  - action: dom_text
+    url: "habr.com/ru/sandbox"
+    into: blk_sandbox
+    optional: true
+  - action: emit
+    key: abort_reason
+    value: "sandbox-tier surface (ReadOnly account): {blk_sandbox}"
+    if: "{blk_sandbox}"
+  - action: fail
+    reason: "blocked publish surface - operator needed (see abort_reason)"
+    if: "{blk_captcha}{blk_login}{blk_sandbox}"
+  # ---------- title (article only) ----------
+  - action: click_dom
+    url: habr.com
+    target: "Заголовок"
+    if: "{title}"
+  - action: set_clipboard
+    text: "{title}"
+    if: "{title}"
+  - action: key
+    keys: "ctrl+v"
+    if: "{title}"
+  # ---------- hubs ----------
+  # the hub selector is a tag input; add each hub by text + Return.
+  # {hubs} arrives as a JSON list - expand per-hub in a verified run;
+  # for now paste the joined list into the selector (TODO: loop).
+  - action: click_dom
+    url: habr.com
+    target: "Хабы"
+  - action: set_clipboard
+    text: "{hubs}"
+  - action: key
+    keys: "ctrl+v"
+  - action: key
+    keys: "Return"
+  - action: wait
+    seconds: 1
+  # ---------- body ----------
+  # markdown mode: Habr's editor accepts markdown when the 'Markdown'
+  # mode toggle is on - long bodies go through the clipboard, never
+  # type_text (human-speed typing a 10k article blows the result
+  # window)
+  - action: click_dom
+    url: habr.com
+    target: "Текст публикации"
+  - action: set_clipboard
+    text: "{text_md}"
+  - action: key
+    keys: "ctrl+v"
+  - action: wait
+    seconds: 2
+  - action: shot
+    name: habr_2_filled.png
+  # ---------- КДПВ / media (optional, TODO: verified attach) ----------
+  # image_path attaches through the composer's file-chooser dialog:
+  # click the upload control, ctrl+l, paste the HOST path, Return.
+  - action: click_dom
+    url: habr.com
+    target: "Загрузить"
+    if: "{image_path}"
+  - action: wait
+    seconds: 2
+    if: "{image_path}"
+  - action: key
+    keys: "ctrl+l"
+    if: "{image_path}"
+  - action: set_clipboard
+    text: "{image_path}"
+    if: "{image_path}"
+  - action: key
+    keys: "ctrl+v"
+    if: "{image_path}"
+  - action: key
+    keys: "Return"
+    if: "{image_path}"
+  - action: wait
+    seconds: 4
+    if: "{image_path}"
+  # honest attach count for the ledger: reaching this emit means every
+  # gated attach step above completed (any failure returns before it).
+  # Only image_path attaches today - the inline media[] figures are a
+  # verified-run TODO, so the count is 1, not len(media)+1. The driver
+  # records result.media_attached (absent -> 0), never its own guess.
+  - action: emit
+    key: media_attached
+    value: 1
+    if: "{image_path}"
+  # ---------- PUBLISH CLICK (the boundary) ----------
+  - action: click_dom
+    url: habr.com
+    target: "Опубликовать"
+    marks: publish
+  - action: wait
+    seconds: 8
+  - action: shot
+    name: habr_3_published.png
+  # ---------- URL read-back (the verification) ----------
+  # empty target -> the tab's location.href/document.title
+  - action: dom_text
+    url: "habr.com"
+    into: page
+  - action: emit
+    key: url
+    value: "{page}"
+  # ---------- test retract (optional) ----------
+  # 'unpublish' on Habr = the article's edit menu 'В черновики'
+  # (back to drafts). Emit retracted so the driver records
+  # test-published-retracted vs test-retract-failed.
+  - action: click_dom
+    url: habr.com
+    target: "В черновики"
+    if: "{test}"
+  - action: wait
+    seconds: 5
+    if: "{test}"
+  - action: emit
+    key: retracted
+    value: true
+    if: "{test}"

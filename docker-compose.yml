@@ -93,9 +93,10 @@ services:
       # the ENABLED gates in sp-publish (Publish Tick) and
       # sp-tg-moderation (Handle TG Update); both read $env via
       # PUBLISH_PLATFORMS so the two cannot drift. 'all' is valid and
-      # expands to every writer platform (linkedin/facebook/fb/vk),
+      # expands to every writer platform (linkedin/facebook/fb/vk/habr),
       # matching content-gen's MAP.all fan-out. Default keeps VK
-      # only; non-enabled platforms land in queue skipped/
+      # only - linkedin and habr are opt-in via the env var (e.g.
+      # 'vk,linkedin'); non-enabled platforms land in queue skipped/
       - PUBLISH_PLATFORMS=${PUBLISH_PLATFORMS:-vk}
       # simulated-publish kill switch (issue #41): real publishing is
       # OFF by developer decision until an explicit go-live - the
@@ -139,6 +140,29 @@ services:
       - VK_TOKEN_SECRET=${VK_TOKEN_SECRET:?VK_TOKEN_SECRET is required - set it in the compose environment}
       - LINKEDIN_ACCESS_TOKEN=${LINKEDIN_ACCESS_TOKEN:-}
       - LINKEDIN_PERSON_URN=${LINKEDIN_PERSON_URN:-}
+      # Habr publish driver (docs/habr-driver-spec.md): NO API exists -
+      # 'hands' (the only accepted value) routes through the
+      # hands-agent habr_post recipe via the /home/node/hands-queue
+      # bind mount below. Anything else fails closed at the driver.
+      - HABR_VIA=${HABR_VIA:-hands}
+      # optional: the account's publications page (e.g.
+      # https://habr.com/ru/users/<nick>/publications/articles/) used
+      # by the orphan-probe recipe after a maybe-live failure. Empty
+      # = skip the probe (the operator checks the page by hand).
+      - HABR_PROFILE_URL=${HABR_PROFILE_URL:-}
+      # hands-agent result-channel wait (ms): the habr_post recipe is
+      # human-speed desktop automation, so this stays under the ~10min
+      # stuck-claim window minus probe time. Empty = 420000 (7min).
+      - HABR_RESULT_WAIT_MS=${HABR_RESULT_WAIT_MS:-}
+      # orphan-probe wait (ms) for the post-failure profile-page
+      # title match. Empty = 120000 (2min).
+      - HABR_PROBE_WAIT_MS=${HABR_PROBE_WAIT_MS:-}
+      # host-side materials directory for habr media path translation:
+      # the driver resolves media to /home/node/materials/<rel> and
+      # must hand the recipe the HOST path the file-chooser attach can
+      # open - the ../materials bind-mount source below. REQUIRED when
+      # a habr payload carries media; text-only payloads work without it.
+      - HANDS_HOST_PREFIX=${HANDS_HOST_PREFIX:-}
     volumes:
       - n8n_storage:/home/node/.n8n
       # hands-agent task queue (n8n drops publish tasks into inbox/)

@@ -41,7 +41,7 @@ const WF_DIR = path.join(__dirname, "..", "n8n", "workflows");
 // token; 'all' is the fan-out token (MAP.all -> every writer) and
 // counts like a platform name, the aliases 'fb'/'ig' count too.
 const PLATFORM_TOKEN_RE =
-  /\b(?:all|facebook|fb|ig|instagram|linkedin|tiktok|twitter|vk|youtube)\b/g;
+  /\b(?:all|facebook|fb|habr|ig|instagram|linkedin|tiktok|twitter|vk|youtube)\b/g;
 
 // expect = exact number of copies that must carry the marker pair, so
 // a deleted or newly added copy is caught as well as an edited one.
