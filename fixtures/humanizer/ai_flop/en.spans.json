@@ -1,0 +1,34 @@
+{
+  "expected_spans": [
+    {
+      "text": "In today's fast-paced world",
+      "marker_type": "filler_opener",
+      "reason": "Generic temporal framing opener; carries no information about the actual subject."
+    },
+    {
+      "text": "It is important to note that",
+      "marker_type": "hedging_filler",
+      "reason": "Meta-announcement filler; the statement that follows carries its own weight."
+    },
+    {
+      "text": "deliver reliable systems at scale",
+      "marker_type": "generic_claim",
+      "reason": "Uncited scale/reliability claim with no concrete object or number."
+    },
+    {
+      "text": "plays a vital role",
+      "marker_type": "generic_claim",
+      "reason": "Stock importance phrase; no mechanism or evidence attached."
+    },
+    {
+      "text": "position themselves for lasting long-term success",
+      "marker_type": "vague_benefit",
+      "reason": "Aspirational closer with no measurable outcome."
+    },
+    {
+      "text": "a guiding principle for every serious engineering effort",
+      "marker_type": "vague_benefit",
+      "reason": "Moralizing summary that resolves nothing concrete."
+    }
+  ]
+}

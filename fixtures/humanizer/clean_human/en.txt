@@ -1,0 +1,9 @@
+Spent most of Tuesday chasing a flaky lock in the run seeder. The tick would claim a run file, die on a folded JSON read, and leave the .lock sitting there until the TTL stole it back. My first fix was dumb - I bumped the TTL to 90 seconds and called it a day. That just made the steal window slower, not smaller.
+
+What actually worked: write the claim, re-read it, and only trust the token you just wrote. Boring, but it killed the double-claim I kept seeing in the logs. I also moved the trace append inside the same atomic write as the state flip. Two writes pretending to be one transaction was the whole bug.
+
+Numbers from last night: 14 runs seeded, zero stuck locks, one malformed fixture that now gets skipped with a note instead of wedging the sweep. The skip path cost me an hour because readdirSync on a missing dir throws ENOENT and I kept forgetting to guard it.
+
+Still annoyed at the credit counter. It resets on UTC date rollover, which is correct, but a run that starts at 23:58 can get capped mid-flight two minutes later. I left it as is - the estimate is optimistic anyway, charged at enqueue, and the reconciliation happens when the result lands. Not elegant. Honest.
+
+Next thing on the list: figure out why the borderline tier keeps scoring 54 against the stub. Probably the jitter hash. Fine for now.

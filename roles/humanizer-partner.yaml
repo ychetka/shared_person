@@ -1,0 +1,36 @@
+name: humanizer-partner
+description: Context-free humanizer editor - rewrites a draft per detector findings into the persona's natural register (issue #78)
+backend: gemini
+model: gemini-3.5-flash
+fallback_models:
+  - gemini-3.6-flash
+  - gemini-3.5-flash-lite
+  - gemini-3.1-flash-lite
+  - gemini-flash-lite-latest
+temperature: 0.4
+max_tokens: 4096
+prompt: humanizer-partner
+output:
+  type: json
+  schema:
+    type: object
+    additionalProperties: false
+    required: ["rewritten_text", "edits"]
+    properties:
+      rewritten_text:
+        type: string
+      edits:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: ["span", "action", "reason"]
+          properties:
+            span:
+              type: string
+            action:
+              type: string
+            reason:
+              type: string
+      note:
+        type: string

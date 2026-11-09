@@ -385,6 +385,34 @@ Note: VK ID now issues these tokens with `expires_in=86400` (~24h) -
 this script is the re-issue path, `vk_token_service.py` remains the
 primary provider for sp-publish.
 
+
+## check_humanizer.js - humanizer eval pipeline harness (issue #78)
+
+Sandbox harness for `sp-humanizer-eval`'s 'Eval Tick': extracts the
+real jsCode and runs it under the stubbed Code-node environment
+(same in-memory `fs`/`$env`/`this.helpers.httpRequest` contract as
+check_pangram.js) against the REAL fixture corpus in
+`fixtures/humanizer/<tier>/<lang>.txt`. Asserts the run state
+machine end to end: idempotent seeding (`<chain>__<tier>-<lang>.json`
+runs for `HUMANIZER_CHAINS` - 'baseline' score-only vs 'editor'
+rewrite), clean_human zero-iteration pass (partner never invoked),
+ai_flop convergence in <=2 iterations with the
+scoring->decide->rewriting->rescoring trace, borderline
+'max_iterations' escalate with best-so-far and no threshold
+oscillation, the score ledger row contract
+(`state/humanizer_scores.jsonl`), the pangram scorer path (enqueue
+`pangram-<run>-<seq>.json`, ceil(words/100) shared-credit charge,
+result consumption, `credit_cap` and missing-queue stub fallback),
+the inhouse partner `/run` call + 422 'partner_failed' escalate,
+declared-but-unconfigured external stages -> 'unavailable' cell +
+'stage_unavailable' with zero outbound calls, and the
+regression->revert decide branch.
+
+```bash
+node tools/check_humanizer.js   # exit 0 = all checks pass
+```
+
 ## port_fwd.sh / port_fwd.py
+
 
 Host-to-rootless-netns port bridging - see `../README.md`.
