@@ -19,22 +19,35 @@
 //       with simulated:true, ZERO hands-queue writes;
 //   H6  dry_run:true: claim -> contract -> media resolve -> done with
 //       a 'dry-run' ledger record and ZERO inbox writes;
-//   H7  3-per-24h window: three recorded habr publications inside 24h
-//       make the fourth file requeue (retryable), not enqueue;
+//   H7  3-per-24h window counts PUBLICATIONS, not ledger rows: the 3
+//       live-status rows of one test publication still leave slots
+//       free; three real publications (six rows) fill the window and
+//       the fourth file requeues (retryable); an unreadable ledger
+//       fails closed - requeue, never publish on an unknown window;
 //   H8  result timeout: no result file inside HABR_RESULT_WAIT_MS ->
 //       failed/ + maybe_live, and the habr_probe orphan probe
 //       (HABR_PROFILE_URL) recovers the article url into the ledger;
 //   H9  media path translation: /home/node/materials/<rel> resolves
 //       then translates to HANDS_HOST_PREFIX/<rel> host paths in the
-//       task params; image (КДПВ) lands in image_path;
+//       task params; image (КДПВ) lands in image_path; the ledger's
+//       media_attached is the recipe's own emit, not the enqueue
+//       count;
 //   H10 test:true + {retracted:true} -> test-published-retracted;
-//       {ok,url} without retracted -> test-retract-failed;
-//   H11 recipe failure classification: pre-click {ok:false,error}
-//       -> definite failed (no maybe_live); post-click
-//       {ok:false,published:true} -> failed + maybe_live;
-//   H12 CAPTCHA/verification abort -> operator_escalation status,
-//       no retry, no maybe_live;
-//   H13 HABR_VIA other than 'hands' -> config_error, terminal.
+//       {ok,url} without retracted -> test-retract-failed - the
+//       stubbed retracted value is whatever the REAL recipe's emit
+//       line produces (typed YAML pass-through), so a quoted "true"
+//       regression fails here;
+//   H11 recipe failure classification by step FACT: last_step <
+//       publish_step -> definite failed (no maybe_live); last_step >=
+//       publish_step -> failed + maybe_live; a bare failed/ task file
+//       stays ambiguous -> maybe_live;
+//   H12 blocked-surface abort -> operator_escalation status, no
+//       retry, no maybe_live (the recipe's own abort_reason emit is
+//       the evidence);
+//   H13 HABR_VIA other than 'hands' -> config_error, terminal;
+//   H14 a done result whose read-back url is not a publication page
+//       (/ru/sandbox/, edit page, profile) -> operator_escalation,
+//       never a 'published' record.
 //
 // The hands-agent worker is simulated by hooking renameSync: an
 // enqueue into hands-queue/inbox/<tid>.json schedules a
@@ -60,6 +73,51 @@ const factory = new Function(
   "$env",
   `return (async function () {\n${node0.parameters.jsCode}\n});`,
 );
+
+// ------------------------------------------------------------------
+// Recipe-anchored contract constants. The stubs below must speak the
+// REAL result dialect the worker+recipe produce, so the values are
+// read out of hands-agent/recipes/habr_post.yaml instead of restated:
+//   PUBLISH_STEP  - steps[] index of the `marks: publish` step (the
+//                   'Опубликовать' click_dom); the worker reports it as
+//                   result.publish_step
+//   FAIL_STEP     - steps[] index of the gated `fail` step (blocked-
+//                   surface abort)
+//   emitValue(k)  - the value a `{action: emit, key: k, value: X}`
+//                   step actually emits: YAML scalars pass through the
+//                   DSL TYPED (unquoted true -> boolean, 1 -> number),
+//                   only strings get {param} formatting. A quoted
+//                   "true" would emit the STRING 'true' - and these
+//                   stubs would then feed that string to the driver,
+//                   which is exactly the bug class this guards.
+const RECIPE = fs.readFileSync(
+  path.join(__dirname, "..", "hands-agent", "recipes", "habr_post.yaml"),
+  "utf8",
+);
+let PUBLISH_STEP = -1;
+let FAIL_STEP = -1;
+{
+  let stepIdx = -1;
+  for (const line of RECIPE.split("\n")) {
+    const m = /^\s*-\s*action:\s*(\S+)\s*$/.exec(line);
+    if (m) {
+      stepIdx++;
+      if (m[1] === "fail" && FAIL_STEP < 0) FAIL_STEP = stepIdx;
+    }
+    if (/^\s*marks:\s*publish\s*$/.test(line)) PUBLISH_STEP = stepIdx;
+  }
+}
+const emitValue = (key) => {
+  const m = new RegExp(`key:\\s*${key}\\s*\\r?\\n\\s*value:\\s*(.+?)\\s*$`, "m").exec(RECIPE);
+  if (!m) return undefined;
+  const raw = m[1];
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
+  return raw.replace(/^["']|["']$/g, "");
+};
+const EMITTED_RETRACTED = emitValue("retracted");
+const EMITTED_MEDIA_ATTACHED = emitValue("media_attached");
 
 // ------------------------------------------------------------------
 // in-memory fs - identical contract to check_li_media.js's mkFs.
@@ -304,6 +362,9 @@ const runTick = async (sc) => {
       fakeFs.appendFileSync(`${STATE}/published.jsonl`, JSON.stringify(rec) + "\n");
     }
   }
+  // fsTweak: last-mile fs sabotage a seed can't express (e.g. a
+  // non-ENOENT read error on the ledger for the fail-closed case)
+  if (sc.fsTweak) sc.fsTweak(fakeFs);
   const calls = [];
   const helpers = {
     httpRequest: async (opts) => {
@@ -421,7 +482,10 @@ const main = async () => {
       !!pub &&
         pub.external_id === "https://habr.com/ru/articles/424242/" &&
         pub.platform === "habr" &&
-        pub.verified === true,
+        pub.verified === true &&
+        // no media enqueued -> the recipe emits no media_attached ->
+        // the driver records 0, not its own guess
+        pub.media_attached === 0,
       JSON.stringify(pub),
     );
     check("H2 file lands in done/", at(fakeFs, "done").includes("h1.json"));
@@ -524,17 +588,48 @@ const main = async () => {
     check("H6 dry-run: ledger dry-run record", !!dr && dr.media_resolved === 1, JSON.stringify(dr));
   }
 
-  // H7: 3-per-24h window - requeue, no enqueue.
+  // H7: 3-per-24h window - counts PUBLICATIONS, not ledger rows.
   {
+    // one test publication leaves THREE live-status rows behind
+    // (post-created + published + test-published-retracted, all the
+    // same draft id) - row counting would read that as a full 3/3
+    // window; publication counting leaves two slots free
     const now = Date.now();
     const { fakeFs } = await runTick({
-      ledgerSeed: [1, 2, 3].map((i) => ({
-        ts: new Date(now - i * 3600 * 1000).toISOString(),
-        id: `old${i}`,
+      ledgerSeed: ["post-created", "published", "test-published-retracted"].map((st, i) => ({
+        ts: new Date(now - (i + 1) * 600 * 1000).toISOString(),
+        id: "t9",
         platform: "habr",
-        status: "published",
-        external_id: `https://habr.com/ru/articles/${i}/`,
+        status: st,
+        external_id: "https://habr.com/ru/articles/9/",
       })),
+      result: { url: "https://habr.com/ru/articles/77/" },
+    });
+    check(
+      "H7 event dedupe: 3 rows from 1 publication -> publish proceeds",
+      at(fakeFs, "done").includes("h1.json") && status(fakeFs)?.status === "ok",
+      JSON.stringify({
+        done: at(fakeFs, "done"),
+        failed: at(fakeFs, "failed"),
+        status: status(fakeFs),
+      }),
+    );
+  }
+  {
+    // three real publications - each its own post-created + published
+    // pair (six rows, three draft ids) - fill the window; the fourth
+    // file requeues instead of burning a blocked recipe run
+    const now = Date.now();
+    const { fakeFs } = await runTick({
+      ledgerSeed: [1, 2, 3].flatMap((i) =>
+        ["post-created", "published"].map((st, j) => ({
+          ts: new Date(now - i * 3600 * 1000 - j * 1000).toISOString(),
+          id: `old${i}`,
+          platform: "habr",
+          status: st,
+          external_id: `https://habr.com/ru/articles/${i}/`,
+        })),
+      ),
     });
     check(
       "H7 window full: file requeued at queue root (retries=1)",
@@ -550,6 +645,33 @@ const main = async () => {
       "H7 window full: rate_window_wait status",
       status(fakeFs)?.status === "rate_window_wait",
       JSON.stringify(status(fakeFs)),
+    );
+  }
+  {
+    // an unreadable ledger (not ENOENT - a real read error) leaves the
+    // window UNKNOWN: the driver fails closed and requeues rather
+    // than publishing blind into a possibly-full window
+    const { fakeFs } = await runTick({
+      fsTweak: (f) => {
+        const orig = f.readFileSync.bind(f);
+        f.readFileSync = (p, enc) => {
+          if (String(p).endsWith("published.jsonl")) {
+            throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+          }
+          return orig(p, enc);
+        };
+      },
+    });
+    check(
+      "H7 ledger unreadable: requeued (fail-closed), no enqueue",
+      fakeFs.existsSync(`${Q}/h1.json`) &&
+        status(fakeFs)?.status === "rate_window_wait" &&
+        hq(fakeFs, "inbox").length === 0,
+      JSON.stringify({
+        root: fakeFs.existsSync(`${Q}/h1.json`),
+        done: at(fakeFs, "done"),
+        status: status(fakeFs),
+      }),
     );
   }
 
@@ -589,13 +711,20 @@ const main = async () => {
 
   // H9: media path translation - container -> host prefix.
   {
-    const { fakeFs } = await runTick({
+    const { fakeFs, ledger } = await runTick({
       payload: {
         media: ["materials/photos/fig1.png"],
         image: "materials/photos/fig2.png",
       },
       media: MEDIA,
-      result: { url: "https://habr.com/ru/articles/7/" },
+      // the recipe emits media_attached only after its attach steps -
+      // the stub carries exactly what the recipe's emit produces (1:
+      // image_path is the only attach the recipe performs today;
+      // the inline fig enqueued in media[] proves intent, not attach)
+      result: {
+        url: "https://habr.com/ru/articles/7/",
+        media_attached: EMITTED_MEDIA_ATTACHED,
+      },
     });
     const task = hq(fakeFs, "done").find((f) => f.endsWith(".json") && !f.endsWith(".result.json"));
     const body = task ? JSON.parse(read(fakeFs, `${HANDS}/done/${task}`)) : null;
@@ -605,6 +734,12 @@ const main = async () => {
         JSON.stringify(body.params.media) === JSON.stringify(["/host/materials/photos/fig1.png"]) &&
         body.params.image_path === "/host/materials/photos/fig2.png",
       JSON.stringify(body && body.params),
+    );
+    const pub9 = ledger.find((r) => r && r.status === "published");
+    check(
+      "H9 ledger: media_attached is the recipe emit (1), not the 2 enqueued",
+      !!pub9 && pub9.media_attached === 1 && EMITTED_MEDIA_ATTACHED === 1,
+      JSON.stringify({ pub: pub9, emitted: EMITTED_MEDIA_ATTACHED }),
     );
   }
   {
@@ -637,8 +772,17 @@ const main = async () => {
   {
     const { fakeFs, ledger } = await runTick({
       payload: { test: true },
-      result: { url: "https://habr.com/ru/articles/55/", retracted: true },
+      // EMITTED_RETRACTED is whatever the recipe's `value:` line
+      // really emits - boolean true today, but a regression to the
+      // quoted "true" would feed the driver a string here and fail
+      // the retracted === true assertion below
+      result: { url: "https://habr.com/ru/articles/55/", retracted: EMITTED_RETRACTED },
     });
+    check(
+      "H10 recipe emits a real boolean retracted",
+      EMITTED_RETRACTED === true,
+      `recipe retracted emit parses as ${JSON.stringify(EMITTED_RETRACTED)}`,
+    );
     const rec = ledger.find((r) => r && r.status === "test-published-retracted");
     check(
       "H10 test+retracted: test-published-retracted ledger",
@@ -673,10 +817,21 @@ const main = async () => {
     );
   }
 
-  // H11: recipe failure classification.
+  // H11: recipe failure classification by last_step vs publish_step
+  // (both anchored in the real recipe file, not restated here).
   {
     const { fakeFs, ledger } = await runTick({
-      failResult: { error: "composer field not found", log: ["fill title", "fill hubs"] },
+      // a composer fill step failed BEFORE the 'Опубликовать' click:
+      // last_step < publish_step -> definite, no maybe_live. The
+      // error text is the worker's real 'stepN: element not found'
+      // shape - which the old stringify-scan could never escalate OR
+      // classify, and must not now either
+      failResult: {
+        error: `step${FAIL_STEP + 1}: element not found: Заголовок`,
+        log: ["step0 shot ok", "step1 key ok"],
+        last_step: PUBLISH_STEP - 1,
+        publish_step: PUBLISH_STEP,
+      },
     });
     check(
       "H11 pre-click failure: failed/, no maybe_live",
@@ -692,9 +847,38 @@ const main = async () => {
     );
   }
   {
+    // 'element not found' ON the publish target itself: the click
+    // never fired - last_step stays below publish_step, and the
+    // 'Опубликовать' text inside the error must not promote it
     const { fakeFs, ledger } = await runTick({
       env: { HABR_PROFILE_URL: "" },
-      failResult: { error: "browser died after click", published: true },
+      failResult: {
+        error: `step${PUBLISH_STEP}: element not found: Опубликовать`,
+        log: ["step0 shot ok"],
+        last_step: PUBLISH_STEP - 1,
+        publish_step: PUBLISH_STEP,
+      },
+    });
+    check(
+      "H11 publish-target miss is still pre-click (definite)",
+      at(fakeFs, "failed").includes("h1.json") &&
+        status(fakeFs)?.status === "recipe_failed" &&
+        !ledger.some((r) => r && r.status === "failed" && r.maybe_live === true),
+      JSON.stringify({ status: status(fakeFs), ledger }),
+    );
+  }
+  {
+    const { fakeFs, ledger } = await runTick({
+      env: { HABR_PROFILE_URL: "" },
+      // the click step completed (last_step == publish_step, its
+      // success line is in the worker log), a LATER step crashed -
+      // the article may be live -> maybe_live
+      failResult: {
+        error: `step${PUBLISH_STEP + 1} wait: browser window gone`,
+        log: [`step${PUBLISH_STEP} click_dom 'Опубликовать' -> Опубликовать`],
+        last_step: PUBLISH_STEP,
+        publish_step: PUBLISH_STEP,
+      },
     });
     check(
       "H11 post-click failure: failed/ + maybe_live flag",
@@ -716,21 +900,28 @@ const main = async () => {
     );
   }
 
-  // H12: CAPTCHA abort - operator escalation, terminal.
+  // H12: blocked-surface abort - the recipe's own abort_reason emit
+  // is the evidence; operator escalation, terminal.
   {
     const { fakeFs, ledger } = await runTick({
+      // exactly what a probe hit produces: abort_reason emitted, the
+      // gated `fail` step aborts on a named reason, emits survive
+      // into the failed result
       failResult: {
-        error: "CAPTCHA challenge shown - abort",
-        log: ["nav", "captcha interstitial"],
+        abort_reason: "CAPTCHA/verification surface visible: SmartCaptcha",
+        error: `step${FAIL_STEP}: blocked publish surface - operator needed (see abort_reason)`,
+        log: [`step${FAIL_STEP - 1} emit ok`],
+        last_step: FAIL_STEP - 1,
+        publish_step: PUBLISH_STEP,
       },
     });
     check(
-      "H12 captcha: failed/ + operator_escalation",
+      "H12 abort_reason: failed/ + operator_escalation",
       at(fakeFs, "failed").includes("h1.json") && status(fakeFs)?.status === "operator_escalation",
       JSON.stringify(status(fakeFs)),
     );
     check(
-      "H12 captcha: no maybe_live",
+      "H12 abort_reason: no maybe_live",
       !ledger.some((r) => r && r.status === "failed" && r.maybe_live === true) &&
         !ledger.some((r) => r && r.status === "maybe-live"),
     );
@@ -747,6 +938,26 @@ const main = async () => {
         status(fakeFs)?.status === "config_error" &&
         hq(fakeFs, "inbox").length === 0,
       JSON.stringify(status(fakeFs)),
+    );
+  }
+
+  // H14: non-publication read-back urls - a done result is only a
+  // publication when the url IS a publication page. A /ru/sandbox/
+  // read-back means the recipe 'published' onto the ReadOnly sandbox
+  // surface: operator escalation, never a 'published' record.
+  for (const [why, url] of [
+    ["sandbox surface", "https://habr.com/ru/sandbox/"],
+    ["non-numeric id", "https://habr.com/ru/articles/abc/"],
+  ]) {
+    const { fakeFs, ledger } = await runTick({
+      result: { url },
+    });
+    check(
+      `H14 bad url (${why}): failed/ + operator_escalation, no published`,
+      at(fakeFs, "failed").includes("h1.json") &&
+        status(fakeFs)?.status === "operator_escalation" &&
+        !ledger.some((r) => r && (r.status === "published" || r.status === "post-created")),
+      JSON.stringify({ status: status(fakeFs), ledger }),
     );
   }
 

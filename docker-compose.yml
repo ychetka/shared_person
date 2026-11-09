@@ -94,10 +94,10 @@ services:
       # sp-tg-moderation (Handle TG Update); both read $env via
       # PUBLISH_PLATFORMS so the two cannot drift. 'all' is valid and
       # expands to every writer platform (linkedin/facebook/fb/vk/habr),
-      # matching content-gen's MAP.all fan-out. Default is vk+linkedin;
-      # habr is opt-in only (append ',habr' to enable it) - non-enabled
-      # platforms land in queue skipped/
-      - PUBLISH_PLATFORMS=${PUBLISH_PLATFORMS:-vk,linkedin}
+      # matching content-gen's MAP.all fan-out. Default keeps VK
+      # only - linkedin and habr are opt-in via the env var (e.g.
+      # 'vk,linkedin'); non-enabled platforms land in queue skipped/
+      - PUBLISH_PLATFORMS=${PUBLISH_PLATFORMS:-vk}
       # simulated-publish kill switch (issue #41): real publishing is
       # OFF by developer decision until an explicit go-live - the
       # default below is ON ('1'/'true'/'yes' = simulate). Simulated
