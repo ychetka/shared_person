@@ -116,6 +116,11 @@ const GROUPS = {
     expect: 3,
     normalize: [[/^\s+/gm, ""]],
   },
+  // withLock tokened fs lock + LockBusyError (issue #70): Prepare
+  // Draft and Handle TG Update (sp-tg-moderation) plus Publish Tick
+  // (sp-publish) - the whole block is one fixed shape, so the copies
+  // compare identical with no normalization
+  "file-lock": { expect: 3 },
   // updateDraft guarded re-read+mutate: Handle TG Update and Prepare
   // Draft (both sp-tg-moderation). The load/save lines legitimately
   // differ (loadDraft/saveDraft wrappers vs inline
