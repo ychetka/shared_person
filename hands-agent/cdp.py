@@ -134,3 +134,66 @@ def click_dom(url_substr, query):
         return {"error": f"element not found: {query}"}
     hands.click(pos["x"], pos["y"])
     return {"ok": True, "clicked": pos}
+
+
+def dom_text(url_substr, query=""):
+    """Read text out of a tab via eval_js (read-only - nothing is
+    injected or clicked). Two modes, both returning a dict or None:
+
+    - query empty: page/location read-back for the tab whose URL
+      contains url_substr -> {url, title}. This is the post-publish
+      URL read-back the habr result channel needs.
+    - query set: best visible-text/aria-label match like dom_rect's
+      candidate scan, but returns CONTENT instead of coords:
+      {text, href, tag} - href resolved through the element's closest
+      anchor, which is how the orphan probe recovers the article URL
+      from a title match on the publications page.
+    """
+    t = find_page(url_substr)
+    if not t:
+        return None
+    ws = t["webSocketDebuggerUrl"]
+    if not query:
+        raw = eval_js(ws, "JSON.stringify({url: location.href, title: document.title})")
+        try:
+            return json.loads(raw) if raw else None
+        except (TypeError, ValueError):
+            return None
+    expr = """(() => {
+      const q = __QUERY__.toLowerCase();
+      const els = Array.from(document.querySelectorAll(
+        'a,button,[role=button],h1,h2,h3,h4,span,li,div'));
+      let best = null;
+      for (const e of els) {
+        const it = (e.innerText || '').trim();
+        if (!it) continue;
+        const al = (e.getAttribute('aria-label') || '').trim();
+        const il = it.toLowerCase(), all = al.toLowerCase();
+        const exact = il === q || all === q;
+        if (!exact && !il.includes(q) && !(all && all.includes(q))) continue;
+        const r = e.getBoundingClientRect();
+        if (r.width < 4 || r.height < 4) continue;
+        const a = e.tagName === 'A' ? e : e.closest('a');
+        const c = {
+          text: it.slice(0, 300),
+          href: a && a.href ? String(a.href) : '',
+          tag: e.tagName,
+          area: r.width * r.height,
+          ex: exact
+        };
+        // smallest element wins, exact match first - same rule as
+        // dom_rect's cand(): the broadest container matching by
+        // substring must not beat the title element itself
+        if (!best || (c.ex && !best.ex) ||
+            (c.ex === best.ex && c.area < best.area)) best = c;
+      }
+      return best ? JSON.stringify(best) : 'null';
+    })()""".replace("__QUERY__", json.dumps(query))
+    raw = eval_js(ws, expr)
+    if not raw or raw == "null":
+        return None
+    try:
+        el = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return el if isinstance(el, dict) else None

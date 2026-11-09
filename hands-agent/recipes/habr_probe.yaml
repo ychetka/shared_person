@@ -1,0 +1,47 @@
+name: habr_probe
+# Orphan probe (docs/habr-driver-spec.md 2.6): after a post-click
+# recipe failure or a result-file loss, the sp-publish driver enqueues
+# this to recover the article URL. It opens the account's publications
+# page (HABR_PROFILE_URL) in the logged-in desktop browser, matches the
+# publication title via dom_text and emits the matched link's href.
+#
+# Params:
+#   profile_url - the account publications page (e.g.
+#                 https://habr.com/ru/users/<name>/publications/articles/)
+#   match       - exact title to match (article) or the ~80-char text
+#                 head (post). The publications list shows newest first;
+#                 the driver-side call is made within minutes of the
+#                 publish attempt, which is the recency bound the spec
+#                 relies on - titles are NOT guaranteed unique.
+#
+# Result: {ok, url, found} - url empty on a negative probe (the miss is
+# a legitimate answer, dom_text is optional), the run only lands in
+# failed/ on real mechanics failures (navigation, browser gone).
+steps:
+  - action: key
+    keys: "ctrl+l"
+  - action: wait
+    seconds: 0.5
+  - action: set_clipboard
+    text: "{profile_url}"
+  - action: key
+    keys: "ctrl+v"
+  - action: key
+    keys: "Return"
+  - action: wait
+    seconds: 5
+  - action: shot
+    name: "habr_probe_page.png"
+  - action: dom_text
+    url: "habr.com"
+    target: "{match}"
+    into: hit
+    optional: true
+  - action: emit
+    key: url
+    value: "{hit_href}"
+  - action: emit
+    key: found
+    value: "{hit}"
+  - action: shot
+    name: "habr_probe_result.png"

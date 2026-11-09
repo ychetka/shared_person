@@ -41,6 +41,8 @@ X11 session required (xdotool). Detected here: DISPLAY=:1, X11.
 | `locate` | Gemini vision locate -> coords |
 | `run_recipe` | Execute recipes/<name>.yaml |
 | `task_status` | Queue status |
+| `set_clipboard` | Load X CLIPBOARD (PyGObject Gtk) for `key ctrl+v` long-body paste |
+| `dom_text` | CDP read: element innerText+href, or page location when `target` empty |
 
 ## Recipe DSL (recipes/*.yaml)
 
@@ -79,6 +81,25 @@ Drop `task_id.json` into `queue/inbox/`:
 ```
 
 Poller consumes -> `queue/done/` or `queue/failed/` + in-memory `task_status`.
+
+Result channel (habr-driver-spec 2.4): on completion the poller also
+writes `queue/<done|failed>/<task_id>.result.json` with the recipe's
+returned fields (`{ok, url?, error?, log?}`) - this is how n8n records
+`external_ids` and classifies pre-click vs post-click failures. Recipe
+steps publish values into the result via `emit`:
+
+```yaml
+  - action: dom_text           # CDP read-only text extraction
+    url: "habr.com"            # tab URL substring
+    target: "{match}"          # element text; empty -> page {url,title}
+    into: hit                  # ctx[hit]=text|url, ctx[hit_href]=href
+    optional: true             # a miss = empty values, not a failed step
+  - action: set_clipboard      # PyGObject Gtk clipboard for ctrl+v
+    text: "{text_md}"
+  - action: emit               # ctx value -> result field
+    key: url
+    value: "{hit_href}"
+```
 
 ## Safety
 

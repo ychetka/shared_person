@@ -12,9 +12,15 @@ Tools (all coordinates are SCREEN pixels):
   locate(description, hint?)          -> vision-model locate -> (x,y) | null
   run_recipe(name, params_json)       -> run recipes/<name>.yaml steps
   task_status(task_id?)               -> queue status
+  set_clipboard(text)                 -> load X CLIPBOARD for ctrl+v paste
+  dom_text(url, target?)              -> CDP read: page location | element text+href
 
 Queue: n8n drops JSON tasks into ./queue/inbox/*.json, a poller thread
 consumes them into ./queue/{done,failed}/. Task = {"recipe": str, "params": {...}}
+Result channel (habr-driver-spec 2.4): on completion the poller also
+writes queue/<done|failed>/<task_id>.result.json carrying the recipe's
+returned fields ({ok, url?, error?, log?}) - n8n polls that file for
+external_ids and failure classification.
 
 ENV: DISPLAY, XAUTHORITY (auto-default to :1 + ~/.Xauthority).
 GEMINI_API_KEY (optional) - enables 'locate' via vision model.
@@ -109,6 +115,7 @@ def run_recipe(name, params):
         return {"error": "python3-yaml not installed"}
     ctx = dict(params)
     log_line = []
+    emitted = {}  # `emit` steps publish ctx values into the task result
 
     class _Safe(dict):
         def __missing__(self, k):
@@ -174,6 +181,38 @@ def run_recipe(name, params):
                 if r.get("error"):
                     return {"error": f"step{i}: {r['error']}", "log": log_line}
                 log_line.append(f"step{i} click_dom '{st['target']}' -> {r['clicked']['found']}")
+            elif act == "set_clipboard":
+                # long-body insert path: loads the X clipboard via
+                # PyGObject; the recipe then `key ctrl+v`s a real paste
+                hands.set_clipboard(st["text"])
+            elif act == "dom_text":
+                # CDP read (no input): target set -> innerText + href of
+                # the best-matching element; target empty -> the tab's
+                # location/title read-back. `optional: true` turns a
+                # miss into empty ctx values instead of a failed step
+                # (negative probe answers are legitimate results).
+                r = cdp.dom_text(st["url"], st.get("target", ""))
+                if r is None:
+                    if not st.get("optional"):
+                        return {
+                            "error": f"step{i}: dom_text no match: {st.get('target') or st['url']}",
+                            "log": log_line,
+                        }
+                    r = {}
+                into = st.get("into", "dom_text")
+                ctx[into] = r.get("text") or r.get("url") or ""
+                ctx[into + "_href"] = r.get("href") or ""
+                log_line.append(
+                    f"step{i} dom_text '{st.get('target', 'location')}' -> {str(ctx[into])[:80]}"
+                )
+            elif act == "emit":
+                # publish a ctx value (or a literal) into the task
+                # result, e.g. `{action: emit, key: url, value:
+                # "{page}"}` after a location-read dom_text - this is
+                # what lands in done/<task_id>.result.json
+                emitted[str(st["key"])] = (
+                    ctx.get(st["from"]) if "from" in st else st.get("value", "")
+                )
             elif act == "shot":
                 p = vision.screenshot(
                     os.path.join(BASE, "queue", "done", st.get("name", f"step{i}.png"))
@@ -184,7 +223,11 @@ def run_recipe(name, params):
             log_line.append(f"step{i} {act} ok")
         except Exception as e:  # noqa: BLE001 - a failed step must surface as recipe result, not crash the loop
             return {"error": f"step{i} {act}: {e}", "log": log_line}
-    return {"ok": True, "log": log_line}
+    res = {"ok": True, "log": log_line}
+    for k, v in emitted.items():
+        if k not in ("ok", "log", "error"):  # reserved fields
+            res[k] = v
+    return res
 
 
 def queue_worker():
@@ -193,6 +236,7 @@ def queue_worker():
             if not fn.endswith(".json"):
                 continue
             p = os.path.join(INBOX, fn)
+            res = None
             try:
                 task = json.load(open(p))
                 tid = fn[:-5]
@@ -202,8 +246,26 @@ def queue_worker():
                 dst = DONE if res.get("ok") else FAILED
             except Exception as e:  # noqa: BLE001 - queue boundary: mark the task failed, keep the worker alive
                 tid = fn[:-5]
-                TASKS[tid] = {"status": "failed", "result": {"error": str(e)}}
+                res = {"error": str(e)}
+                TASKS[tid] = {"status": "failed", "result": res}
                 dst = FAILED
+            # result channel (habr-driver-spec 2.4): n8n polls
+            # queue/{done,failed}/<task_id>.result.json for the recipe's
+            # emitted fields - url on success, error+log for post-click
+            # classification on failure. Write it before the task file
+            # lands so a result never sits without its task - or, more
+            # importantly, a moved task file is never mistaken for a
+            # result-less finish while the result is still mid-write.
+            try:
+                payload = dict(res or {})
+                payload["ok"] = bool(payload.get("ok"))
+                rp = os.path.join(dst, tid + ".result.json")
+                tmp = rp + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False)
+                os.replace(tmp, rp)
+            except Exception as e:  # noqa: BLE001 - a lost result must not wedge the worker; the task file still lands
+                log("result write failed", tid, e)
             os.replace(p, os.path.join(dst, fn))
         time.sleep(2)
 
@@ -317,6 +379,36 @@ TOOLS = [
         },
     },
     {
+        "name": "set_clipboard",
+        "description": (
+            "Load text into the X clipboard (PyGObject Gtk) so a later 'key ctrl+v' pastes it"
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["text"],
+            "properties": {"text": {"type": "string"}},
+        },
+    },
+    {
+        "name": "dom_text",
+        "description": (
+            "CDP read-only text extraction: target set -> {text,href,tag} "
+            "of the best-matching element; target empty -> {url,title} "
+            "page location read"
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["url"],
+            "properties": {
+                "url": {"type": "string", "description": "substring of tab URL"},
+                "target": {
+                    "type": "string",
+                    "description": "visible text/aria-label substring (empty = location read)",
+                },
+            },
+        },
+    },
+    {
         "name": "task_status",
         "description": "Queue task status",
         "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}}},
@@ -351,6 +443,11 @@ def call_tool(name, args):
         return cdp.dom_rect(args["url"], args["target"]) or {"x": -1, "y": -1}
     if name == "click_dom":
         return cdp.click_dom(args["url"], args["target"])
+    if name == "set_clipboard":
+        hands.set_clipboard(args["text"])
+        return {"ok": True}
+    if name == "dom_text":
+        return cdp.dom_text(args["url"], args.get("target", "")) or {"error": "no match"}
     if name == "run_recipe":
         tid = str(uuid.uuid4())[:8]
         res = run_recipe(args["name"], args.get("params", {}))
