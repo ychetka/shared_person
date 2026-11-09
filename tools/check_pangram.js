@@ -37,7 +37,23 @@
 //   G11 stale result: a result whose pending stamp no longer matches
 //       is consumed WITHOUT a reply;
 //   G12 missing hands-queue dirs: Prepare Draft stamps 'skipped' /
-//       'queue_unavailable' and the poll exits quietly - no throws.
+//       'queue_unavailable' and the poll exits quietly - no throws;
+//   G13 double-poll race: two overlapping poll executions sharing the
+//       state fs both see the pending draft + landed result - exactly
+//       ONE sendMessage lands (the lock claim precedes sendWarn);
+//   G14 inconclusive double-poll: same race on the notify sweep -
+//       exactly one 'inconclusive' reply across both polls;
+//   G15 transient re-arm: a 'skipped'/'credit_cap' stamp with a stale
+//       counter date re-arms after the daily reset (rechecks budget
+//       untouched); a still-capped counter stamps rearmed_on and the
+//       next same-day poll stays quiet;
+//   G16 queue_unavailable re-arm: the same 'skipped' stamp re-arms
+//       once the hands-queue bind mount reappears;
+//   G17 gate typo: PANGRAM_GATE='wran' fails CLOSED - no enqueue, no
+//       stamp, no sends, a 'ai-check-gate-disabled' ledger note and
+//       pangram_gate 'disabled' on the poll answer;
+//   G18 PANGRAM_DAILY_CREDITS='0' means ZERO: the first enqueue is
+//       credit-capped, never silently defaulted back to 20.
 //
 // Run:  node tools/check_pangram.js    (exit 0 = all pass)
 
@@ -53,12 +69,7 @@ const factoryOf = (name) => {
     console.error(`FAIL: ${name} jsCode not found in ${WF}`);
     process.exit(1);
   }
-  return new Function(
-    "require",
-    "$input",
-    "$env",
-    `return (async function () {\n${code}\n});`,
-  );
+  return new Function("require", "$input", "$env", `return (async function () {\n${code}\n});`);
 };
 const prepFactory = factoryOf("Prepare Draft");
 const pollFactory = factoryOf("Handle Pangram Results");
@@ -366,10 +377,7 @@ const main = async () => {
         !d.ai_check_pending,
       JSON.stringify(d && d.ai_check),
     );
-    check(
-      "G2 short text: zero enqueue",
-      dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0,
-    );
+    check("G2 short text: zero enqueue", dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0);
   }
 
   // --- G3 happy path: enqueue + pending + credit charge -------------
@@ -386,11 +394,16 @@ const main = async () => {
       inbox.join(","),
     );
     const task = readJson(sc.fakeFs, `${HANDS}/inbox/pangram-g3.json`);
+    // the driver sends the first ~60 chars of the collapsed text as
+    // the history-row match snippet (issue #77 review: lengthened
+    // from ~30 to shrink the substring-match click surface)
+    const snippet60 = Array.from(text.replace(/\s+/g, " ").trim()).slice(0, 60).join("").trim();
     check(
       "G3 task shape: pangram_check + text/snippet params",
       task?.recipe === "pangram_check" &&
         task.params.text === text &&
-        task.params.snippet === "w0 w1 w2 w3 w4 w5 w6 w7 w8 w9",
+        task.params.snippet === snippet60 &&
+        task.params.snippet.length === 60,
       JSON.stringify(task),
     );
     const d = readJson(sc.fakeFs, `${DRAFTS}/g3.json`);
@@ -625,7 +638,8 @@ const main = async () => {
     const c = readJson(sc.fakeFs, CREDITS);
     check(
       "G9 date rollover: est_spent reset then charged",
-      c?.date === today() && c.est_spent === 2 &&
+      c?.date === today() &&
+        c.est_spent === 2 &&
         dirOf(sc.fakeFs, `${HANDS}/inbox`).includes("pangram-g9.json"),
       JSON.stringify({ c, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
     );
@@ -713,6 +727,258 @@ const main = async () => {
     );
   }
 
+  // --- G13 double-poll race: exactly one reply ----------------------
+  // two poll executions overlapping on the SAME fs: the first claims
+  // the pending stamp under the draft lock and only then awaits the
+  // TG send - the second sees the stamp already transitioned and must
+  // consume the artifact as stale, never reply again.
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    const text = words(160);
+    seedDraft(sc.fakeFs, "g13", {
+      text,
+      ai_check_pending: {
+        task: "pangram-g13",
+        text_fnv: fnv(text),
+        words: 160,
+        cost: 2,
+        at: new Date().toISOString(),
+      },
+    });
+    sc.fakeFs.writeFileSync(
+      `${HANDS}/done/pangram-g13.result.json`,
+      JSON.stringify({ ok: true, hit_aig: "AI Generated", confidence: "88%" }),
+    );
+    const scA = sc;
+    scA.items = [{ json: {} }];
+    const scB = mkSc();
+    scB.fakeFs = scA.fakeFs; // sibling poll on the same state volume
+    scB.items = [{ json: {} }];
+    await Promise.all([execNode(pollFactory, scA), execNode(pollFactory, scB)]);
+    const sent = [...scA.tgCalls, ...scB.tgCalls].filter((c) => c.method === "sendMessage");
+    check(
+      "G13 double-poll: exactly one reply across both polls",
+      sent.length === 1,
+      JSON.stringify(sent.map((c) => c.body.text)),
+    );
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g13.json`);
+    check(
+      "G13 double-poll: settled stamp, pending consumed",
+      d?.ai_check?.status === "done" && d.ai_check.reply_sent === true && !d.ai_check_pending,
+      JSON.stringify(d && d.ai_check),
+    );
+    check(
+      "G13 double-poll: loser's stale-consume note in ledger",
+      logLines(sc.fakeFs).some(
+        (l) => l.action === "ai-check-stale-result" || l.action === "ai-check-stamp-vetoed",
+      ),
+    );
+  }
+
+  // --- G14 inconclusive double-poll: same single-answer rule --------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    const text = words(50);
+    seedDraft(sc.fakeFs, "g14", {
+      text,
+      ai_check: {
+        status: "inconclusive",
+        reason: "short_text",
+        words: 50,
+        text_fnv: fnv(text),
+        rechecks: 0,
+        notified: false,
+        at: new Date().toISOString(),
+      },
+    });
+    const scA = sc;
+    scA.items = [{ json: {} }];
+    const scB = mkSc();
+    scB.fakeFs = scA.fakeFs;
+    scB.items = [{ json: {} }];
+    await Promise.all([execNode(pollFactory, scA), execNode(pollFactory, scB)]);
+    const sent = [...scA.tgCalls, ...scB.tgCalls].filter((c) => c.method === "sendMessage");
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g14.json`);
+    check(
+      "G14 inconclusive double-poll: exactly one reply",
+      sent.length === 1 && d?.ai_check?.notified === true,
+      JSON.stringify(sent.map((c) => c.body.text)),
+    );
+  }
+
+  // --- G15 transient re-arm: credit_cap skip wakes after reset ------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    const text = words(160);
+    seedDraft(sc.fakeFs, "g15", {
+      text,
+      ai_check: {
+        status: "skipped",
+        reason: "credit_cap",
+        words: 160,
+        text_fnv: fnv(text),
+        rechecks: 0,
+        at: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    // yesterday's exhausted counter: the rollover in the credit lock
+    // resets est_spent, so the re-arm enqueue goes through today
+    sc.fakeFs.writeFileSync(
+      CREDITS,
+      JSON.stringify({ date: "2020-01-01", est_spent: 20, last_seen_left: 0 }),
+    );
+    await runPoll(sc);
+    check(
+      "G15 re-arm: credit_cap skip re-enqueues after daily reset",
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).includes("pangram-g15.json"),
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).join(","),
+    );
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g15.json`);
+    check(
+      "G15 re-arm: pending armed, recheck budget untouched",
+      d?.ai_check_pending?.task === "pangram-g15" &&
+        Number(d.ai_check.rechecks || 0) === 0 &&
+        d.ai_check.rearmed_on === today(),
+      JSON.stringify({ ai: d && d.ai_check, pend: d && d.ai_check_pending }),
+    );
+    // still-capped same day: ONE bound attempt, then quiet
+    const sc2 = mkSc();
+    seed(sc2.fakeFs);
+    seedDraft(sc2.fakeFs, "g15b", {
+      text,
+      ai_check: {
+        status: "skipped",
+        reason: "credit_cap",
+        words: 160,
+        text_fnv: fnv(text),
+        rechecks: 0,
+        at: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    sc2.fakeFs.writeFileSync(
+      CREDITS,
+      JSON.stringify({ date: today(), est_spent: 20, last_seen_left: 0 }),
+    );
+    await runPoll(sc2);
+    const d2 = readJson(sc2.fakeFs, `${DRAFTS}/g15b.json`);
+    check(
+      "G15 re-arm bound: capped counter refuses + stamps rearmed_on",
+      dirOf(sc2.fakeFs, `${HANDS}/inbox`).length === 0 &&
+        d2?.ai_check?.rearmed_on === today() &&
+        logLines(sc2.fakeFs).filter((l) => l.action === "ai-check-rearm-credit-cap").length === 1,
+      JSON.stringify({
+        inbox: dirOf(sc2.fakeFs, `${HANDS}/inbox`),
+        ai: d2 && d2.ai_check,
+      }),
+    );
+    await runPoll(sc2);
+    check(
+      "G15 re-arm bound: same-day repoll stays quiet",
+      dirOf(sc2.fakeFs, `${HANDS}/inbox`).length === 0 &&
+        logLines(sc2.fakeFs).filter((l) => l.action === "ai-check-rearm-credit-cap").length === 1,
+    );
+  }
+
+  // --- G16 queue_unavailable re-arm once the mount returns ----------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs); // hands dirs present again
+    const text = words(160);
+    seedDraft(sc.fakeFs, "g16", {
+      text,
+      ai_check: {
+        status: "skipped",
+        reason: "queue_unavailable",
+        words: 160,
+        text_fnv: fnv(text),
+        rechecks: 0,
+        at: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    await runPoll(sc);
+    check(
+      "G16 re-arm: queue_unavailable skip re-enqueues when mounted",
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).includes("pangram-g16.json"),
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).join(","),
+    );
+    // mount still absent: quiet skip, no rearm stamp churn
+    const sc2 = mkSc();
+    seed(sc2.fakeFs, { hands: false });
+    seedDraft(sc2.fakeFs, "g16b", {
+      text,
+      ai_check: {
+        status: "skipped",
+        reason: "queue_unavailable",
+        words: 160,
+        text_fnv: fnv(text),
+        rechecks: 0,
+        at: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    const out = await runPoll(sc2);
+    const d2 = readJson(sc2.fakeFs, `${DRAFTS}/g16b.json`);
+    check(
+      "G16 re-arm: mount still absent -> quiet, un-stamped",
+      out?.[0]?.json?.ok === true && !d2?.ai_check?.rearmed_on && sc2.tgCalls.length === 0,
+      JSON.stringify({ out: out && out[0] && out[0].json, ai: d2 && d2.ai_check }),
+    );
+  }
+
+  // --- G17 gate typo: fail CLOSED, not silent 'warn' ----------------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.env = { PANGRAM_GATE: "wran" };
+    sc.items = [draftItem({ draft_id: "g17", platform: "vk", text: words(160) })];
+    await runPrepare(sc);
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g17.json`);
+    check(
+      "G17 gate typo: no enqueue, no stamp",
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0 && !!d && !d.ai_check && !d.ai_check_pending,
+      JSON.stringify({ ai: d && d.ai_check, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
+    );
+    const out = await runPoll(sc);
+    check(
+      "G17 gate typo: poll answers 'disabled', sends nothing",
+      out?.[0]?.json?.pangram_gate === "disabled" && sc.tgCalls.length === 0,
+      JSON.stringify(out && out[0] && out[0].json),
+    );
+    check(
+      "G17 gate typo: disabled note in ledger",
+      logLines(sc.fakeFs).some((l) => l.action === "ai-check-gate-disabled" && l.value === "wran"),
+    );
+    // 'block' is reserved: same fail-closed treatment
+    const sc2 = mkSc();
+    seed(sc2.fakeFs);
+    sc2.env = { PANGRAM_GATE: "block" };
+    const out2 = await runPoll(sc2);
+    check(
+      "G17 gate 'block': reserved value also disabled",
+      out2?.[0]?.json?.pangram_gate === "disabled",
+      JSON.stringify(out2 && out2[0] && out2[0].json),
+    );
+  }
+
+  // --- G18 PANGRAM_DAILY_CREDITS='0' means zero ----------------------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.env = { PANGRAM_DAILY_CREDITS: "0" };
+    sc.items = [draftItem({ draft_id: "g18", platform: "vk", text: words(160) })];
+    await runPrepare(sc);
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g18.json`);
+    check(
+      "G18 credits=0: first enqueue credit-capped",
+      d?.ai_check?.status === "skipped" &&
+        d.ai_check.reason === "credit_cap" &&
+        dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0,
+      JSON.stringify({ ai: d && d.ai_check, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
+    );
+  }
+
   // --- WARN invariant: delivery outcome unaffected by pangram fields -
   // the 'msg' marker Prepare Draft emits for a normal draft still
   // carries exactly the moderation contract fields
@@ -724,7 +990,9 @@ const main = async () => {
     const marker = (out || []).find((i) => i.json && i.json.kind === "msg");
     check(
       "WARN invariant: msg marker ok/draft_id/chat_id intact",
-      !!marker && marker.json.draft_id === "g13" && marker.json.chat_id === "4242" &&
+      !!marker &&
+        marker.json.draft_id === "g13" &&
+        marker.json.chat_id === "4242" &&
         marker.json.ok !== false,
       JSON.stringify(marker && marker.json),
     );

@@ -10,16 +10,29 @@ name: pangram_check
 #   text     - the full draft text under check (pasted via clipboard,
 #              never type_text - a draft body is far over the human
 #              typing budget)
-#   snippet  - first ~30 chars of the whitespace-collapsed text; the
+#   snippet  - first ~60 chars of the whitespace-collapsed text; the
 #              newest history row's innerText starts with the checked
-#              text's head (rows truncate ~50 chars), so the snippet
-#              re-opens THIS scan's detail panel for the verdict probe
+#              text's head, so the snippet re-opens THIS scan's detail
+#              panel for the verdict probes. The length is deliberate:
+#              a longer query shrinks the substring-match surface a
+#              click can land on by mistake (issue #77 review).
 #
 # Result: {ok, hit_aig?, hit_ph?, hit_pai?, confidence?, credits_raw?,
-# credits_before?, last_step} - whichever verdict probe hit carries its
-# element innerText (up to 300 chars, percent included); the driver
-# picks the label by priority (a confident 'AI Generated' outranks the
-# 'possibly' labels) and parses the % and 'N left' figures itself.
+# credits_before?, abort_reason?, last_step} - whichever verdict probe
+# hit carries its element innerText (up to 300 chars, percent
+# included); the driver picks the label by priority (a confident 'AI
+# Generated' outranks the 'possibly' labels) and parses the % and
+# 'N left' figures itself.
+#
+# CLICK SEMANTICS (all click_dom steps): the driver READS the DOM -
+# a candidate is any button/a/[role=button]/input/textarea/
+# contenteditable/[role=textbox]/tabindex'd div whose visible
+# innerText, aria-label or placeholder EXACTLY equals or CONTAINS the
+# query; exact matches outrank substring matches and the SMALLEST
+# matched element area wins, so a broad container holding the text
+# can never beat the element itself. The physical click then lands
+# on that element's center via real OS input - no JS events are
+# injected into the page.
 #
 # VERIFIED DOM anatomy (audit browser, logged in):
 #   textarea: aria-label 'Text to check for AI' (placeholder 'Enter at
@@ -28,6 +41,8 @@ name: pangram_check
 #   history:  <button> rows whose innerText starts with the checked
 #             text's first words; the newest row sits on top after a
 #             check
+#   detail:   the scan detail panel renders an 'Overview' tab over the
+#             classification card (percent gauge + verdict label)
 #   verdict:  detail-panel label 'AI Generated' | 'Possibly AI' |
 #             'Possibly human' plus a percent figure
 #   credits:  header text 'N left' (e.g. '11 left'); 1 credit / 100
@@ -38,9 +53,11 @@ name: pangram_check
 # (keep it that way - the free daily credits are the whole budget).
 #
 # FAILURE MODE: a missing pangram tab (first dom_text), a missing
-# textarea, or a 'Check for AI' button that never appears all return a
-# definite recipe failure -> failed/<tid>.result.json - the driver
-# warn-classifies it, never retries into a double-charged credit.
+# textarea, a 'Check for AI' button that never appears, or a
+# history-row click that opens the wrong panel (the 'Overview'
+# assertion below) all return a definite recipe failure ->
+# failed/<tid>.result.json - the driver warn-classifies it, never
+# retries into a double-charged credit.
 steps:
   # ---------- anchor the tab + read the pre-check credit header ----
   # non-optional location read: no www.pangram.com tab in the audit
@@ -51,7 +68,13 @@ steps:
     url: "www.pangram.com"
     into: pg_page
   # header 'N left' BEFORE the run - the driver diff/re-syncs it
-  # against credits_raw below
+  # against credits_raw below. OBSERVABILITY-ONLY: the probe can land
+  # on a '14 days left' trial banner instead of the credit header -
+  # the driver-side parse rejects 'days left' forms, and the real
+  # 0-credit gate lives n8n-side anyway (est_spent vs
+  # PANGRAM_DAILY_CREDITS is checked before a task is ever
+  # enqueued), so a misleading read here can never make the recipe
+  # spend or skip a credit on its own.
   - action: dom_text
     url: "www.pangram.com"
     target: "left"
@@ -86,6 +109,27 @@ steps:
     seconds: 2
   - action: shot
     name: pangram_1_result.png
+  # ---------- post-click panel assertion ----------
+  # the row click MUST have opened this scan's detail panel - a click
+  # that landed on the wrong surface (a paid CTA or an unrelated
+  # element sharing the snippet substring) must NOT be followed by
+  # verdict probes reading a foreign panel. The presumptive emit arms
+  # abort_reason='wrong_panel' BEFORE the non-optional 'Overview'
+  # probe: a probe miss fails the step with the reason already in the
+  # result; a hit clears it (the DSL has no miss-gated fail, so the
+  # non-optional probe IS the fail). 'Overview' is the detail panel's
+  # results tab (verified DOM anatomy); if Pangram renames it, assert
+  # the verdict label itself here instead.
+  - action: emit
+    key: abort_reason
+    value: "wrong_panel"
+  - action: dom_text
+    url: "www.pangram.com"
+    target: "Overview"
+    into: pg_panel
+  - action: emit
+    key: abort_reason
+    value: ""
   # ---------- verdict probes (read-only, all optional) ----------
   # the three verdict labels are pairwise-disjoint substrings: 'AI
   # Generated' is not inside either 'possibly' label, 'Possibly AI' is
