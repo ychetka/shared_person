@@ -163,6 +163,17 @@ services:
       # open - the ../materials bind-mount source below. REQUIRED when
       # a habr payload carries media; text-only payloads work without it.
       - HANDS_HOST_PREFIX=${HANDS_HOST_PREFIX:-}
+      # Pangram AI-check warn-gate on moderation cards (issue #76):
+      # 'warn' (default) enqueues pangram_check tasks into the same
+      # /home/node/hands-queue bind mount and replies on the card -
+      # it informs, NEVER blocks moderation. 'off' disables the whole
+      # path (no enqueues, no draft stamps, no replies).
+      - PANGRAM_GATE=${PANGRAM_GATE:-warn}
+      # optimistic daily credit estimate cap for the gate (free
+      # Pangram credits are 1 per 100 words): Prepare Draft's enqueue
+      # gate and the poller's text-hash re-check both read it via
+      # $env, so the two cannot drift. Empty = 20.
+      - PANGRAM_DAILY_CREDITS=${PANGRAM_DAILY_CREDITS:-}
     volumes:
       - n8n_storage:/home/node/.n8n
       # hands-agent task queue (n8n drops publish tasks into inbox/)

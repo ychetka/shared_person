@@ -1,0 +1,214 @@
+name: pangram_check
+# Pangram AI-check probe (issue #76): drives the free text checker on
+# www.pangram.com/dashboard inside the audit browser profile (already
+# logged in - NO credentials anywhere in this recipe). The result is a
+# WARN-only signal for the moderation card: the driver (Handle Pangram
+# Results in sp-tg-moderation) turns the emitted probe hits into a
+# card reply that informs, NEVER blocks.
+#
+# Params (from the driver's queue payload pangram-<draft_id>.json):
+#   text     - the full draft text under check (pasted via clipboard,
+#              never type_text - a draft body is far over the human
+#              typing budget)
+#   snippet  - first ~60 chars of the whitespace-collapsed text; the
+#              newest history row's innerText starts with the checked
+#              text's head, so the snippet re-opens THIS scan's detail
+#              panel for the verdict probes - and doubles as the
+#              post-click scan-identity assertion (the open panel
+#              renders the checked text itself, so a foreign panel
+#              cannot contain it). The length is deliberate: a longer
+#              query shrinks the substring-match surface a click can
+#              land on by mistake (issue #77 review).
+#
+# Result: {ok, hit_aig?, hit_ph?, hit_pai?, confidence?, credits_raw?,
+# credits_before?, abort_reason?, last_step} - whichever verdict probe
+# hit carries its element innerText (up to 300 chars, percent
+# included); the driver picks the label by priority (a confident 'AI
+# Generated' outranks the 'possibly' labels) and parses the % and
+# 'N left' figures itself.
+#
+# CLICK SEMANTICS (all click_dom steps): the driver READS the DOM -
+# a candidate is any button/a/[role=button]/input/textarea/
+# contenteditable/[role=textbox]/tabindex'd div whose visible
+# innerText, aria-label or placeholder EXACTLY equals or CONTAINS the
+# query; exact matches outrank substring matches and the SMALLEST
+# matched element area wins, so a broad container holding the text
+# can never beat the element itself. The physical click then lands
+# on that element's center via real OS input - no JS events are
+# injected into the page.
+#
+# VERIFIED DOM anatomy (audit browser, logged in):
+#   textarea: aria-label 'Text to check for AI' (placeholder 'Enter at
+#             least 50 words or drop a file or image to check for AI.')
+#   submit:   visible button text 'Check for AI'
+#   history:  <button> rows whose innerText starts with the checked
+#             text's first words; the newest row sits on top after a
+#             check
+#   detail:   the scan detail panel renders the checked text itself
+#             plus an 'Overview' tab over the classification card
+#             (percent gauge + verdict label)
+#   verdict:  detail-panel label 'AI Generated' | 'Possibly AI' |
+#             'Possibly human' plus a percent figure
+#   credits:  header text 'N left' (e.g. '11 left'); 1 credit / 100
+#             words
+#
+# SAFETY - paid-surface elements are NEVER targeted: no step below
+# touches 'Unlock Free Trial', 'View Plans', 'Upgrade' or 'Get $10'
+# (keep it that way - the free daily credits are the whole budget).
+#
+# FAILURE MODE: a missing pangram tab (first dom_text), a missing
+# textarea, a 'Check for AI' button that never appears, or a
+# history-row click that opens the wrong panel (the snippet
+# scan-identity assertion below) all return a definite recipe failure
+# -> failed/<tid>.result.json - the driver warn-classifies it, never
+# retries into a double-charged credit.
+steps:
+  # ---------- anchor the tab + read the pre-check credit header ----
+  # non-optional location read: no www.pangram.com tab in the audit
+  # profile is a definite recipe failure, not a retryable click miss.
+  - action: shot
+    name: pangram_0_start.png
+  - action: dom_text
+    url: "www.pangram.com"
+    into: pg_page
+  # ---------- pre-flight: close leftover surfaces -------------------
+  # a leftover checkout modal or a stale detail drawer (an earlier
+  # scan's panel still open from a previous run or a manual poke)
+  # would eat the history-row click below - or worse, survive it and
+  # let the verdict probes read a foreign panel. Two unconditional
+  # Escape presses collapse both layers; on a clean surface they are
+  # harmless no-ops (issue #77 review).
+  - action: key
+    keys: "Escape"
+  - action: wait
+    seconds: 1
+  - action: key
+    keys: "Escape"
+  - action: wait
+    seconds: 1
+  # header 'N left' BEFORE the run - the driver diff/re-syncs it
+  # against credits_raw below. OBSERVABILITY-ONLY: the probe can land
+  # on a '14 days left' trial banner instead of the credit header -
+  # the driver-side parse rejects 'days left' forms, and the real
+  # 0-credit gate lives n8n-side anyway (est_spent vs
+  # PANGRAM_DAILY_CREDITS is checked before a task is ever
+  # enqueued), so a misleading read here can never make the recipe
+  # spend or skip a credit on its own.
+  - action: dom_text
+    url: "www.pangram.com"
+    target: "left"
+    into: credits_before
+    optional: true
+  # ---------- fill + submit ----------
+  - action: click_dom
+    url: "www.pangram.com"
+    target: "Text to check for AI"
+  - action: set_clipboard
+    text: "{text}"
+  - action: key
+    keys: "ctrl+a"
+  - action: key
+    keys: "ctrl+v"
+  - action: wait
+    seconds: 1
+  - action: click_dom
+    url: "www.pangram.com"
+    target: "Check for AI"
+  - action: wait
+    seconds: 8
+  # ---------- open this scan's detail panel ----------
+  # the freshest history row is on top and its innerText starts with
+  # the checked text's head; the snippet param IS that head. The
+  # textarea holds the pasted text as a VALUE (not innerText), so the
+  # row is the only text-match target for it.
+  - action: click_dom
+    url: "www.pangram.com"
+    target: "{snippet}"
+  - action: wait
+    seconds: 2
+  - action: shot
+    name: pangram_1_result.png
+  # ---------- post-click scan-identity assertion ----------
+  # LOAD-BEARING (issue #77 review): the row click MUST have opened
+  # THIS scan's detail panel - an 'Overview' probe alone only proved
+  # SOME drawer was open, so a stale drawer from an earlier scan (or
+  # a leftover modal the pre-flight Escape missed) would let the
+  # verdict probes below read a foreign panel and emit a wrong
+  # verdict as ok. The open detail panel renders the checked text
+  # itself (verified DOM anatomy), so a non-optional dom_text on
+  # {snippet} is the identity check: a different scan's panel cannot
+  # contain it -> the step fails -> the recipe fails closed. The
+  # presumptive emit arms abort_reason='wrong_scan_panel' BEFORE the
+  # probe (the DSL has no miss-gated fail - the non-optional probe IS
+  # the fail); a hit clears it. 'Overview' stays on as a secondary,
+  # weaker guard - the open panel must still be the results tab.
+  - action: emit
+    key: abort_reason
+    value: "wrong_scan_panel"
+  - action: dom_text
+    url: "www.pangram.com"
+    target: "{snippet}"
+    into: pg_identity
+  - action: dom_text
+    url: "www.pangram.com"
+    target: "Overview"
+    into: pg_panel
+  - action: emit
+    key: abort_reason
+    value: ""
+  # ---------- verdict probes (read-only, all optional) ----------
+  # the three verdict labels are pairwise-disjoint substrings: 'AI
+  # Generated' is not inside either 'possibly' label, 'Possibly AI' is
+  # not inside 'Possibly human' (and vice versa). Whichever hits emits
+  # its raw element text; the driver applies the priority order.
+  - action: dom_text
+    url: "www.pangram.com"
+    target: "AI Generated"
+    into: hit_aig
+    optional: true
+  - action: dom_text
+    url: "www.pangram.com"
+    target: "Possibly human"
+    into: hit_ph
+    optional: true
+  - action: dom_text
+    url: "www.pangram.com"
+    target: "Possibly AI"
+    into: hit_pai
+    optional: true
+  # percent figure + post-run credit header ('11 left')
+  - action: dom_text
+    url: "www.pangram.com"
+    target: "%"
+    into: confidence
+    optional: true
+  - action: dom_text
+    url: "www.pangram.com"
+    target: "left"
+    into: credits_raw
+    optional: true
+  # ---------- emit (gated - only the probes that hit land) ----------
+  - action: emit
+    key: hit_aig
+    from: hit_aig
+    if: "{hit_aig}"
+  - action: emit
+    key: hit_ph
+    from: hit_ph
+    if: "{hit_ph}"
+  - action: emit
+    key: hit_pai
+    from: hit_pai
+    if: "{hit_pai}"
+  - action: emit
+    key: confidence
+    from: confidence
+    if: "{confidence}"
+  - action: emit
+    key: credits_raw
+    from: credits_raw
+    if: "{credits_raw}"
+  - action: emit
+    key: credits_before
+    from: credits_before
+    if: "{credits_before}"
