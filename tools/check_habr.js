@@ -534,7 +534,7 @@ const main = async () => {
     ],
   ];
   for (const [why, patch] of contractCases) {
-    const { fakeFs, ledger } = await runTick({ payload: patch });
+    const { fakeFs } = await runTick({ payload: patch });
     check(
       `H3 contract (${why}): failed/, no enqueue`,
       at(fakeFs, "failed").includes("h1.json") && hq(fakeFs, "inbox").length === 0,

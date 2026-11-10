@@ -102,6 +102,12 @@
 //       response (rewritten_text === source, edits describe the
 //       plan) and the escalate_to_human arm - schema-level, no
 //       live model call.
+//   E32 rubric scorer backend (issue #80): POST RUBRIC_URL/score
+//       maps findings -> marker_spans, via 'rubric' in trace +
+//       scorer_backend in the ledger, malformed/unreachable service
+//       -> scorer_failed (never a stub fallback), and a stale
+//       scorer_claim re-claims once on the same scorer_retries
+//       budget the pangram pending path keeps.
 //
 // Run:  node tools/check_humanizer.js    (exit 0 = all pass)
 
@@ -1561,6 +1567,183 @@ const main = async () => {
         texts.includes("It is important to note") &&
         texts.includes("Furthermore"),
       JSON.stringify(texts),
+    );
+  }
+
+  // --- E32 rubric scorer backend (issue #80) -----------------------------
+  // the deterministic local HTTP scorer: POST RUBRIC_URL/score with
+  // {text,lang}, findings -> marker_spans {span,text,marker_type,
+  // reason}, via 'rubric' in trace + scorer_backend in the ledger, and
+  // honest scorer_failed on a dead/malformed service - never a stub
+  // fallback
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_SCORER: "rubric", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc.fakeFs, ["ai_flop"]);
+    sc.httpImpl = async (o) => {
+      if (o.url === "http://127.0.0.1:8790/score") {
+        return {
+          score: 20,
+          findings: [
+            {
+              rule: "en-hedge",
+              severity: 1,
+              span: [10, 18],
+              text: "it seems",
+              suggestion: "cut the hedge",
+            },
+            {
+              rule: "burstiness",
+              severity: 2,
+              span: [0, 0],
+              text: "",
+              suggestion: "vary sentence length",
+            },
+          ],
+          metrics: { stdev_words: 3.2, band_share: 0.8 },
+          version: "0.1.0",
+        };
+      }
+      throw new Error(`unexpected ${o.url}`);
+    };
+    await runTicks(sc, 4);
+    const r = loadRun(sc.fakeFs, "baseline__ai_flop-en");
+    check(
+      "E32 rubric: baseline run reaches done under the rubric scorer",
+      r?.state === "done" && r.last_score?.via === "rubric" && r.last_score?.score === 20,
+      JSON.stringify({ st: r?.state, s: r?.last_score }),
+    );
+    check(
+      "E32 rubric: POST {text,lang} to RUBRIC_URL/score",
+      sc.calls.length >= 1 &&
+        sc.calls.every(
+          (c0) =>
+            c0.url === "http://127.0.0.1:8790/score" &&
+            String(c0.method || "").toUpperCase() === "POST" &&
+            typeof (c0.body || {}).text === "string" &&
+            ["en", "ru"].includes((c0.body || {}).lang),
+        ),
+      JSON.stringify(
+        sc.calls.map((c0) => ({ u: c0.url, m: c0.method, b: c0.body && Object.keys(c0.body) })),
+      ),
+    );
+    const spans = r?.last_score?.marker_spans || [];
+    check(
+      "E32 rubric: findings -> marker_spans {span,text,marker_type,reason}",
+      spans.length === 1 &&
+        spans[0].span?.[0] === 10 &&
+        spans[0].span?.[1] === 18 &&
+        spans[0].text === "it seems" &&
+        spans[0].marker_type === "en-hedge" &&
+        spans[0].reason === "cut the hedge",
+      JSON.stringify(spans),
+    );
+    check(
+      "E32 rubric: doc-level [0,0] finding never enters marker_spans",
+      !spans.some(
+        (s) =>
+          s.text === "" ||
+          (s.span?.[0] === 0 && s.span?.[1] === 0 && s.marker_type === "burstiness"),
+      ),
+      JSON.stringify(spans),
+    );
+    check(
+      "E32 rubric: via 'rubric' in trace, scorer_backend 'rubric' in ledger",
+      (r?.trace || []).some((t) => t.action === "score" && t.via === "rubric") &&
+        scoreRows(sc.fakeFs).some((row) => row.scorer_backend === "rubric"),
+      JSON.stringify({ tr: (r?.trace || []).map((t) => t.action), rows: scoreRows(sc.fakeFs) }),
+    );
+
+    // malformed response: a numeric score with no findings array is
+    // as bad as a non-numeric one - scorer_failed, no stub fallback
+    const sc2 = mkSc();
+    sc2.env = { HUMANIZER_SCORER: "rubric", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc2.fakeFs, ["ai_flop"]);
+    sc2.httpImpl = async (o) => {
+      if (o.url === "http://127.0.0.1:8790/score") return { score: 30 };
+      throw new Error(`unexpected ${o.url}`);
+    };
+    await runTicks(sc2, 4);
+    const r2 = loadRun(sc2.fakeFs, "baseline__ai_flop-en");
+    check(
+      "E32 rubric: missing findings array -> scorer_failed",
+      r2?.state === "escalated" && r2.outcome === "scorer_failed",
+      JSON.stringify({ st: r2?.state, oc: r2?.outcome }),
+    );
+    check(
+      "E32 rubric: malformed response never falls back to stub",
+      r2?.last_score?.via !== "stub" && !(r2?.trace || []).some((t) => t.via === "stub"),
+      JSON.stringify(r2?.last_score),
+    );
+
+    // dead service: transport error -> scorer_failed, and no score
+    // row is written in any backend's name
+    const sc3 = mkSc();
+    sc3.env = { HUMANIZER_SCORER: "rubric", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc3.fakeFs, ["ai_flop"]);
+    sc3.httpImpl = async () => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:8790");
+    };
+    await runTicks(sc3, 4);
+    const r3 = loadRun(sc3.fakeFs, "baseline__ai_flop-en");
+    check(
+      "E32 rubric: unreachable service -> scorer_failed, no stub fallback",
+      r3?.state === "escalated" &&
+        r3.outcome === "scorer_failed" &&
+        r3?.last_score?.via !== "stub" &&
+        !scoreRows(sc3.fakeFs).some((row) => row.scorer_backend === "stub"),
+      JSON.stringify({ st: r3?.state, oc: r3?.outcome, rows: scoreRows(sc3.fakeFs) }),
+    );
+
+    // stale-claim parity with pangram's E13 - same tick, both arms:
+    // a scorer_claim that outlives SCORE_STALE_MS is a crashed tick.
+    // The en run (retries 0) gets ONE re-claim on the scorer_retries
+    // budget: rubric-stale-clear, then a fresh claim whose landed
+    // score resets the budget to 0 (E27 semantics). The ru run
+    // (retries already 1) hits the second-stale bound and escalates
+    // 'scorer_failed'. This machinery is the rubric-specific
+    // scorer_claim, not the pangram pending task, so E13 never saw it
+    const sc4 = mkSc();
+    sc4.env = { HUMANIZER_SCORER: "rubric", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc4.fakeFs, ["clean_human"]);
+    sc4.httpImpl = async (o) => {
+      if (o.url === "http://127.0.0.1:8790/score") {
+        return { score: 10, findings: [], metrics: {}, version: "0.1.0" };
+      }
+      throw new Error(`unexpected ${o.url}`);
+    };
+    await execTick(sc4); // seeds + first claims land -> decide
+    const stale = new Date(Date.now() - 700000).toISOString();
+    for (const [id, retries] of [
+      ["baseline__clean_human-en", 0],
+      ["baseline__clean_human-ru", 1],
+    ]) {
+      const cur4 = loadRun(sc4.fakeFs, id);
+      cur4.state = "scoring";
+      cur4.scorer_retries = retries;
+      cur4.scorer_claim = { nonce: "stale0", at: stale };
+      sc4.fakeFs.writeFileSync(`${RUNS}/${id}.json`, JSON.stringify(cur4));
+    }
+    const callsBefore = sc4.calls.length;
+    await execTick(sc4);
+    const r4 = loadRun(sc4.fakeFs, "baseline__clean_human-en");
+    const r4ru = loadRun(sc4.fakeFs, "baseline__clean_human-ru");
+    const tr4 = (r4?.trace || []).map((t) => t.action);
+    check(
+      "E32 rubric: stale scorer_claim - one re-claim, then scorer_failed",
+      r4?.state === "decide" &&
+        r4.scorer_retries === 0 &&
+        !r4.scorer_claim &&
+        tr4.includes("rubric-stale-clear") &&
+        tr4.indexOf("rubric-stale-clear") < tr4.lastIndexOf("rubric-claim") &&
+        sc4.calls.length === callsBefore + 1 &&
+        r4ru?.state === "escalated" &&
+        r4ru.outcome === "scorer_failed" &&
+        !r4ru.scorer_claim,
+      JSON.stringify({
+        en: { st: r4?.state, rt: r4?.scorer_retries, tr: tr4 },
+        ru: { st: r4ru?.state, oc: r4ru?.outcome },
+      }),
     );
   }
 

@@ -29,3 +29,4 @@ edge/data/
 
 # generated secrets - never commit (see deploy/vk-token.service)
 deploy/vk-token.env
+rubric-lint/python/
