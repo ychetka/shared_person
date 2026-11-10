@@ -183,6 +183,10 @@ services:
       # POST $RUBRIC_URL/score on the shared-person-rubric service
       # below - local+fast, no queue; an unreachable service escalates
       # scorer_failed honestly instead of falling back to stub.
+      # HUMANIZER_SCORER=rubric+judge (issue #82) is the atomic
+      # composite: rubric /score AND the fluency-judge role on the
+      # gateway, blended max(rubric, judge*weight); either leg down
+      # escalates scorer_failed - never a rubric-only settle.
       # HUMANIZER_PARTNER=inhouse routes rewrites through
       # llm-gateway /run (role humanizer-partner).
       - HUMANIZER_SCORER=${HUMANIZER_SCORER:-stub}
@@ -199,6 +203,12 @@ services:
       # rubric-lint /score endpoint for the rubric scorer backend
       # (issue #80) - loopback for the same network_mode:host reason
       - RUBRIC_URL=${RUBRIC_URL:-http://127.0.0.1:8790}
+      # composite 'rubric+judge' scorer knobs (issue #82): the judge
+      # rides the SAME LLM_GATEWAY_URL as the partner - JUDGE_ROLE
+      # names the role manifest, HUMANIZER_JUDGE_WEIGHT dampens the
+      # judge leg of the blend (empty = 0.8, clamped 0-1)
+      - JUDGE_ROLE=${JUDGE_ROLE:-fluency-judge}
+      - HUMANIZER_JUDGE_WEIGHT=${HUMANIZER_JUDGE_WEIGHT:-}
     volumes:
       - n8n_storage:/home/node/.n8n
       # hands-agent task queue (n8n drops publish tasks into inbox/)

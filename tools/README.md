@@ -417,10 +417,32 @@ partner's `detector_payload {ai_score, marker_spans[]}` input shape,
 >=150-word fixture cells with parsable `*.spans.json` annotations,
 the `humanizer-seed` lock race guard, cross-backend 'best'
 separation (pangram vs stub scores never compare), the 0-100
-threshold clamp, and the spec shipping `active: false`.
+threshold clamp, and the spec shipping `active: false`. Issue #82
+adds the composite `rubric+judge` scorer (blend `max(rubric,
+judge*0.8)`, atomic `scorer_failed` on either leg, judge spans
+unioned into `marker_spans`), the `chain_a`/`stage_a` blind-label
+non-leakage assertions, and the `roles/fluency-judge.yaml` schema
+contract compiled through ajv.
 
 ```bash
 node tools/check_humanizer.js   # exit 0 = all checks pass
+```
+
+## check_judge.py - fluency-judge validation harness (issue #82)
+
+Fixture-tier validation for `roles/fluency-judge.yaml` before the
+composite `rubric+judge` scorer trusts the LLM verdict: asserts the
+strict output contract (`{score 0-100 higher=WORSE, rationale,
+issues[]}`, `additionalProperties:false`), then ranks the EN fixture
+tiers `clean_human < borderline < ai_flop`. Default mode replays
+recorded verdicts - no network, CI-safe; `--live` POSTs the real
+role to `$LLM_GATEWAY_URL/run` (`JUDGE_ROLE` env override) for each
+tier, prints the ranking report and asserts the same ordering
+against the live model.
+
+```bash
+python3 tools/check_judge.py         # mock mode (exit 0 = pass)
+python3 tools/check_judge.py --live  # hits the real gateway
 ```
 
 ## port_fwd.sh / port_fwd.py

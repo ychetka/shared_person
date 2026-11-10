@@ -136,6 +136,15 @@ reason: suggestion}]` for the partner's `detector_payload`. An
 unreachable service or a bad response shape escalates
 `scorer_failed` - honest, never a silent stub fallback.
 
+`HUMANIZER_SCORER=rubric+judge` (issue #82) is the atomic composite:
+the same `/score` call PLUS a blind `fluency-judge` role verdict via
+`$LLM_GATEWAY_URL/run` (`JUDGE_ROLE`), blended
+`final = max(rubric, round(judge * 0.8))` - this service's score is
+the deterministic floor the LLM leg can never under-score. Either
+leg down escalates `scorer_failed`; there is no rubric-only settle.
+Validate the judge against the fixture tiers with
+`tools/check_judge.py --live` before enabling it.
+
 ## Docker
 
 `FROM n8n-local` like the siblings, but the flattened base ships node
