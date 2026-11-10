@@ -6,14 +6,14 @@ vendored nomisread sentences()/rhythm() pass, and writes the
 per-language voice profile the /score burstiness check compares
 against.
 
-Corpus (W7 - one fixture file is too thin for a voice profile):
-  * fixtures/humanizer/clean_human/{en,ru}.txt - the labelled-human
-    cells, always present;
-  * every *.txt/*.md under prompts/, docs/ and context/ that reads as
-    human-authored - developer-written prompts and spec prose are the
-    largest honest sample of this author's unassisted writing the repo
-    carries. A file joins the RU pool when >=30% of its letters are
-    Cyrillic, else EN.
+Corpus (round-2 review): fixtures/humanizer/clean_human/{en,ru}.txt
+ONLY - the one committed, verifiably human-authored sample this repo
+carries. The earlier W7 superset (prompts/, docs/, context/) was
+dropped on two grounds: this repo's docs and prompts are AGENT-
+written prose, so they were never evidence of a human hand, and
+context/ is gitignored, so a voice.json calibrated against it could
+not be reproduced on a clean checkout and broke --check in CI. A
+thin-but-honest profile beats a fat-but-corrupted one.
 
 Per-language calibration is deliberate: Russian and English prose
 have different sentence-length spreads, and one profile applied to
@@ -32,7 +32,6 @@ writing it actually saw.
 
 import json
 import os
-import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -42,40 +41,16 @@ import rubric_lint  # noqa: E402  (engine loads vendor + data itself)
 import vendor.nomisread as nomisread  # noqa: E402
 
 FIXTURES = os.path.join(ROOT, "fixtures", "humanizer", "clean_human")
-EXTRA_DIRS = ("prompts", "docs", "context")
-EXTRA_EXT = (".txt", ".md")
 VOICE_PATH = os.path.join(ROOT, "rubric-lint", "voice.json")
 MIN_CAL_SENTENCES = 30
 
-_CYR = re.compile(r"[а-яё]", re.I)
-_LAT = re.compile(r"[a-z]", re.I)
-
-
-def _lang_of(text):
-    cyr = len(_CYR.findall(text))
-    lat = len(_LAT.findall(text))
-    return "ru" if cyr >= 0.3 * (cyr + lat) else "en"
-
 
 def corpus_files(lang):
-    """clean_human cell first, then the repo's human-authored prose."""
-    files = [os.path.join(FIXTURES, lang + ".txt")]
-    for d in EXTRA_DIRS:
-        root = os.path.join(ROOT, d)
-        try:
-            names = sorted(os.listdir(root))
-        except OSError:
-            continue
-        for name in names:
-            if not name.endswith(EXTRA_EXT):
-                continue
-            p = os.path.join(root, name)
-            try:
-                if _lang_of(open(p, encoding="utf-8").read()) == lang:
-                    files.append(p)
-            except OSError:
-                continue
-    return files
+    """The committed verifiably-human corpus: the clean_human cell,
+    nothing else. prompts/docs are agent prose and context/ is
+    gitignored - neither may feed a baseline that has to regenerate
+    byte-identically on a clean checkout."""
+    return [os.path.join(FIXTURES, lang + ".txt")]
 
 
 def measure(lang):
@@ -111,9 +86,10 @@ def main():
     voice = {lang: measure(lang) for lang in ("en", "ru")}
     voice["_meta"] = {
         "source": "tools/learn_voice.py over "
-                  "fixtures/humanizer/clean_human/{en,ru}.txt plus "
-                  "human-authored *.txt/*.md in prompts/, docs/, "
-                  "context/ (per-language by cyrillic share)",
+                  "fixtures/humanizer/clean_human/{en,ru}.txt - the "
+                  "only committed, verifiably human-authored corpus "
+                  "in the repo (docs/prompts are agent prose, "
+                  "context/ is gitignored)",
         "use": "flat_for_you = stdev_words < rhythm.stdev_words * "
                "FLAT_FOR_YOU (vendored nomisread convention)",
     }

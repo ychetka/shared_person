@@ -34,12 +34,15 @@ no container) and asserts the eval-loop contract:
       tools/learn_voice.py would regenerate (--check);
   R13 masked-region integrity: code/quotes/URLs are NUL-masked AND
       intersect-dropped, so a tell phrase bracketing a code span
-      cannot bridge it into a phantom finding, and /diff never emits
-      a phantom entity from inside a masked span;
-  R14 C1 density floors: a ~150-word short post holding exactly 1 em
-      dash, 2 transitions and 3 nominalizations stays warn-level and
-      inside the human band; ordinary technology nouns are a reduced-
-      weight subset, not severity-2;
+      cannot bridge it into a phantom finding, a masked span before
+      a sentence never shifts its reported offsets, and /diff never
+      emits a phantom entity from inside a masked span;
+  R14 C1 density floors: a ~170-word short post holding exactly 1
+      REAL em dash, 2 LISTED transitions and 3 hard-list
+      nominalizations stays warn-level and inside the human band;
+      the same post one notch over the absolute floors escalates all
+      three density rules to severity 2; ordinary technology nouns
+      are a reduced-weight subset, not severity-2;
   R15 RU split: soft connectors ('Кроме того', 'более того') land in
       ru-stamp-soft at weight 0.5, clean-tier prose does not error on
       them, and a literal 'играет роль' without an adjective does not
@@ -338,6 +341,27 @@ check("R13 masked heading does not seed findings",
       not any(f["rule"].startswith("en-") for f in res_head["findings"]
               if "deployment notes" in f["text"].lower()),
       res_head["findings"])
+# a masked span BEFORE a finding must not shift its offsets: with the
+# '\x00+' collapse the pbody coordinates came back short of the truth,
+# so the finding's span sliced the wrong bytes and the intersect-drop
+# compared garbage. Per-char masking keeps len(pbody) == len(text).
+code_ru = "`kubectl rollout restart`"
+ru_long_src = (
+    "Утром вернули " + code_ru + " в runbook. "
+    "Потом целый час разбирались, почему канарейка упала: метрика шла "
+    "с задержкой, алёрт молчал, дашборд показывал зелёное, а в логах "
+    "уже копились пятисотые ответы от старого пода, который никто не "
+    "успел снять с балансировщика, и он продолжал отдавать битые "
+    "страницы клиентам ещё минут двадцать.")
+res_ru_span = rl.score_text(ru_long_src, "ru")
+long_f = [f for f in res_ru_span["findings"]
+          if f["rule"] == "ru-long-sentence"]
+check("R13 ru-long-sentence span survives a leading masked span",
+      len(long_f) == 1 and
+      long_f[0]["span"][0] == ru_long_src.index("Потом") and
+      ru_long_src[long_f[0]["span"][0]:long_f[0]["span"][1]]
+      == long_f[0]["text"] and "балансировщика" in long_f[0]["text"],
+      [(f["span"], f["text"][:60]) for f in long_f])
 # /diff must not emit a phantom entity from inside a code span
 d = rl.diff_texts("Run `kubectl rollout restart DeployX` now.",
                   "Run `kubectl rollout restart DeployY` now.", [])
@@ -346,26 +370,45 @@ check("R13 diff sees code span, no phantom entity",
       d["mismatches"])
 
 # --- R14 C1 density floors -------------------------------------------
-# exactly 1 em dash, 2 transitions, 3 ordinary-tech nominalizations in
-# a ~150-word honest post - all under the absolute floors, so nothing
-# escalates to severity 2 (the old rate-only gates errored here)
-# exactly three ordinary-tech nominalizations (documentation,
-# configuration, validation) - four would still stay warn but the
-# score target needs the warn weight to stay small
+# exactly 1 REAL em dash (—, counted by [—–]), 2 LISTED transitions
+# (EN_TRANSITION_RE members) and 3 hard-list nominalizations in a
+# ~170-word honest post - all under the absolute floors, so nothing
+# escalates to severity 2. (The previous draft pinned nothing: its
+# ' - ' was an ASCII hyphen the counter deliberately ignores, and
+# 'However,' is not a listed transition.)
 short_post = _pad(
-    "Last week I shipped the docs - the move itself took two "
-    "evenings. However, the rollout went fine. Moreover, the test "
-    "plan caught the last bug before users did. The documentation "
-    "now covers the configuration file and the validation step, and "
-    "the rest of the upgrade notes are finally short enough to "
-    "read.", 175, "en")
+    "Last week I shipped the docs — the move itself took two "
+    "evenings. The test plan caught the last bug before users did. "
+    "Similarly, the rollback path got a real rehearsal. "
+    "Consequently, the reconciliation step now covers the "
+    "investigation notes and the monetization report, and the rest "
+    "of the upgrade notes are finally short enough to read.",
+    175, "en")
 w = len(short_post.split())
 res_short = rl.score_text(short_post, "en")
 errs = [f for f in res_short["findings"] if f["severity"] == 2]
-check("R14 ~150-word post stays under the absolute floors",
-      140 <= w <= 185 and not errs and res_short["score"] < 45,
+check("R14 ~170-word post stays under the absolute floors",
+      140 <= w <= 210 and not errs and res_short["score"] < 45,
       f"words={w} score={res_short['score']} "
       f"errs={[f['rule'] for f in errs]}")
+# and the SAME post one notch over the floors must escalate: 3 real
+# em dashes, 3 listed transitions and 4 hard nominalizations cross
+# every absolute count at this length
+dense_post = _pad(
+    "Last week I shipped the docs — the move itself took two "
+    "evenings — and nobody paged me — not once. Moreover, the "
+    "rollout went fine. Furthermore, the test plan caught the last "
+    "bug before users did. Consequently, the reconciliation step, "
+    "the investigation notes, the monetization report and the "
+    "prioritization list are all finally short enough to read.",
+    175, "en")
+res_dense = rl.score_text(dense_post, "en")
+sev2 = {f["rule"] for f in res_dense["findings"]
+        if f["severity"] == 2}
+check("R14 floor-crossing post escalates all three density rules",
+      {"en-emdash-density", "en-transition-density",
+       "en-nominalization"} <= sev2,
+      f"words={len(dense_post.split())} sev2={sorted(sev2)}")
 # ordinary technology nouns: 4+ 'implementation'-class words at any
 # density are the common subset, never the severity-2 gate
 tech = _pad(

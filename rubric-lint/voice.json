@@ -1,71 +1,42 @@
 {
  "_meta": {
-  "source": "tools/learn_voice.py over fixtures/humanizer/clean_human/{en,ru}.txt plus human-authored *.txt/*.md in prompts/, docs/, context/ (per-language by cyrillic share)",
+  "source": "tools/learn_voice.py over fixtures/humanizer/clean_human/{en,ru}.txt - the only committed, verifiably human-authored corpus in the repo (docs/prompts are agent prose, context/ is gitignored)",
   "use": "flat_for_you = stdev_words < rhythm.stdev_words * FLAT_FOR_YOU (vendored nomisread convention)"
  },
  "en": {
   "rhythm": {
-   "band_share": 0.29,
-   "longest": 67,
-   "mean_words": 15.4,
+   "band_share": 0.38,
+   "longest": 25,
+   "mean_words": 15,
    "shortest": 3,
-   "stdev_words": 9.8
+   "stdev_words": 7.0
   },
   "samples": {
-   "files": 29,
-   "sentences": 1214,
+   "files": 1,
+   "sentences": 16,
    "sources": [
-    "fixtures/humanizer/clean_human/en.txt",
-    "prompts/critic.txt",
-    "prompts/extract-facts.txt",
-    "prompts/feed-curator.txt",
-    "prompts/humanizer-partner.txt",
-    "prompts/hype-brief.md",
-    "prompts/image-gen.txt",
-    "prompts/media-director.txt",
-    "prompts/media-selector.txt",
-    "prompts/profile-auditor.txt",
-    "prompts/session-brief.md",
-    "prompts/source-scout.txt",
-    "prompts/strategist.txt",
-    "prompts/stylist.txt",
-    "prompts/viz-spec.txt",
-    "prompts/writer-fb.txt",
-    "prompts/writer-habr.txt",
-    "prompts/writer-linkedin.txt",
-    "prompts/writer-vk.txt",
-    "docs/content-article-spec.md",
-    "docs/habr-driver-spec.md",
-    "docs/habr-integration-spec.md",
-    "docs/post-registry-design.md",
-    "docs/tradingview-driver-spec.md",
-    "docs/x-app-onboarding.md",
-    "docs/x-twitter-driver-spec.md",
-    "context/README.md",
-    "context/client_context.md",
-    "context/writer_style.md"
+    "fixtures/humanizer/clean_human/en.txt"
    ],
-   "thin_calibration": false,
-   "words": 19356
+   "thin_calibration": true,
+   "words": 243
   }
  },
  "ru": {
   "rhythm": {
-   "band_share": 0.37,
-   "longest": 30,
-   "mean_words": 10.3,
-   "shortest": 3,
+   "band_share": 0.25,
+   "longest": 23,
+   "mean_words": 12.7,
+   "shortest": 5,
    "stdev_words": 5.4
   },
   "samples": {
-   "files": 2,
-   "sentences": 99,
+   "files": 1,
+   "sentences": 16,
    "sources": [
-    "fixtures/humanizer/clean_human/ru.txt",
-    "context/style_guide.md"
+    "fixtures/humanizer/clean_human/ru.txt"
    ],
-   "thin_calibration": false,
-   "words": 1080
+   "thin_calibration": true,
+   "words": 208
   }
  }
 }

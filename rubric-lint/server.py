@@ -26,12 +26,20 @@ Run:  RUBRIC_PORT=8790 python3 server.py
 
 import json
 import os
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import rubric_lint
 
-PORT = int(os.environ.get("RUBRIC_PORT") or 8790)
+# a mistyped RUBRIC_PORT must not kill the service before it ever
+# binds - warn loudly and take the documented default
+try:
+    PORT = int(os.environ.get("RUBRIC_PORT") or 8790)
+except ValueError:
+    print(f"rubric-lint: RUBRIC_PORT={os.environ['RUBRIC_PORT']!r} is "
+          "not an integer - falling back to 8790", file=sys.stderr)
+    PORT = 8790
 MAX_BODY = 2 * 1024 * 1024  # eval cells are ~2KB; 2MB is generous
 
 

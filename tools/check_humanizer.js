@@ -102,6 +102,12 @@
 //       response (rewritten_text === source, edits describe the
 //       plan) and the escalate_to_human arm - schema-level, no
 //       live model call.
+//   E32 rubric scorer backend (issue #80): POST RUBRIC_URL/score
+//       maps findings -> marker_spans, via 'rubric' in trace +
+//       scorer_backend in the ledger, malformed/unreachable service
+//       -> scorer_failed (never a stub fallback), and a stale
+//       scorer_claim re-claims once on the same scorer_retries
+//       budget the pangram pending path keeps.
 //
 // Run:  node tools/check_humanizer.js    (exit 0 = all pass)
 
@@ -1671,6 +1677,55 @@ const main = async () => {
         r3?.last_score?.via !== "stub" &&
         !scoreRows(sc3.fakeFs).some((row) => row.scorer_backend === "stub"),
       JSON.stringify({ st: r3?.state, oc: r3?.outcome, rows: scoreRows(sc3.fakeFs) }),
+    );
+
+    // stale-claim parity with pangram's E13 - same tick, both arms:
+    // a scorer_claim that outlives SCORE_STALE_MS is a crashed tick.
+    // The en run (retries 0) gets ONE re-claim on the scorer_retries
+    // budget: rubric-stale-clear, then a fresh claim whose landed
+    // score resets the budget to 0 (E27 semantics). The ru run
+    // (retries already 1) hits the second-stale bound and escalates
+    // 'scorer_failed'. This machinery is the rubric-specific
+    // scorer_claim, not the pangram pending task, so E13 never saw it
+    const sc4 = mkSc();
+    sc4.env = { HUMANIZER_SCORER: "rubric", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc4.fakeFs, ["clean_human"]);
+    sc4.httpImpl = async (o) => {
+      if (o.url === "http://127.0.0.1:8790/score") {
+        return { score: 10, findings: [], metrics: {}, version: "0.1.0" };
+      }
+      throw new Error(`unexpected ${o.url}`);
+    };
+    await execTick(sc4); // seeds + first claims land -> decide
+    const stale = new Date(Date.now() - 700000).toISOString();
+    for (const [id, retries] of [
+      ["baseline__clean_human-en", 0],
+      ["baseline__clean_human-ru", 1],
+    ]) {
+      const cur4 = loadRun(sc4.fakeFs, id);
+      cur4.state = "scoring";
+      cur4.scorer_retries = retries;
+      cur4.scorer_claim = { nonce: "stale0", at: stale };
+      sc4.fakeFs.writeFileSync(`${RUNS}/${id}.json`, JSON.stringify(cur4));
+    }
+    const callsBefore = sc4.calls.length;
+    await execTick(sc4);
+    const r4 = loadRun(sc4.fakeFs, "baseline__clean_human-en");
+    const r4ru = loadRun(sc4.fakeFs, "baseline__clean_human-ru");
+    const tr4 = (r4?.trace || []).map((t) => t.action);
+    check(
+      "E32 rubric: stale scorer_claim - one re-claim, then scorer_failed",
+      r4?.state === "decide" && r4.scorer_retries === 0 &&
+        !r4.scorer_claim &&
+        tr4.includes("rubric-stale-clear") &&
+        tr4.indexOf("rubric-stale-clear") < tr4.lastIndexOf("rubric-claim") &&
+        sc4.calls.length === callsBefore + 1 &&
+        r4ru?.state === "escalated" && r4ru.outcome === "scorer_failed" &&
+        !r4ru.scorer_claim,
+      JSON.stringify({
+        en: { st: r4?.state, rt: r4?.scorer_retries, tr: tr4 },
+        ru: { st: r4ru?.state, oc: r4ru?.outcome },
+      }),
     );
   }
 

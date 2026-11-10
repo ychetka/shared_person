@@ -88,11 +88,12 @@ collapse onto the strongest-weighted one.
 
 | rule | what |
 |---|---|
-| `ru-stamp` | ~50 канцелярит/штампы/neuroslop marker regexes: в современном мире, важно/стоит/нельзя не отметить, в рамках, осуществлять, данный-family frames, играет ключевую роль, синергия, бесшовн-, глубокое погружение, в заключении, таким образом, кроме того, ... each carrying a specific fix suggestion |
-| `ru-nominalization` | suffix-regex share of word tokens (-ание/-ение/-ость/-ствие/-тельн-/-ци-); severity 2 when share > 0.14 |
+| `ru-stamp` | ~50 канцелярит/штампы/neuroslop marker regexes: в современном мире, важно/стоит/нельзя не отметить, осуществлять, играет ключевую роль (adjective required - a literal "играет роль" is spared), синергия, бесшовн-, глубокое погружение, в заключении, ... each carrying a specific fix suggestion |
+| `ru-stamp-soft` | ordinary connectors that are warn-only at half weight: при этом, кроме того, более того, таким образом, вместе с тем, в рамках |
+| `ru-nominalization` | suffix-regex share of ALL word tokens: -ание/-ение/-ствие at full weight, plus a small curated -ость list (возможность, необходимость, ...) at half weight; severity 2 when the hard share > 0.14. -тельн-/-ци- were dropped - they match far more ordinary lexicon (функция, станция, внимательный) than nominalizations |
 | `ru-long-sentence` | sentences > 35 words; severity 2 when share > 30% |
 | `ru-negation-reframe` | strict "это не X — это Y" only (plain "не ..., а ..." is ordinary Russian, excluded after FP audit) |
-| `ru-typography` | straight quotes in Cyrillic text (ёлочки note, weight 0.5) |
+| `ru-typography` | typographically perfect «ёлочки» paired with a typographic dash in one casual post (weight 0.5 - straight quotes are the human habit, not the tell) |
 
 pymorphy3 was evaluated for RU POS-confirm and deliberately skipped:
 the suffix regex is honest about what it sees and keeps the image
@@ -107,8 +108,19 @@ python3 tools/learn_voice.py          # regenerate from clean_human fixtures
 python3 tools/learn_voice.py --check  # CI drift check
 ```
 
+The calibration corpus is exactly
+`fixtures/humanizer/clean_human/{en,ru}.txt` - the only committed,
+verifiably human-authored sample the repo carries. Repo docs/prompts
+are agent-written prose and `context/` is gitignored, so neither may
+feed a baseline that has to regenerate byte-identically on a clean
+checkout. That leaves ~16 sentences per language - honestly recorded
+as `thin_calibration: true` in the profile and echoed in `/score`
+metrics. A thin-but-verified profile is a documented small-sample
+estimate; a fat-but-corrupted one is a silent wrong baseline.
+
 Each language's `rhythm.stdev_words` feeds the burstiness
-`flat_for_you` comparison (`sd < base * 0.6`), per the vendored
+`flat_for_you` comparison (`sd < base * 0.6`, with the same
+`band_share` gate the fixed floor keeps), per the vendored
 nomisread profile convention.
 
 ## Eval Tick integration

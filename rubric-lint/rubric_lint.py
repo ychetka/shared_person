@@ -92,10 +92,12 @@ def mask_body(text):
 
 def prose_body(text):
     """Space-normalized view of the masked body for the structural
-    passes (sentence split, paragraphs, rhythm): byte-identical in
-    shape to the original space mask, so vendored nomisread helpers
-    see exactly the text they were tuned against."""
-    return re.sub(r"\x00+", " ", mask_body(text))
+    passes (sentence split, paragraphs, rhythm). Per-CHARACTER
+    substitution: a collapsed '\x00+' -> ' ' would shift every later
+    offset, while runs of spaces are invisible to the split() /
+    sentence-split semantics the vendored helpers were tuned
+    against - so length is preserved and nothing downstream moves."""
+    return re.sub(r"\x00", " ", mask_body(text))
 
 
 def _sentence_spans(body):
@@ -676,7 +678,12 @@ def score_text(text, lang):
     text = text if isinstance(text, str) else ""
     lang = "ru" if str(lang).lower().startswith("ru") else "en"
     body, masked_spans = _mask(text)
-    pbody = re.sub(r"\x00+", " ", body)
+    # per-character substitution, NOT '\x00+' collapse: collapsing a
+    # masked run shifts every offset after it, so spans coming back
+    # from _sentence_spans(pbody) would address a phantom text and
+    # the intersect-drop below would compare against the wrong
+    # coordinates. Per-char keeps len(pbody) == len(body) == len(text)
+    pbody = re.sub(r"\x00", " ", body)
     span_sents = _sentence_spans(pbody)
     sents = [t for _, _, t in span_sents]
     words = len(pbody.split())
