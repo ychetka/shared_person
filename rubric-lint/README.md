@@ -26,7 +26,7 @@ sh fetch_python.sh && docker build -t shared-person/rubric-lint .  # image
        "suggestion": "..."}
     ],
     "metrics": {"stdev_words": 3.9, "band_share": 0.79,
-                "nominalization_density": 21.7, "marker_density": 49.4,
+                "nominalization_density": 0.022, "marker_density": 49.4,
                 "emdash_per_1k": 0, "transition_per_1k": 4.1,
                 "passive_per_1k": 8.2, "mean_words": 15.7,
                 "sentences": 14, "words": 201,
@@ -131,7 +131,7 @@ synchronous `POST $RUBRIC_URL/score` (default
 response maps onto the existing score record: `score`, `label`
 (stub's bands: >=75 AI Generated / >=45 Possibly AI / else Possibly
 human), `via: 'rubric'` -> ledger `scorer_backend: 'rubric'`, and
-`findings` -> `marker_spans [{text, marker_type: rule,
+`findings` -> `marker_spans [{text, span, marker_type: rule,
 reason: suggestion}]` for the partner's `detector_payload`. An
 unreachable service or a bad response shape escalates
 `scorer_failed` - honest, never a silent stub fallback.
