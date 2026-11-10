@@ -82,8 +82,7 @@ def _chrome_offset(ws_url):
 # {el,x,y,a,ex,tag,t} or null); the injected __TAIL__ decides what to
 # do with it (rect coords / el.click() / text+href read).
 _SEL_CLICK = (
-    "button,a,[role=button],input,textarea,"
-    "[contenteditable=true],[role=textbox],div[tabindex]"
+    "button,a,[role=button],input,textarea,[contenteditable=true],[role=textbox],div[tabindex]"
 )
 # wider text-bearing set for read probes - 'words scanned'/'Overview'
 # style markers live in plain divs/spans, not interactive elements
