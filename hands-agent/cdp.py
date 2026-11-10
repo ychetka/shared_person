@@ -73,6 +73,64 @@ def _chrome_offset(ws_url):
     )
 
 
+# Shared DOM candidate-scan template (PR #87 review): every DOM
+# targeting helper below is this scan plus a tail. Candidates = the
+# __SELECTOR__ set, scored on visible innerText / aria-label /
+# placeholder - EXACT match outranks substring, the SMALLEST
+# on-screen area wins, so a broad container holding the text never
+# beats the element itself. The scan ends at `hit` (winning
+# {el,x,y,a,ex,tag,t} or null); the injected __TAIL__ decides what to
+# do with it (rect coords / el.click() / text+href read).
+_SEL_CLICK = (
+    "button,a,[role=button],input,textarea,"
+    "[contenteditable=true],[role=textbox],div[tabindex]"
+)
+# wider text-bearing set for read probes - 'words scanned'/'Overview'
+# style markers live in plain divs/spans, not interactive elements
+_SEL_TEXT = "a,button,[role=button],h1,h2,h3,h4,span,li,div"
+
+_CAND_SCAN = """(() => {
+  const q = __QUERY__.toLowerCase();
+  const els = Array.from(document.querySelectorAll('__SELECTOR__'));
+  const cand = (e) => {
+    const it = (e.innerText||'').trim().toLowerCase();
+    const al = (e.getAttribute('aria-label')||'').trim().toLowerCase();
+    const ph = (e.placeholder||'').trim().toLowerCase();
+    const exact = (it === q || al === q || ph === q);
+    const sub = !exact && ((it + ' ' + al + ' ' + ph).includes(q));
+    if (!exact && !sub) return null;
+    const r = e.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) return null;
+    if (r.bottom < 0 || r.top > innerHeight) return null;
+    return {
+      el: e, x: r.x + r.width/2, y: r.y + r.height/2,
+      a: r.width*r.height, ex: exact, tag: e.tagName,
+      t: (e.innerText||e.getAttribute('aria-label')||'').trim().slice(0,300)
+    };
+  };
+  let best = null, bestEx = null;
+  for (const e of els) {
+    const c = cand(e);
+    if (!c) continue;
+    if (c.ex) { if (!bestEx || c.a < bestEx.a) bestEx = c; }
+    else if (!best || c.a < best.a) best = c;
+  }
+  const hit = bestEx || best;
+__TAIL__
+})()"""
+
+
+def _scan_expr(selector, tail, query):
+    """Fill the shared candidate-scan template. __QUERY__ is replaced
+    LAST so an injected query string can never collide with the
+    selector/tail placeholders."""
+    return (
+        _CAND_SCAN.replace("__SELECTOR__", selector)
+        .replace("__TAIL__", tail)
+        .replace("__QUERY__", json.dumps(query))
+    )
+
+
 def dom_rect(url_substr, query):
     """Find element by visible text/aria-label/placeholder (not CSS needed).
     query = substring of element's text or aria-label.
@@ -82,38 +140,15 @@ def dom_rect(url_substr, query):
         return None
     ws = t["webSocketDebuggerUrl"]
     off = json.loads(_chrome_offset(ws))
-    expr = """(() => {
-      const q = __QUERY__.toLowerCase();
-      const els = Array.from(document.querySelectorAll(
-        'button,a,[role=button],input,textarea,'
-        + '[contenteditable=true],[role=textbox],div[tabindex]'));
-      const cand = (e) => {
-        const it = (e.innerText||'').trim().toLowerCase();
-        const al = (e.getAttribute('aria-label')||'').trim().toLowerCase();
-        const ph = (e.placeholder||'').trim().toLowerCase();
-        const exact = (it === q || al === q || ph === q);
-        const sub = !exact && ((it + ' ' + al + ' ' + ph).includes(q));
-        if (!exact && !sub) return null;
-        const r = e.getBoundingClientRect();
-        if (r.width < 4 || r.height < 4) return null;
-        if (r.bottom < 0 || r.top > innerHeight) return null;
-        return {
-          x: r.x + r.width/2, y: r.y + r.height/2, a: r.width*r.height,
-          ex: exact, tag: e.tagName,
-          t: (e.innerText||e.getAttribute('aria-label')||'').slice(0,60)
-        };
-      };
-      let best = null, bestEx = null;
-      for (const e of els) {
-        const c = cand(e);
-        if (!c) continue;
-        if (c.ex) { if (!bestEx || c.a < bestEx.a) bestEx = c; }
-        else if (!best || c.a < best.a) best = c;
-      }
-      const hit = bestEx || best;
-      return hit ? JSON.stringify(hit) : 'null';
-    })()""".replace("__QUERY__", json.dumps(query))
-    raw = eval_js(ws, expr)
+    raw = eval_js(
+        ws,
+        _scan_expr(
+            _SEL_CLICK,
+            "  return hit ? JSON.stringify({x: hit.x, y: hit.y, "
+            "tag: hit.tag, t: hit.t.slice(0,60)}) : 'null';",
+            query,
+        ),
+    )
     if not raw or raw == "null":
         return None
     el = json.loads(raw)
@@ -150,38 +185,13 @@ def js_click(url_substr, query):
     if not t:
         return {"error": f"no tab matching: {url_substr}"}
     ws = t["webSocketDebuggerUrl"]
-    expr = """(() => {
-      const q = __QUERY__.toLowerCase();
-      const els = Array.from(document.querySelectorAll(
-        'button,a,[role=button],input,textarea,'
-        + '[contenteditable=true],[role=textbox],div[tabindex]'));
-      const cand = (e) => {
-        const it = (e.innerText||'').trim().toLowerCase();
-        const al = (e.getAttribute('aria-label')||'').trim().toLowerCase();
-        const ph = (e.placeholder||'').trim().toLowerCase();
-        const exact = (it === q || al === q || ph === q);
-        const sub = !exact && ((it + ' ' + al + ' ' + ph).includes(q));
-        if (!exact && !sub) return null;
-        const r = e.getBoundingClientRect();
-        if (r.width < 4 || r.height < 4) return null;
-        if (r.bottom < 0 || r.top > innerHeight) return null;
-        return {
-          el: e, a: r.width*r.height, ex: exact, tag: e.tagName,
-          t: (e.innerText||e.getAttribute('aria-label')||'').slice(0,60)
-        };
-      };
-      let best = null, bestEx = null;
-      for (const e of els) {
-        const c = cand(e);
-        if (!c) continue;
-        if (c.ex) { if (!bestEx || c.a < bestEx.a) bestEx = c; }
-        else if (!best || c.a < best.a) best = c;
-      }
-      const hit = bestEx || best;
-      if (!hit) return 'null';
-      hit.el.click();
-      return JSON.stringify({tag: hit.tag, t: hit.t});
-    })()""".replace("__QUERY__", json.dumps(query))
+    expr = _scan_expr(
+        _SEL_CLICK,
+        "  if (!hit) return 'null';\n"
+        "  hit.el.click();\n"
+        "  return JSON.stringify({tag: hit.tag, t: hit.t.slice(0,60)});",
+        query,
+    )
     raw = eval_js(ws, expr)
     if not raw or raw == "null":
         return {"error": f"element not found: {query}"}
@@ -198,8 +208,9 @@ def dom_text(url_substr, query=""):
     - query empty: page/location read-back for the tab whose URL
       contains url_substr -> {url, title}. This is the post-publish
       URL read-back the habr result channel needs.
-    - query set: best visible-text/aria-label match like dom_rect's
-      candidate scan, but returns CONTENT instead of coords:
+    - query set: the shared candidate scan (_CAND_SCAN) over a wider
+      text-bearing selector (_SEL_TEXT - headings/spans/divs, not just
+      clickable elements), returning CONTENT instead of coords:
       {text, href, tag} - href resolved through the element's closest
       anchor, which is how the orphan probe recovers the article URL
       from a title match on the publications page.
@@ -214,36 +225,14 @@ def dom_text(url_substr, query=""):
             return json.loads(raw) if raw else None
         except (TypeError, ValueError):
             return None
-    expr = """(() => {
-      const q = __QUERY__.toLowerCase();
-      const els = Array.from(document.querySelectorAll(
-        'a,button,[role=button],h1,h2,h3,h4,span,li,div'));
-      let best = null;
-      for (const e of els) {
-        const it = (e.innerText || '').trim();
-        if (!it) continue;
-        const al = (e.getAttribute('aria-label') || '').trim();
-        const il = it.toLowerCase(), all = al.toLowerCase();
-        const exact = il === q || all === q;
-        if (!exact && !il.includes(q) && !(all && all.includes(q))) continue;
-        const r = e.getBoundingClientRect();
-        if (r.width < 4 || r.height < 4) continue;
-        const a = e.tagName === 'A' ? e : e.closest('a');
-        const c = {
-          text: it.slice(0, 300),
-          href: a && a.href ? String(a.href) : '',
-          tag: e.tagName,
-          area: r.width * r.height,
-          ex: exact
-        };
-        // smallest element wins, exact match first - same rule as
-        // dom_rect's cand(): the broadest container matching by
-        // substring must not beat the title element itself
-        if (!best || (c.ex && !best.ex) ||
-            (c.ex === best.ex && c.area < best.area)) best = c;
-      }
-      return best ? JSON.stringify(best) : 'null';
-    })()""".replace("__QUERY__", json.dumps(query))
+    expr = _scan_expr(
+        _SEL_TEXT,
+        "  if (!hit) return 'null';\n"
+        "  const a = hit.el.tagName === 'A' ? hit.el : hit.el.closest('a');\n"
+        "  return JSON.stringify({text: hit.t, "
+        "href: a && a.href ? String(a.href) : '', tag: hit.tag});",
+        query,
+    )
     raw = eval_js(ws, expr)
     if not raw or raw == "null":
         return None
