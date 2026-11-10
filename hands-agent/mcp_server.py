@@ -14,6 +14,7 @@ Tools (all coordinates are SCREEN pixels):
   task_status(task_id?)               -> queue status
   set_clipboard(text)                 -> load X CLIPBOARD for ctrl+v paste
   dom_text(url, target?)              -> CDP read: page location | element text+href
+  js_click(url, target)               -> DOM-resolve + JS el.click() (no OS input)
 
 Queue: n8n drops JSON tasks into ./queue/inbox/*.json, a poller thread
 consumes them into ./queue/{done,failed}/. Task = {"recipe": str, "params": {...}}
@@ -103,7 +104,7 @@ def gemini_locate(description, hint=""):
 def run_recipe(name, params):
     """Execute recipes/<name>.yaml. Mini-DSL:
     steps: [{action: find|locate|click|type|key|scroll|wait|shot|move|
-             emit|fail|dom_find|click_dom|dom_text|set_clipboard, ...}]
+             emit|fail|dom_find|click_dom|js_click|dom_text|set_clipboard, ...}]
     Template strings support {param} substitution. A step carrying
     `marks: publish` is the post-publish classification boundary: the
     result records its index as publish_step next to last_step (index
@@ -208,6 +209,14 @@ def run_recipe(name, params):
                 if r.get("error"):
                     return _result(f"step{i}: {r['error']}")
                 log_line.append(f"step{i} click_dom '{st['target']}' -> {r['clicked']['found']}")
+            elif act == "js_click":
+                # same DOM resolution as click_dom but el.click() via
+                # Runtime.evaluate - for React surfaces that ignore
+                # OS/synthetic clicks (issue #86 pangram submit)
+                r = cdp.js_click(st["url"], st["target"])
+                if r.get("error"):
+                    return _result(f"step{i}: {r['error']}")
+                log_line.append(f"step{i} js_click '{st['target']}' -> {r['clicked']['found']}")
             elif act == "set_clipboard":
                 # long-body insert path: loads the X clipboard via
                 # PyGObject; the recipe then `key ctrl+v`s a real paste
@@ -411,6 +420,19 @@ TOOLS = [
         },
     },
     {
+        "name": "js_click",
+        "description": (
+            "Find element by text via DOM-read, then JS el.click() via "
+            "Runtime.evaluate (no OS input) - for React surfaces that "
+            "ignore synthetic clicks"
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["url", "target"],
+            "properties": {"url": {"type": "string"}, "target": {"type": "string"}},
+        },
+    },
+    {
         "name": "set_clipboard",
         "description": (
             "Load text into the X clipboard (PyGObject Gtk) so a later 'key ctrl+v' pastes it"
@@ -475,6 +497,8 @@ def call_tool(name, args):
         return cdp.dom_rect(args["url"], args["target"]) or {"x": -1, "y": -1}
     if name == "click_dom":
         return cdp.click_dom(args["url"], args["target"])
+    if name == "js_click":
+        return cdp.js_click(args["url"], args["target"])
     if name == "set_clipboard":
         hands.set_clipboard(args["text"])
         return {"ok": True}

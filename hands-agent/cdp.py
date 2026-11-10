@@ -3,8 +3,11 @@
 
 Reads element positions via Chrome DevTools Protocol (getBoundingClientRect)
 and converts page coords to screen coords for real OS clicks.
-The DOM is only READ - no events injected into the page, so sites see
-nothing; the physical click comes from xdotool (trusted input).
+Everything except js_click only READS the DOM - no events injected into
+the page, so sites see nothing; the physical click comes from xdotool
+(trusted input). js_click is the escape hatch for React surfaces that
+ignore OS/synthetic clicks entirely: it calls el.click() inside
+Runtime.evaluate.
 
 Requires: websocket-client (python3-websocket).
 """
@@ -134,6 +137,58 @@ def click_dom(url_substr, query):
         return {"error": f"element not found: {query}"}
     hands.click(pos["x"], pos["y"])
     return {"ok": True, "clicked": pos}
+
+
+def js_click(url_substr, query):
+    """Same element resolution as dom_rect (innerText/aria-label/
+    placeholder exact > contains, smallest area wins), but the click is
+    el.click() inside Runtime.evaluate - NO OS input at all. For React
+    surfaces whose handlers ignore trusted-looking synthetic clicks
+    (issue #86: Pangram's 'Check for AI' only submits on el.click()).
+    Returns {ok, clicked:{found,tag}} or {error} like click_dom."""
+    t = find_page(url_substr)
+    if not t:
+        return {"error": f"no tab matching: {url_substr}"}
+    ws = t["webSocketDebuggerUrl"]
+    expr = """(() => {
+      const q = __QUERY__.toLowerCase();
+      const els = Array.from(document.querySelectorAll(
+        'button,a,[role=button],input,textarea,'
+        + '[contenteditable=true],[role=textbox],div[tabindex]'));
+      const cand = (e) => {
+        const it = (e.innerText||'').trim().toLowerCase();
+        const al = (e.getAttribute('aria-label')||'').trim().toLowerCase();
+        const ph = (e.placeholder||'').trim().toLowerCase();
+        const exact = (it === q || al === q || ph === q);
+        const sub = !exact && ((it + ' ' + al + ' ' + ph).includes(q));
+        if (!exact && !sub) return null;
+        const r = e.getBoundingClientRect();
+        if (r.width < 4 || r.height < 4) return null;
+        if (r.bottom < 0 || r.top > innerHeight) return null;
+        return {
+          el: e, a: r.width*r.height, ex: exact, tag: e.tagName,
+          t: (e.innerText||e.getAttribute('aria-label')||'').slice(0,60)
+        };
+      };
+      let best = null, bestEx = null;
+      for (const e of els) {
+        const c = cand(e);
+        if (!c) continue;
+        if (c.ex) { if (!bestEx || c.a < bestEx.a) bestEx = c; }
+        else if (!best || c.a < best.a) best = c;
+      }
+      const hit = bestEx || best;
+      if (!hit) return 'null';
+      hit.el.click();
+      return JSON.stringify({tag: hit.tag, t: hit.t});
+    })()""".replace("__QUERY__", json.dumps(query))
+    raw = eval_js(ws, expr)
+    if not raw or raw == "null":
+        return {"error": f"element not found: {query}"}
+    el = json.loads(raw)
+    if not isinstance(el, dict):
+        return {"error": f"element not found: {query}"}
+    return {"ok": True, "clicked": {"found": el["t"], "tag": el["tag"]}}
 
 
 def dom_text(url_substr, query=""):

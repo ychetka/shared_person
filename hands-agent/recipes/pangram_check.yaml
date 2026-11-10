@@ -27,20 +27,37 @@ name: pangram_check
 # Generated' outranks the 'possibly' labels) and parses the % and
 # 'N left' figures itself.
 #
-# CLICK SEMANTICS (all click_dom steps): the driver READS the DOM -
-# a candidate is any button/a/[role=button]/input/textarea/
+# CLICK SEMANTICS. Both click actions READ the DOM first - a
+# candidate is any button/a/[role=button]/input/textarea/
 # contenteditable/[role=textbox]/tabindex'd div whose visible
 # innerText, aria-label or placeholder EXACTLY equals or CONTAINS the
 # query; exact matches outrank substring matches and the SMALLEST
 # matched element area wins, so a broad container holding the text
-# can never beat the element itself. The physical click then lands
-# on that element's center via real OS input - no JS events are
-# injected into the page.
+# can never beat the element itself. The resolution is identical;
+# only the click differs:
+#   click_dom - real OS input lands on the element center (trusted
+#               xdotool click; the page sees no injected events).
+#   js_click  - el.click() inside Runtime.evaluate, NO OS input.
+#               REQUIRED on this surface: Pangram's React handlers
+#               ignore OS-level AND CDP-synthesized clicks entirely
+#               (issue #86, verified live - elementFromPoint proved
+#               the click lands ON 'Check for AI' and nothing
+#               submits; a plain el.click() submits instantly).
+#               Used for the 'Check for AI' submit and the 'New
+#               check' reset. The textarea focus click below STAYS
+#               click_dom on purpose: the ctrl+a/ctrl+v paste needs
+#               real keyboard focus that only a trusted OS click
+#               grants (that path was verified live).
 #
 # VERIFIED DOM anatomy (audit browser, logged in):
 #   textarea: aria-label 'Text to check for AI' (placeholder 'Enter at
 #             least 50 words or drop a file or image to check for AI.')
-#   submit:   visible button text 'Check for AI'
+#   submit:   visible button text 'Check for AI' - js_click ONLY
+#             (React handler ignores OS/synthetic clicks, issue #86)
+#   reset:    icon button aria-label 'New check' - NO innerText, so
+#             only the aria-label arm of the candidate scan matches;
+#             js_click for the same reason as submit. Clicking it
+#             closes a stale detail panel and re-arms the submit
 #   history:  <button> rows whose innerText starts with the checked
 #             text's first words; the newest row sits on top after a
 #             check
@@ -86,6 +103,24 @@ steps:
     keys: "Escape"
   - action: wait
     seconds: 1
+  # ...but a stale detail panel can ALSO survive Escape (verified
+  # live, issue #86) and leaves 'Check for AI' inert. Probe for its
+  # 'N words scanned' marker; when present, reset via the icon
+  # button aria-label 'New check' (no innerText - aria-label-only
+  # match, js_click because the same React surface eats OS clicks).
+  # On a clean surface the probe misses, {stale_panel} formats to ''
+  # and the conditional reset step is skipped.
+  - action: dom_text
+    url: "www.pangram.com"
+    target: "words scanned"
+    into: stale_panel
+    optional: true
+  - action: js_click
+    url: "www.pangram.com"
+    target: "New check"
+    if: "{stale_panel}"
+  - action: wait
+    seconds: 1
   # header 'N left' BEFORE the run - the driver diff/re-syncs it
   # against credits_raw below. OBSERVABILITY-ONLY: the probe can land
   # on a '14 days left' trial banner instead of the credit header -
@@ -100,6 +135,8 @@ steps:
     into: credits_before
     optional: true
   # ---------- fill + submit ----------
+  # textarea focus stays a real OS click: the paste below needs
+  # genuine keyboard focus, and this path was verified live.
   - action: click_dom
     url: "www.pangram.com"
     target: "Text to check for AI"
@@ -111,7 +148,10 @@ steps:
     keys: "ctrl+v"
   - action: wait
     seconds: 1
-  - action: click_dom
+  # js_click, NOT click_dom: the React submit ignores OS/synthetic
+  # clicks - verified live that xdotool AND CDP dispatchMouseEvent
+  # land on the button yet never submit (issue #86)
+  - action: js_click
     url: "www.pangram.com"
     target: "Check for AI"
   - action: wait
