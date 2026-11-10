@@ -1,0 +1,9 @@
+The migration itself went fine, and shockingly fast, taking only 40 seconds this time (six last time, no clue as to why the discrepancy). I did have to restart the cache warmer halfway through, since it doesn't block on the migration lock and I ended up with a partially warm index, and I could see this because p99 latency spiked to ~900ms for about a minute before evening out. In the future I'll have the warmer block on the lock too; less sexy, but also I didn't get paged so I'm all for it.
+
+There's still the issue that the credit count refreshes on a UTC boundary so a run that begins at 23:58 UTC may exhaust its credit allotment two minutes in to execution. I've added a comment to the relevant trace but haven't addressed it in any more substantial way, and since we optimistically debit the estimated cost when adding a job to the queue the worst that could happen is reporting inaccurate (too high) credit usage for a particular day until we're able to recalculate once results are in.
+
+Also should review Sasha's PR adding jitter to retries sometime tomorrow (assuming the filesystem the queue is on cooperates).
+
+At some point after Friday's rollout I should also prune some of the longer test texts, as many of them feel padded because they are. First I need to figure out why we keep accruing thousands of stale tmp files on staging.
+
+
