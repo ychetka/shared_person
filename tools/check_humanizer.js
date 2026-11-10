@@ -1585,10 +1585,20 @@ const main = async () => {
         return {
           score: 20,
           findings: [
-            { rule: "en-hedge", severity: 1, span: [10, 18],
-              text: "it seems", suggestion: "cut the hedge" },
-            { rule: "burstiness", severity: 2, span: [0, 0],
-              text: "", suggestion: "vary sentence length" },
+            {
+              rule: "en-hedge",
+              severity: 1,
+              span: [10, 18],
+              text: "it seems",
+              suggestion: "cut the hedge",
+            },
+            {
+              rule: "burstiness",
+              severity: 2,
+              span: [0, 0],
+              text: "",
+              suggestion: "vary sentence length",
+            },
           ],
           metrics: { stdev_words: 3.2, band_share: 0.8 },
           version: "0.1.0",
@@ -1600,8 +1610,7 @@ const main = async () => {
     const r = loadRun(sc.fakeFs, "baseline__ai_flop-en");
     check(
       "E32 rubric: baseline run reaches done under the rubric scorer",
-      r?.state === "done" && r.last_score?.via === "rubric" &&
-        r.last_score?.score === 20,
+      r?.state === "done" && r.last_score?.via === "rubric" && r.last_score?.score === 20,
       JSON.stringify({ st: r?.state, s: r?.last_score }),
     );
     check(
@@ -1614,13 +1623,16 @@ const main = async () => {
             typeof (c0.body || {}).text === "string" &&
             ["en", "ru"].includes((c0.body || {}).lang),
         ),
-      JSON.stringify(sc.calls.map((c0) => ({ u: c0.url, m: c0.method, b: c0.body && Object.keys(c0.body) }))),
+      JSON.stringify(
+        sc.calls.map((c0) => ({ u: c0.url, m: c0.method, b: c0.body && Object.keys(c0.body) })),
+      ),
     );
     const spans = r?.last_score?.marker_spans || [];
     check(
       "E32 rubric: findings -> marker_spans {span,text,marker_type,reason}",
       spans.length === 1 &&
-        spans[0].span?.[0] === 10 && spans[0].span?.[1] === 18 &&
+        spans[0].span?.[0] === 10 &&
+        spans[0].span?.[1] === 18 &&
         spans[0].text === "it seems" &&
         spans[0].marker_type === "en-hedge" &&
         spans[0].reason === "cut the hedge",
@@ -1628,7 +1640,11 @@ const main = async () => {
     );
     check(
       "E32 rubric: doc-level [0,0] finding never enters marker_spans",
-      !spans.some((s) => s.text === "" || (s.span?.[0] === 0 && s.span?.[1] === 0 && s.marker_type === "burstiness")),
+      !spans.some(
+        (s) =>
+          s.text === "" ||
+          (s.span?.[0] === 0 && s.span?.[1] === 0 && s.marker_type === "burstiness"),
+      ),
       JSON.stringify(spans),
     );
     check(
@@ -1656,8 +1672,7 @@ const main = async () => {
     );
     check(
       "E32 rubric: malformed response never falls back to stub",
-      r2?.last_score?.via !== "stub" &&
-        !(r2?.trace || []).some((t) => t.via === "stub"),
+      r2?.last_score?.via !== "stub" && !(r2?.trace || []).some((t) => t.via === "stub"),
       JSON.stringify(r2?.last_score),
     );
 
@@ -1673,7 +1688,8 @@ const main = async () => {
     const r3 = loadRun(sc3.fakeFs, "baseline__ai_flop-en");
     check(
       "E32 rubric: unreachable service -> scorer_failed, no stub fallback",
-      r3?.state === "escalated" && r3.outcome === "scorer_failed" &&
+      r3?.state === "escalated" &&
+        r3.outcome === "scorer_failed" &&
         r3?.last_score?.via !== "stub" &&
         !scoreRows(sc3.fakeFs).some((row) => row.scorer_backend === "stub"),
       JSON.stringify({ st: r3?.state, oc: r3?.outcome, rows: scoreRows(sc3.fakeFs) }),
@@ -1715,12 +1731,14 @@ const main = async () => {
     const tr4 = (r4?.trace || []).map((t) => t.action);
     check(
       "E32 rubric: stale scorer_claim - one re-claim, then scorer_failed",
-      r4?.state === "decide" && r4.scorer_retries === 0 &&
+      r4?.state === "decide" &&
+        r4.scorer_retries === 0 &&
         !r4.scorer_claim &&
         tr4.includes("rubric-stale-clear") &&
         tr4.indexOf("rubric-stale-clear") < tr4.lastIndexOf("rubric-claim") &&
         sc4.calls.length === callsBefore + 1 &&
-        r4ru?.state === "escalated" && r4ru.outcome === "scorer_failed" &&
+        r4ru?.state === "escalated" &&
+        r4ru.outcome === "scorer_failed" &&
         !r4ru.scorer_claim,
       JSON.stringify({
         en: { st: r4?.state, rt: r4?.scorer_retries, tr: tr4 },
