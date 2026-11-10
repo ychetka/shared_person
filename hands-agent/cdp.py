@@ -76,17 +76,23 @@ def _chrome_offset(ws_url):
 # Shared DOM candidate-scan template (PR #87 review): every DOM
 # targeting helper below is this scan plus a tail. Candidates = the
 # __SELECTOR__ set, scored on visible innerText / aria-label /
-# placeholder - EXACT match outranks substring, the SMALLEST
-# on-screen area wins, so a broad container holding the text never
-# beats the element itself. The scan ends at `hit` (winning
-# {el,x,y,a,ex,tag,t} or null); the injected __TAIL__ decides what to
-# do with it (rect coords / el.click() / text+href read).
+# placeholder - EXACT match outranks substring, the SMALLEST matching
+# area wins, so a broad container holding the text never beats the
+# element itself. The scan ends at `hit` (winning {el,x,y,a,ex,tag,t}
+# or null); the injected __TAIL__ decides what to do with it (rect
+# coords / el.click() / text+href read). __RECT_SKIP__ is a caller-
+# supplied extra rejection clause inside cand(): the click helpers
+# inject _ONSCREEN (they need a VISIBLE element to click) while
+# dom_text leaves it empty - off-screen text is a legitimate read
+# (the habr orphan probe recovers article URLs below the fold).
 _SEL_CLICK = (
     "button,a,[role=button],input,textarea,[contenteditable=true],[role=textbox],div[tabindex]"
 )
 # wider text-bearing set for read probes - 'words scanned'/'Overview'
 # style markers live in plain divs/spans, not interactive elements
 _SEL_TEXT = "a,button,[role=button],h1,h2,h3,h4,span,li,div"
+# viewport-bounds clause injected as __RECT_SKIP__ by the click helpers
+_ONSCREEN = "if (r.bottom < 0 || r.top > innerHeight) return null;"
 
 _CAND_SCAN = """(() => {
   const q = __QUERY__.toLowerCase();
@@ -100,7 +106,7 @@ _CAND_SCAN = """(() => {
     if (!exact && !sub) return null;
     const r = e.getBoundingClientRect();
     if (r.width < 4 || r.height < 4) return null;
-    if (r.bottom < 0 || r.top > innerHeight) return null;
+    __RECT_SKIP__
     return {
       el: e, x: r.x + r.width/2, y: r.y + r.height/2,
       a: r.width*r.height, ex: exact, tag: e.tagName,
@@ -119,12 +125,14 @@ __TAIL__
 })()"""
 
 
-def _scan_expr(selector, tail, query):
+def _scan_expr(selector, tail, query, rect_skip=""):
     """Fill the shared candidate-scan template. __QUERY__ is replaced
     LAST so an injected query string can never collide with the
-    selector/tail placeholders."""
+    selector/tail placeholders. rect_skip is an extra cand() rejection
+    clause (e.g. _ONSCREEN for click helpers, '' for text reads)."""
     return (
         _CAND_SCAN.replace("__SELECTOR__", selector)
+        .replace("__RECT_SKIP__", rect_skip)
         .replace("__TAIL__", tail)
         .replace("__QUERY__", json.dumps(query))
     )
@@ -146,6 +154,7 @@ def dom_rect(url_substr, query):
             "  return hit ? JSON.stringify({x: hit.x, y: hit.y, "
             "tag: hit.tag, t: hit.t.slice(0,60)}) : 'null';",
             query,
+            rect_skip=_ONSCREEN,
         ),
     )
     if not raw or raw == "null":
@@ -190,6 +199,7 @@ def js_click(url_substr, query):
         "  hit.el.click();\n"
         "  return JSON.stringify({tag: hit.tag, t: hit.t.slice(0,60)});",
         query,
+        rect_skip=_ONSCREEN,
     )
     raw = eval_js(ws, expr)
     if not raw or raw == "null":
