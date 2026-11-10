@@ -59,8 +59,7 @@ def measure(lang):
     files = []
     for path in corpus_files(lang):
         try:
-            body = rubric_lint.prose_body(
-                open(path, encoding="utf-8").read())
+            body = rubric_lint.prose_body(open(path, encoding="utf-8").read())
         except OSError:
             continue
         sents.extend(nomisread.sentences(body))
@@ -70,15 +69,21 @@ def measure(lang):
     if not r.get("measurable"):
         raise SystemExit(
             f"{lang}: only {r.get('sentences', 0)} sentences - "
-            "calibration needs >=5; refusing to record noise")
+            "calibration needs >=5; refusing to record noise"
+        )
     return {
-        "rhythm": {k: r[k] for k in
-                   ("mean_words", "stdev_words", "band_share",
-                    "shortest", "longest") if k in r},
-        "samples": {"files": len(files), "words": words,
-                    "sentences": r["sentences"],
-                    "thin_calibration": r["sentences"] < MIN_CAL_SENTENCES,
-                    "sources": files},
+        "rhythm": {
+            k: r[k]
+            for k in ("mean_words", "stdev_words", "band_share", "shortest", "longest")
+            if k in r
+        },
+        "samples": {
+            "files": len(files),
+            "words": words,
+            "sentences": r["sentences"],
+            "thin_calibration": r["sentences"] < MIN_CAL_SENTENCES,
+            "sources": files,
+        },
     }
 
 
@@ -86,22 +91,22 @@ def main():
     voice = {lang: measure(lang) for lang in ("en", "ru")}
     voice["_meta"] = {
         "source": "tools/learn_voice.py over "
-                  "fixtures/humanizer/clean_human/{en,ru}.txt - the "
-                  "only committed, verifiably human-authored corpus "
-                  "in the repo (docs/prompts are agent prose, "
-                  "context/ is gitignored)",
+        "fixtures/humanizer/clean_human/{en,ru}.txt - the "
+        "only committed, verifiably human-authored corpus "
+        "in the repo (docs/prompts are agent prose, "
+        "context/ is gitignored)",
         "use": "flat_for_you = stdev_words < rhythm.stdev_words * "
-               "FLAT_FOR_YOU (vendored nomisread convention)",
+        "FLAT_FOR_YOU (vendored nomisread convention)",
     }
-    out = json.dumps(voice, indent=1, ensure_ascii=False,
-                     sort_keys=True) + "\n"
-    thin = [lang for lang in ("en", "ru")
-            if voice[lang]["samples"]["thin_calibration"]]
+    out = json.dumps(voice, indent=1, ensure_ascii=False, sort_keys=True) + "\n"
+    thin = [lang for lang in ("en", "ru") if voice[lang]["samples"]["thin_calibration"]]
     if thin:
-        print(f"WARNING: thin calibration for {', '.join(thin)} - "
-              f"corpus under {MIN_CAL_SENTENCES} sentences; the "
-              "recorded profile is a small-sample estimate",
-              file=sys.stderr)
+        print(
+            f"WARNING: thin calibration for {', '.join(thin)} - "
+            f"corpus under {MIN_CAL_SENTENCES} sentences; the "
+            "recorded profile is a small-sample estimate",
+            file=sys.stderr,
+        )
     if "--check" in sys.argv:
         cur = ""
         try:
@@ -117,10 +122,12 @@ def main():
         fh.write(out)
     for lang in ("en", "ru"):
         r = voice[lang]["rhythm"]
-        print(f"{lang}: stdev {r['stdev_words']} words, "
-              f"band_share {r['band_share']}, "
-              f"{voice[lang]['samples']['sentences']} sentences over "
-              f"{voice[lang]['samples']['files']} files")
+        print(
+            f"{lang}: stdev {r['stdev_words']} words, "
+            f"band_share {r['band_share']}, "
+            f"{voice[lang]['samples']['sentences']} sentences over "
+            f"{voice[lang]['samples']['files']} files"
+        )
     print("wrote", os.path.relpath(VOICE_PATH, ROOT))
 
 

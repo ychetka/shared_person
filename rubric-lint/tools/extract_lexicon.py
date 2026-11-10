@@ -50,12 +50,9 @@ def unquote_js(s):
 def parse_obj_list(src, array_name):
     """Pull {word: '...', variants: [...], reason: '...'} shaped object
     literals out of `export const <array_name> = [...]`."""
-    m = re.search(
-        r"export const " + re.escape(array_name) + r"\s*:[^=]*=\s*\[",
-        src)
+    m = re.search(r"export const " + re.escape(array_name) + r"\s*:[^=]*=\s*\[", src)
     if not m:
-        m = re.search(
-            r"export const " + re.escape(array_name) + r"\s*=\s*\[", src)
+        m = re.search(r"export const " + re.escape(array_name) + r"\s*=\s*\[", src)
     if not m:
         return []
     start = m.end()
@@ -76,7 +73,7 @@ def parse_obj_list(src, array_name):
         elif c == "]":
             depth -= 1
         i += 1
-    body = src[start:i - 1]
+    body = src[start : i - 1]
     # objects may contain {n,m} regex quantifiers - walk brace depth
     # instead of a [^{}] character-class match
     objs = []
@@ -98,55 +95,52 @@ def parse_obj_list(src, array_name):
         elif c == "}":
             depth -= 1
             if depth == 0 and obj_start is not None:
-                objs.append(body[obj_start:j + 1])
+                objs.append(body[obj_start : j + 1])
                 obj_start = None
         j += 1
     out = []
     for o in objs:
         ent = {}
-        for key in ("word", "phrase", "name", "reason", "suggestion",
-                    "pattern"):
-            km = re.search(
-                key + r"\s*:\s*'((?:[^'\\]|\\.)*)'", o) or re.search(
-                key + r'\s*:\s*"((?:[^"\\]|\\.)*)"', o)
+        for key in ("word", "phrase", "name", "reason", "suggestion", "pattern"):
+            km = re.search(key + r"\s*:\s*'((?:[^'\\]|\\.)*)'", o) or re.search(
+                key + r'\s*:\s*"((?:[^"\\]|\\.)*)"', o
+            )
             if km:
                 ent[key] = unquote_js(km.group(1))
         vm = re.search(r"variants\s*:\s*\[([^\]]*)\]", o)
         if vm:
             ent["variants"] = [
-                unquote_js(x) for x in
-                re.findall(r"'((?:[^'\\]|\\.)*)'", vm.group(1))]
+                unquote_js(x) for x in re.findall(r"'((?:[^'\\]|\\.)*)'", vm.group(1))
+            ]
         if ent:
             out.append(ent)
     return out
 
 
 def parse_string_list(src, array_name):
-    m = re.search(
-        r"export const " + re.escape(array_name) +
-        r"[^=]*=\s*\[([^\]]*)\]", src, re.S)
+    m = re.search(r"export const " + re.escape(array_name) + r"[^=]*=\s*\[([^\]]*)\]", src, re.S)
     if not m:
         return []
-    return [unquote_js(x) for x in
-            re.findall(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"",
-                       m.group(1)) for x in x if x]
+    return [
+        unquote_js(x)
+        for x in re.findall(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"", m.group(1))
+        for x in x
+        if x
+    ]
 
 
 # impersonal hedge frames only - personal hedges ("I think", "in my
 # opinion", "in my view") are a voice feature, not an AI tell; the
 # second alternation that once let them through is removed
 def is_impersonal_hedge(p):
-    return bool(re.match(
-        r"(it |one |needless|there |this |the evidence|remains|time )",
-        p))
+    return bool(re.match(r"(it |one |needless|there |this |the evidence|remains|time )", p))
 
 
 def main():
     words_ts, slopless_dir, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
     src = open(words_ts, encoding="utf-8").read()
 
-    hedges = [p for p in parse_string_list(src, "hedgingPhrases")
-              if is_impersonal_hedge(p.lower())]
+    hedges = [p for p in parse_string_list(src, "hedgingPhrases") if is_impersonal_hedge(p.lower())]
 
     lex = {
         "ai_vocab": parse_obj_list(src, "aiTellsVocabulary"),
@@ -156,9 +150,14 @@ def main():
         "nominalizations": parse_obj_list(src, "nominalizations"),
         "filler_adverbs": parse_string_list(src, "fillerAdverbs"),
     }
-    for name in ("seo-filler", "corporate-speak", "cliches",
-                 "prohibited-phrases", "weasel-attribution",
-                 "llm-disclaimer-expansions"):
+    for name in (
+        "seo-filler",
+        "corporate-speak",
+        "cliches",
+        "prohibited-phrases",
+        "weasel-attribution",
+        "llm-disclaimer-expansions",
+    ):
         with open(f"{slopless_dir}/{name}.json", encoding="utf-8") as fh:
             lex[name.replace("-", "_")] = json.load(fh)
 

@@ -5,6 +5,8 @@ extend-exclude = [
     "hands-agent/queue",
     "n8n",
     "n8n-workflows",
+    "rubric-lint/python",
+    "rubric-lint/vendor",
 ]
 
 [lint]

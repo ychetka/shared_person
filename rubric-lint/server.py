@@ -37,15 +37,17 @@ import rubric_lint
 try:
     PORT = int(os.environ.get("RUBRIC_PORT") or 8790)
 except ValueError:
-    print(f"rubric-lint: RUBRIC_PORT={os.environ['RUBRIC_PORT']!r} is "
-          "not an integer - falling back to 8790", file=sys.stderr)
+    print(
+        f"rubric-lint: RUBRIC_PORT={os.environ['RUBRIC_PORT']!r} is "
+        "not an integer - falling back to 8790",
+        file=sys.stderr,
+    )
     PORT = 8790
 MAX_BODY = 2 * 1024 * 1024  # eval cells are ~2KB; 2MB is generous
 
 
 def _dumps(obj):
-    return json.dumps(obj, ensure_ascii=False, sort_keys=True).encode(
-        "utf-8")
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True).encode("utf-8")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -106,22 +108,24 @@ class Handler(BaseHTTPRequestHandler):
                     self._bad(400, "score requires {text, lang}")
                     return
                 lang = payload.get("lang", "en")
-                if not isinstance(lang, str) or \
-                        lang.strip().lower() not in ("ru", "en"):
+                if not isinstance(lang, str) or lang.strip().lower() not in ("ru", "en"):
                     self._bad(400, "lang must be 'ru' or 'en'")
                     return
-                self._send(200, rubric_lint.score_text(
-                    payload["text"], lang))
+                self._send(200, rubric_lint.score_text(payload["text"], lang))
             else:
-                if not isinstance(payload.get("original"), str) or \
-                        not isinstance(payload.get("rewritten"), str):
-                    self._bad(
-                        400, "diff requires {original, rewritten,"
-                             " protected_terms[]}")
+                if not isinstance(payload.get("original"), str) or not isinstance(
+                    payload.get("rewritten"), str
+                ):
+                    self._bad(400, "diff requires {original, rewritten, protected_terms[]}")
                     return
-                self._send(200, rubric_lint.diff_texts(
-                    payload["original"], payload["rewritten"],
-                    payload.get("protected_terms", [])))
+                self._send(
+                    200,
+                    rubric_lint.diff_texts(
+                        payload["original"],
+                        payload["rewritten"],
+                        payload.get("protected_terms", []),
+                    ),
+                )
         except Exception as e:  # noqa: BLE001 - a lint crash must not kill the socket
             self._bad(500, "internal: " + str(e)[:200])
 
