@@ -132,12 +132,13 @@ def parse_string_list(src, array_name):
                        m.group(1)) for x in x if x]
 
 
-# impersonal hedge frames only - personal hedges ("I think") are a voice
-# feature, not an AI tell
+# impersonal hedge frames only - personal hedges ("I think", "in my
+# opinion", "in my view") are a voice feature, not an AI tell; the
+# second alternation that once let them through is removed
 def is_impersonal_hedge(p):
     return bool(re.match(
-        r"(it |one |needless|there |this |the evidence|remains|time )"
-        r"|(in my opinion|in my view)", p))
+        r"(it |one |needless|there |this |the evidence|remains|time )",
+        p))
 
 
 def main():

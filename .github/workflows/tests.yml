@@ -78,3 +78,11 @@ jobs:
           curl -sf http://localhost:8788/health
           RSS=http://localhost:8788 npm test
           curl -sf "http://localhost:8788/digest?since=48h" | grep -q "ci smoke item"
+
+      # rubric-lint (issue #80) is pure stdlib Python - no setup step,
+      # no image pull, just the engine harness and the voice-profile
+      # drift check over the committed corpus
+      - name: rubric-lint backend checks
+        run: |
+          python3 tools/check_rubric.py
+          python3 tools/learn_voice.py --check

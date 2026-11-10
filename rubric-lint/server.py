@@ -44,6 +44,13 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "rubric-lint/" + rubric_lint.VERSION
 
+    def setup(self):
+        super().setup()
+        # a stalled or half-written request must not pin a worker
+        # thread forever - the eval tick's own 30s timeout is the
+        # contract, so the socket agrees with it
+        self.connection.settimeout(30)
+
     def log_message(self, fmt, *args):  # keep stderr quiet; n8n logs
         pass
 
@@ -59,7 +66,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, {"error": msg, "ok": False})
 
     def do_GET(self):
-        if self.path.rstrip("/") in ("", "/health"):
+        path = self.path.split("?", 1)[0].rstrip("/")
+        if path in ("", "/health"):
             self._send(200, {"ok": True, "version": rubric_lint.VERSION})
             return
         self._bad(404, "unknown path")
@@ -89,8 +97,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(payload.get("text"), str):
                     self._bad(400, "score requires {text, lang}")
                     return
+                lang = payload.get("lang", "en")
+                if not isinstance(lang, str) or \
+                        lang.strip().lower() not in ("ru", "en"):
+                    self._bad(400, "lang must be 'ru' or 'en'")
+                    return
                 self._send(200, rubric_lint.score_text(
-                    payload["text"], payload.get("lang", "en")))
+                    payload["text"], lang))
             else:
                 if not isinstance(payload.get("original"), str) or \
                         not isinstance(payload.get("rewritten"), str):
@@ -106,7 +119,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    # loopback only: every consumer (eval tick, compose siblings on
+    # network_mode:host) reaches this on 127.0.0.1 - there is no caller
+    # that needs it on the LAN interface
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     srv.daemon_threads = True
     threading.current_thread().name = "rubric-lint"
     print(f"rubric-lint {rubric_lint.VERSION} listening on :{PORT}")
