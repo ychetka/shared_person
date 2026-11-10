@@ -1,0 +1,21 @@
+Good monitoring gives visibility into how systems cope with real-world conditions.
+
+Proper tooling lets engineers concentrate on solving actual customer problems instead of wrestling with their environment.
+
+Solid foundations enable software organizations to consistently provide scalable, dependable solutions without compromising quality.
+
+Collaboration among teams paves the way for successful projects.
+
+A focus on quality benefits all stakeholders. Attention to quality at all levels of an application, from early design and code review to testing and monitoring in production environments, paves the way for scalable, reliable solutions.
+
+Investing in good architecture early on avoids headaches down the line.
+
+Continuous improvement should be at the core of any engineering effort.
+
+Clear, effective communication allows knowledge to be shared and keeps everyone on the same page. Comprehensive documentation keeps teams on track.
+
+Thorough testing uncovers issues before they creep into production.
+
+When developers are dedicated to doing great work on a day-to-day basis it will shine through.
+
+

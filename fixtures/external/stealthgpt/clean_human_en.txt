@@ -1,0 +1,13 @@
+The lock stealing logic wasn’t actually stealing locks, it was just waiting for the TTL to expire before claiming someone elses lock file. I increased the TTL to 90s (which isnt a fix its just delaying the problem) and made sure that after writing a lock file we re-read it and make sure its our token before proceeding (this seems to have eliminated the issue).
+
+Fixed an issue where two workers could claim the same run (apparently this wasnt as rare as I’d hoped based on logs).
+
+Moved writing to the trace file to be part of the same “transaction” as the state change (which in reality are both just writes to different files and there is no transaction but hey progress is progress).
+
+Yesterday / last night saw 14 seeded runs complete with no lock files sticking around. There was an issue with one of the test runs because of bad data in one of the fixture files but instead of crashing the whole process it just logs an error and skips that particular file. Took way too long to figure out because I kept forgetting readdirSync will throw ENOENT if the directory doesnt exist.
+
+Ive been meaning to look into why borderline tier always seems to score around 54 against the stub solution but I’m guessing it has to do with the jitter hash.
+
+The credit system still has the issue where if you start a run at 23:58 youll run into credit limit issues 2 minutes later. This is because the credit count resets at UTC midnight. Leaving this as-is for now since its technically correct behaviour and the credit usage estimation is pretty optimistic anyways (we deduct credits when a run is enqueued and reconcile when we get the response back).
+
+
