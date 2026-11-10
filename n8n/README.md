@@ -809,7 +809,22 @@ deploy burns nothing):
   service or a bad response shape escalates `scorer_failed` honestly
   - there is NO stub fallback for this backend. A `scorer_claim`
   left by a crashed tick gets one re-claim before `scorer_failed`,
-  same bound as the pangram pending path). A pangram task with no
+  same bound as the pangram pending path), or `rubric+judge`
+  (issue #82 - the atomic composite: the rubric leg above PLUS a
+  blind `POST $LLM_GATEWAY_URL/run {role: $JUDGE_ROLE}` fluency
+  verdict. The judge shares the ai_score polarity - 0-100, higher =
+  WORSE fluency - and the blend is `final = max(rubric,
+  round(judge * HUMANIZER_JUDGE_WEIGHT))`: the rubric stays the
+  deterministic floor the LLM can never under-score, while fluency
+  damage the lexicon misses still pushes the score up; the 0.8
+  weight dampens judge noise. Either leg failing - transport or
+  shape - escalates `scorer_failed`; the composite never settles
+  rubric-only. Judge issues with a verbatim `span` join
+  `marker_spans` as `judge-<severity>` markers; spanless issues are
+  doc-level findings kept on the score record and trace only. The
+  score record carries `rubric_score`/`judge_score`/`judge_weight`/
+  `judge_rationale`/`judge_issues` so the blend is auditable). A
+  pangram task with no
   landed artifact after ~10min is a dead claim: one re-enqueue
   attempt (per-claim budget - a landed score resets it), then
   `scorer_failed` escalation. Charge dedupe is per task-id, so a
@@ -844,12 +859,31 @@ deploy burns nothing):
   `http://127.0.0.1:8787` - all services run `network_mode: host`,
   so the `llm-gateway` container name is unresolvable).
   `RUBRIC_URL` - rubric scorer endpoint (default
-  `http://127.0.0.1:8790`).
+  `http://127.0.0.1:8790`). `JUDGE_ROLE` - the composite scorer's
+  judge role manifest (default `fluency-judge`;
+  `roles/fluency-judge.yaml` + `prompts/fluency-judge.txt`,
+  schema-validated `{score, rationale, issues[]}` like the partner
+  role). `HUMANIZER_JUDGE_WEIGHT` - judge blend dampening (default
+  0.8, clamped 0-1).
+
+Blind A/B (issue #82): every seeded run carries a positional
+`chain_<letter>` label and a `stage_<letter>` map for its stages.
+The real chain/stage ids stay in the run record, the `seeded` trace
+entry, the ledger (`chain` + `label` per score row) and the tick
+output's `labels` map - audit side only. Outbound scorer, judge and
+partner payloads see only the blind label or nothing at all (the
+judge input is just `{source_text, language}`), and the partner's
+`previous_attempts` is rewritten to stage labels before it leaves
+the node, so a chain's identity can never bias a verdict.
+`tools/check_humanizer.js` E36 asserts the non-leakage.
 
 Deploy note: `HUMANIZER_SCORER=rubric` requires the
 `shared-person-rubric` service (`docker compose --env-file ../../ENV
 up -d rubric`; image build needs `rubric-lint/fetch_python.sh` run on
-the host first - the n8n-local base ships node only). `stub` (the
+the host first - the n8n-local base ships node only). `rubric+judge`
+needs that service AND the llm-gateway (judge calls burn Gemini
+spend - validate the role against the fixture tiers first with
+`tools/check_judge.py --live`). `stub` (the
 default) needs nothing extra and keeps the whole eval inert on a
 plain deploy.
 
@@ -863,7 +897,10 @@ resets to a fresh baseline (noted in the run trace). Every scored
 cell appends a row to `state/humanizer_scores.jsonl`; escalations
 also log a `humanizer-escalate` line to
 `logs/humanizer-eval.jsonl`. Harness: `tools/check_humanizer.js`
-runs the real Eval Tick jsCode against the real fixtures.
+runs the real Eval Tick jsCode against the real fixtures;
+`tools/check_judge.py` validates the fluency-judge role against the
+fixture tiers (mock mode offline, `--live` against the real
+gateway).
 
 ## Secrets
 

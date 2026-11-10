@@ -1,0 +1,48 @@
+name: fluency-judge
+description: Blind EN fluency/grammaticality/naturalness judge for the humanizer eval composite scorer (rubric+judge) - scores 0-100 where HIGHER = WORSE, plus rationale and optional span-level issues (issue #82)
+backend: gemini
+model: gemini-3.5-flash
+fallback_models:
+  - gemini-3.6-flash
+  - gemini-3.5-flash-lite
+  - gemini-3.1-flash-lite
+  - gemini-flash-lite-latest
+temperature: 0.1
+max_tokens: 2048
+prompt: fluency-judge
+output:
+  type: json
+  schema:
+    type: object
+    additionalProperties: false
+    required:
+      - score
+      - rationale
+      - issues
+    properties:
+      score:
+        type: number
+        minimum: 0
+        maximum: 100
+      rationale:
+        type: string
+      issues:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required:
+            - problem
+            - severity
+          properties:
+            span:
+              type:
+                - string
+                - "null"
+            problem:
+              type: string
+            severity:
+              enum:
+                - minor
+                - major
+                - fatal

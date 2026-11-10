@@ -108,6 +108,21 @@
 //       -> scorer_failed (never a stub fallback), and a stale
 //       scorer_claim re-claims once on the same scorer_retries
 //       budget the pangram pending path keeps.
+//   E33 composite 'rubric+judge' scorer (issue #82): rubric /score
+//       AND the fluency-judge role on GATEWAY/run both land; final =
+//       max(rubric, round(judge*0.8)), marker_spans = rubric
+//       findings + judge span issues (spanless issues stay doc-level
+//       in the score record + trace);
+//   E34 malformed judge JSON (bad shape despite a healthy rubric)
+//       -> scorer_failed, atomic - no rubric-only settle;
+//   E35 unreachable judge -> scorer_failed, no fallback;
+//   E36 blind A/B labels: runs carry chain_a/chain_b labels and
+//       stage_<letter> maps, the tick output records the mapping,
+//       and NO scorer/judge/partner payload contains a chain or
+//       stage id (baseline/editor/inhouse never leak);
+//   E37 roles/fluency-judge.yaml manifest + strict output schema
+//       compile via ajv ({score 0-100, rationale, issues[]},
+//       additionalProperties:false at both levels).
 //
 // Run:  node tools/check_humanizer.js    (exit 0 = all pass)
 
@@ -1744,6 +1759,371 @@ const main = async () => {
         en: { st: r4?.state, rt: r4?.scorer_retries, tr: tr4 },
         ru: { st: r4ru?.state, oc: r4ru?.outcome },
       }),
+    );
+  }
+
+  // --- E33 composite 'rubric+judge' scorer (issue #82) ---------------
+  // both legs land: POST RUBRIC_URL/score AND POST GATEWAY/run
+  // {role: fluency-judge}. final = max(rubric, round(judge*0.8)),
+  // marker_spans = rubric findings + judge span issues, spanless
+  // judge issues stay doc-level on the score record + trace
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_SCORER: "rubric+judge", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc.fakeFs, ["ai_flop"]);
+    sc.httpImpl = async (o) => {
+      if (o.url === "http://127.0.0.1:8790/score") {
+        return {
+          score: 20,
+          findings: [
+            {
+              rule: "en-hedge",
+              severity: 1,
+              span: [10, 18],
+              text: "it seems",
+              suggestion: "cut the hedge",
+            },
+          ],
+          metrics: { stdev_words: 3.2 },
+          version: "0.1.0",
+        };
+      }
+      if (o.url === "http://127.0.0.1:8787/run") {
+        const body = typeof o.body === "string" ? JSON.parse(o.body) : o.body;
+        if (body.role === "fluency-judge") {
+          return {
+            role: "fluency-judge",
+            model: "m",
+            backend: "gemini",
+            json: {
+              score: 80,
+              rationale: "stiff machine rhythm with grammar breaks",
+              issues: [
+                {
+                  span: "plays a vital role",
+                  problem: "cliched collocation reads translated",
+                  severity: "major",
+                },
+                {
+                  span: null,
+                  problem: "uniform sentence length across the whole text",
+                  severity: "minor",
+                },
+              ],
+            },
+          };
+        }
+      }
+      throw new Error(`unexpected ${o.url}`);
+    };
+    await runTicks(sc, 4);
+    const r = loadRun(sc.fakeFs, "baseline__ai_flop-en");
+    // blend: max(rubric 20, round(80 * 0.8) = 64) = 64 -> >=50 ->
+    // baseline escalates no_rewrite_stage carrying the composite score
+    check(
+      "E33 composite: blend = max(rubric, round(judge*0.8)), via stamped",
+      r?.last_score?.via === "rubric+judge" &&
+        r.last_score.score === 64 &&
+        r.last_score.rubric_score === 20 &&
+        r.last_score.judge_score === 80 &&
+        r.last_score.judge_weight === 0.8 &&
+        r.state === "escalated" &&
+        r.outcome === "no_rewrite_stage",
+      JSON.stringify({ st: r?.state, oc: r?.outcome, ls: r?.last_score }),
+    );
+    const judgeCalls = sc.calls.filter(
+      (c0) => c0.url === "http://127.0.0.1:8787/run" && c0.body?.role === "fluency-judge",
+    );
+    check(
+      "E33 composite: judge leg POSTs role contract, blind input shape",
+      judgeCalls.length >= 1 &&
+        judgeCalls.every((c0) => {
+          const p = JSON.parse(c0.body.input);
+          return (
+            Object.keys(p).sort().join(",") === "language,source_text" &&
+            typeof p.source_text === "string" &&
+            ["en", "ru"].includes(p.language)
+          );
+        }),
+      JSON.stringify(judgeCalls.map((c0) => c0.body)),
+    );
+    const spans = r?.last_score?.marker_spans || [];
+    check(
+      "E33 composite: marker_spans = rubric findings + judge spans",
+      spans.some((s) => s.text === "it seems" && s.marker_type === "en-hedge") &&
+        spans.some((s) => s.text === "plays a vital role" && s.marker_type === "judge-major") &&
+        spans.length === 2,
+      JSON.stringify(spans),
+    );
+    check(
+      "E33 composite: spanless issue is doc-level - out of marker_spans, kept in record+trace",
+      !spans.some((s) => s.text === "" || s.text == null) &&
+        (r.last_score.judge_issues || []).some(
+          (i) => i.span === null && i.problem.includes("uniform sentence length"),
+        ) &&
+        (r.trace || []).some(
+          (t) => t.action === "score" && t.via === "rubric+judge" && t.judge_doc_issues === 1,
+        ),
+      JSON.stringify({
+        ji: r?.last_score?.judge_issues,
+        tr: (r?.trace || []).map((t) => t.action),
+      }),
+    );
+    check(
+      "E33 composite: scorer_backend 'rubric+judge' in the ledger",
+      scoreRows(sc.fakeFs).some((row) => row.scorer_backend === "rubric+judge"),
+      JSON.stringify(scoreRows(sc.fakeFs)),
+    );
+  }
+
+  // --- E34 malformed judge -> atomic scorer_failed ---------------------
+  // a healthy rubric cannot settle alone: a judge verdict with a
+  // bad shape (or a gateway 422) fails the whole scorer leg
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_SCORER: "rubric+judge", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc.fakeFs, ["ai_flop"]);
+    sc.httpImpl = async (o) => {
+      if (o.url === "http://127.0.0.1:8790/score") {
+        return { score: 20, findings: [], metrics: {}, version: "0.1.0" };
+      }
+      if (o.url === "http://127.0.0.1:8787/run") {
+        return {
+          role: "fluency-judge",
+          model: "m",
+          backend: "gemini",
+          json: { score: "high", rationale: "no issues array" },
+        };
+      }
+      throw new Error(`unexpected ${o.url}`);
+    };
+    await runTicks(sc, 4);
+    const r = loadRun(sc.fakeFs, "baseline__ai_flop-en");
+    check(
+      "E34 composite: malformed judge verdict -> scorer_failed, no settle",
+      r?.state === "escalated" &&
+        r.outcome === "scorer_failed" &&
+        r.last_score === null &&
+        scoreRows(sc.fakeFs).length === 0 &&
+        String(r?.escalation?.error || "").includes("judge"),
+      JSON.stringify({ st: r?.state, oc: r?.outcome, esc: r?.escalation }),
+    );
+
+    const sc2 = mkSc();
+    sc2.env = { HUMANIZER_SCORER: "rubric+judge", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc2.fakeFs, ["ai_flop"]);
+    sc2.httpImpl = async (o) => {
+      if (o.url === "http://127.0.0.1:8790/score") {
+        return { score: 20, findings: [], metrics: {}, version: "0.1.0" };
+      }
+      const e = new Error("422 - schema validation failed");
+      e.statusCode = 422;
+      throw e;
+    };
+    await runTicks(sc2, 4);
+    const r2 = loadRun(sc2.fakeFs, "baseline__ai_flop-en");
+    check(
+      "E34 composite: gateway 422 -> scorer_failed, never rubric-only",
+      r2?.state === "escalated" &&
+        r2.outcome === "scorer_failed" &&
+        r2.last_score === null &&
+        !scoreRows(sc2.fakeFs).some((row) => row.scorer_backend === "rubric"),
+      JSON.stringify({ st: r2?.state, oc: r2?.outcome, rows: scoreRows(sc2.fakeFs) }),
+    );
+  }
+
+  // --- E35 unreachable judge -> scorer_failed, no fallback -------------
+  {
+    const sc = mkSc();
+    sc.env = { HUMANIZER_SCORER: "rubric+judge", HUMANIZER_CHAINS: "baseline" };
+    seedFixtures(sc.fakeFs, ["ai_flop"]);
+    sc.httpImpl = async (o) => {
+      if (o.url === "http://127.0.0.1:8790/score") {
+        return { score: 20, findings: [], metrics: {}, version: "0.1.0" };
+      }
+      throw new Error("connect ECONNREFUSED 127.0.0.1:8787");
+    };
+    await runTicks(sc, 4);
+    const r = loadRun(sc.fakeFs, "baseline__ai_flop-en");
+    check(
+      "E35 composite: unreachable judge -> scorer_failed, no fallback",
+      r?.state === "escalated" &&
+        r.outcome === "scorer_failed" &&
+        r.last_score === null &&
+        !(r.trace || []).some((t) => t.via === "stub") &&
+        scoreRows(sc.fakeFs).length === 0,
+      JSON.stringify({ st: r?.state, oc: r?.outcome }),
+    );
+  }
+
+  // --- E36 blind A/B labels: mapping recorded, identity never leaks ----
+  // chains baseline+editor under composite scorer + inhouse partner:
+  // every outbound body (rubric, judge, partner) is scanned for the
+  // real chain/stage ids - 'baseline', 'editor', 'inhouse' must
+  // never appear in a payload, while runs/trace/ledger carry the
+  // chain_a/chain_b mapping for audit
+  {
+    const sc = mkSc();
+    sc.env = {
+      HUMANIZER_SCORER: "rubric+judge",
+      HUMANIZER_PARTNER: "inhouse",
+      HUMANIZER_CHAINS: "baseline,editor",
+    };
+    seedFixtures(sc.fakeFs, ["ai_flop"]);
+    sc.httpImpl = async (o) => {
+      if (o.url === "http://127.0.0.1:8790/score") {
+        return { score: 60, findings: [], metrics: {}, version: "0.1.0" };
+      }
+      if (o.url === "http://127.0.0.1:8787/run") {
+        const body = typeof o.body === "string" ? JSON.parse(o.body) : o.body;
+        if (body.role === "fluency-judge") {
+          return {
+            role: "fluency-judge",
+            model: "m",
+            backend: "gemini",
+            json: {
+              score: 70,
+              rationale: "stiff but grammatical",
+              issues: [{ span: null, problem: "flat rhythm", severity: "minor" }],
+            },
+          };
+        }
+        if (body.role === "humanizer-partner") {
+          const p = JSON.parse(body.input);
+          return {
+            role: "humanizer-partner",
+            model: "m",
+            backend: "gemini",
+            json: {
+              rewritten_text: `${p.source_text}\n\nRewritten.`,
+              edits: [{ span_original: "x", span_new: "y", reason: "s" }],
+              confidence: "medium",
+              recommendation: "continue",
+              unchanged_reason: null,
+              caveats: [],
+            },
+          };
+        }
+      }
+      throw new Error(`unexpected ${o.url}`);
+    };
+    const out = await runTicks(sc, 10);
+    const rb = loadRun(sc.fakeFs, "baseline__ai_flop-en");
+    const re = loadRun(sc.fakeFs, "editor__ai_flop-en");
+    check(
+      "E36 blind labels: chain_a/chain_b on runs, mapping in trace + tick output",
+      rb?.label === "chain_a" &&
+        re?.label === "chain_b" &&
+        (rb.trace || []).some((t) => t.action === "seeded" && t.label === "chain_a") &&
+        out?.[0]?.json?.labels?.chain_a === "baseline" &&
+        out?.[0]?.json?.labels?.chain_b === "editor",
+      JSON.stringify({ rb: rb?.label, re: re?.label, labels: out?.[0]?.json?.labels }),
+    );
+    check(
+      "E36 blind labels: stage map on the editor run",
+      re?.stage_labels?.editor === "stage_a",
+      JSON.stringify(re?.stage_labels),
+    );
+    // the leak scan: serialize every outbound request body and hunt
+    // the real chain/stage ids - blind labels ('chain_a', 'stage_a')
+    // are fine, real ids never are
+    const bodies = sc.calls.map((c0) => JSON.stringify(c0.body || {}));
+    const leaked = bodies.filter((b) => /baseline|editor|inhouse|writehuman/.test(b));
+    check(
+      "E36 non-leakage: no chain/stage id in any scorer/judge/partner payload",
+      leaked.length === 0 && sc.calls.length > 0,
+      JSON.stringify(leaked.slice(0, 3)),
+    );
+    const partnerCalls = sc.calls.filter(
+      (c0) => c0.url === "http://127.0.0.1:8787/run" && c0.body?.role === "humanizer-partner",
+    );
+    check(
+      "E36 non-leakage: partner previous_attempts carry blind stage labels",
+      partnerCalls.length >= 1 &&
+        partnerCalls.every((c0) => {
+          const p = JSON.parse(c0.body.input);
+          return (p.previous_attempts || []).every(
+            (a) => !a || typeof a !== "object" || !("stage" in a) || /^stage_/.test(a.stage),
+          );
+        }) &&
+        partnerCalls.some((c0) => JSON.parse(c0.body.input).previous_attempts.length > 0),
+      JSON.stringify(partnerCalls.map((c0) => JSON.parse(c0.body.input).previous_attempts)),
+    );
+    check(
+      "E36 audit side: run record keeps real chain + stage names",
+      re?.chain === "editor" &&
+        (re.previous_attempts || []).every((a) => a.stage === "editor" || a.failed),
+      JSON.stringify(re?.previous_attempts),
+    );
+    check(
+      "E36 ledger: blind label rides the score rows",
+      scoreRows(sc.fakeFs).some((row) => row.label === "chain_b" && row.chain === "editor"),
+      JSON.stringify(scoreRows(sc.fakeFs)),
+    );
+  }
+
+  // --- E37 fluency-judge role manifest + strict schema ----------------
+  {
+    const rolePath = path.join(__dirname, "..", "roles", "fluency-judge.yaml");
+    const promptPath = path.join(__dirname, "..", "prompts", "fluency-judge.txt");
+    const req = createRequire(path.join(__dirname, "..", "llm-gateway", "package.json"));
+    const YAML = req("yaml");
+    const Ajv = req("ajv");
+    const doc = YAML.parse(fs.readFileSync(rolePath, "utf8"));
+    const schema = doc?.output?.schema;
+    let compiled = null;
+    let compErr = null;
+    try {
+      compiled = new Ajv().compile(schema);
+    } catch (e) {
+      compErr = e;
+    }
+    check(
+      "E37 judge role: manifest + prompt + output.schema compile via ajv",
+      doc?.name === "fluency-judge" &&
+        doc?.prompt === "fluency-judge" &&
+        fs.existsSync(promptPath) &&
+        !!compiled &&
+        !compErr,
+      String(compErr || ""),
+    );
+    const itemReq = schema?.properties?.issues?.items?.required || [];
+    check(
+      "E37 judge schema: strict shape, span optional, severity enum",
+      schema?.additionalProperties === false &&
+        ["score", "rationale", "issues"].every(
+          (k) => schema.required.includes(k) && k in schema.properties,
+        ) &&
+        schema.properties.score.type === "number" &&
+        schema.properties.score.minimum === 0 &&
+        schema.properties.score.maximum === 100 &&
+        schema.properties.issues.items.additionalProperties === false &&
+        ["problem", "severity"].every((k) => itemReq.includes(k)) &&
+        !itemReq.includes("span") &&
+        "span" in (schema.properties.issues.items.properties || {}),
+      JSON.stringify({ req: schema?.required, itemReq }),
+    );
+    check(
+      "E37 judge schema: accepts compliant verdicts, rejects malformed",
+      !!compiled?.({ score: 42, rationale: "r", issues: [] }) &&
+        !!compiled?.({
+          score: 80,
+          rationale: "stiff",
+          issues: [{ span: "it seems", problem: "hedge", severity: "major" }],
+        }) &&
+        !!compiled?.({
+          score: 10,
+          rationale: "fine",
+          issues: [{ problem: "doc-level", severity: "minor" }],
+        }) &&
+        !compiled?.({ score: 120, rationale: "r", issues: [] }) &&
+        !compiled?.({ score: 5, issues: [] }) &&
+        !compiled?.({ score: 5, rationale: "r", issues: [], note: "x" }) &&
+        !compiled?.({
+          score: 5,
+          rationale: "r",
+          issues: [{ problem: "p", severity: "terrible" }],
+        }),
     );
   }
 
