@@ -91,7 +91,10 @@ def type_text(text, wpm_range=(30, 60)):
 
 
 def key(*keys):
-    _xd("key", *keys)
+    # Separate xdotool key args are a SEQUENCE of keystrokes, not a chord:
+    # `xdotool key ctrl l` presses ctrl, releases, then types 'l'. A chord
+    # must be one "+"-joined arg ("ctrl+l"), so rejoin multi-key combos.
+    _xd("key", "+".join(str(k) for k in keys))
     time.sleep(random.uniform(0.05, 0.15))
 
 
