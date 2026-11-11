@@ -30,3 +30,6 @@ edge/data/
 # generated secrets - never commit (see deploy/vk-token.service)
 deploy/vk-token.env
 rubric-lint/python/
+
+# devin runtime log - regenerated per session; keep history, ignore re-staging
+.devin/cycle_log.jsonl
