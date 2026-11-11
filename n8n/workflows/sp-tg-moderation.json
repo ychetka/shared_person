@@ -509,6 +509,9 @@
       "node": "TG Update",
       "path": "tg-moderation",
       "method": "POST"
+    },
+    {
+      "node": "Poll Pangram Results"
     }
   ]
 }
