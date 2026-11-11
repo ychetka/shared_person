@@ -6,7 +6,7 @@ fallback_models:
   - gemini-3.6-flash
   - gemini-3.5-flash
 temperature: 0.7
-max_tokens: 4096
+max_tokens: 16384
 prompt: writer-habr
 context_slots:
   - writer_style
