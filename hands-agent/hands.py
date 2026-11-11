@@ -8,7 +8,9 @@ All movements include jitter so events look human, not scripted.
 import math
 import os
 import random
+import signal
 import subprocess
+import sys
 import time
 
 ENV = dict(os.environ)
@@ -97,32 +99,57 @@ def scroll(amount=3, direction="down"):
     _xd("click", "5" if direction == "down" else "4", "--repeat", amount)
 
 
+_clip_holder = None
+
+_HOLDER_SRC = """
+import sys
+import gi
+
+# Gdk must be pinned too: the from-import resolves Gdk first and
+# unversioned, so the host default (4.0) wins and breaks the Gtk pin.
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, GLib, Gtk
+
+Gtk.init([])
+cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+cb.set_text(sys.argv[1], -1)
+cb.store()
+GLib.timeout_add_seconds(120, Gtk.main_quit)  # self-TTL: stale holders die
+Gtk.main()
+"""
+
+
 def set_clipboard(text):
-    """Load the X CLIPBOARD selection via PyGObject Gtk.Clipboard so a
-    following `key ctrl+v` pastes `text` as a normal OS paste event
-    (trusted input - the target app cannot tell it from a human paste).
-    This is the long-body path the README's 'OS-level input' survey
-    picked: xclip/xsel are absent on this box, python3-gi is installed.
+    """Load the X CLIPBOARD selection so a following `key ctrl+v` pastes
+    `text` as a normal OS paste event (trusted input - the target app
+    cannot tell it from a human paste). This is the long-body path the
+    README's 'OS-level input' survey picked: xclip/xsel are absent on
+    this box, python3-gi is installed.
 
-    The selection stays owned by THIS process - fine, because the
-    caller is the long-running mcp_server and the paste happens while
-    it is alive. cb.store() additionally asks the clipboard manager to
-    persist it; harmless when no manager runs.
+    Serving a paste requires the selection owner to run Gtk.main() to
+    answer selection requests; the caller (mcp_server, a recipe
+    executor) never runs a GTK main loop, so owning the selection
+    in-process leaves ctrl+v with no data. Instead we spawn an isolated
+    holder child that owns the selection and spins Gtk.main(). The 120s
+    self-TTL covers a recipe's paste window; consecutive calls SIGTERM
+    the previous holder and replace it.
     """
-    import gi
-
-    # Gdk must be pinned too: the from-import resolves Gdk first and
-    # unversioned, so the host default (4.0) wins and breaks the Gtk pin.
-    gi.require_version("Gtk", "3.0")
-    gi.require_version("Gdk", "3.0")
-    from gi.repository import Gdk, Gtk
-
-    os.environ.setdefault("DISPLAY", ENV["DISPLAY"])
-    os.environ.setdefault("XAUTHORITY", ENV["XAUTHORITY"])
-    Gtk.init([])
-    cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-    cb.set_text(str(text), -1)
-    cb.store()
+    global _clip_holder
+    if _clip_holder is not None:
+        try:
+            _clip_holder.send_signal(signal.SIGTERM)
+        except OSError:
+            pass
+    _clip_holder = subprocess.Popen(
+        [sys.executable, "-c", _HOLDER_SRC, str(text)],
+        env=ENV,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    time.sleep(0.3)  # let the holder claim ownership before the next ctrl+v
 
 
 def wait_for_image(template_path, timeout=10, confidence=0.85):
