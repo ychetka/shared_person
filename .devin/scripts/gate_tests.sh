@@ -98,6 +98,45 @@ echo z > docs/y.md && git add docs/y.md
 "$SHIP" "$CYR_MSG" >"$SCRATCH/out" 2>&1; expect T7-hygiene 2 $? "HYGIENE_GATE"
 git reset -q
 
+# --- T10: a negated/prose rollback mention is NOT a marker.
+# '-- no rollback needed' is prose after the comment marker, and a
+# column literally named 'countdown' only contains the 'down'
+# substring - neither anchors a rollback section.
+printf 'CREATE TABLE c(countdown int);\n-- no rollback needed\n' > db/migrations/004_prose.sql
+git add db/migrations/004_prose.sql
+"$GATE" >"$SCRATCH/out" 2>&1; expect T10a-gate-rejects-prose 1 $? "MIGRATION GATE FAIL"
+"$SHIP" "prose migration" >"$SCRATCH/out" 2>&1; expect T10b-ship-block 3 $? "MIGRATION_GATE"
+git reset -q
+
+# --- T11: a roll-forward note that does NOT name the staged file
+# covers nothing - the note must enumerate the file it authorizes.
+mkdir -p "$SCRATCH/devin"
+printf 'roll-forward approved: db/migrations/other.sql\n' > "$SCRATCH/devin/migration_rollforward.md"
+printf 'CREATE TABLE r(id int);\n' > db/migrations/004_up.sql
+git add db/migrations/004_up.sql
+"$GATE" >"$SCRATCH/out" 2>&1; expect T11a-note-mismatched 1 $? "MIGRATION GATE FAIL"
+"$SHIP" "rollforward migration" >"$SCRATCH/out" 2>&1; expect T11b-ship-block 3 $? "MIGRATION_GATE"
+git reset -q
+
+# --- T12: the note covering the file's exact repo-relative path
+# authorizes the roll-forward - gate verifies, ship commits.
+printf 'roll-forward approved: db/migrations/004_up.sql\n' > "$SCRATCH/devin/migration_rollforward.md"
+git add db/migrations/004_up.sql
+"$GATE" >"$SCRATCH/out" 2>&1; expect T12a-note-covers 0 $? "roll-forward"
+"$SHIP" "rollforward migration" >"$SCRATCH/out" 2>&1; expect T12b-commit-ok 0 $?
+rm -f "$SCRATCH/devin/migration_rollforward.md"
+
+# --- T13: scope gate inspects the OLD path of a rename too -
+# renaming 'outside/secret.md' to 'docs/ok.md' cannot smuggle
+# out-of-whitelist content into an allowed path.
+echo 'docs/' > "$SCRATCH/devin/scope_whitelist.txt"
+mkdir -p outside && echo secret > outside/secret.md
+git add outside/secret.md && git -c user.email=t@t -c user.name=t commit -qm "seed outside file"
+git mv outside/secret.md docs/ok.md
+"$SHIP" "rename smuggle" >"$SCRATCH/out" 2>&1; expect T13-rename-scope 2 $? "SCOPE_GATE"
+git reset -q --hard HEAD 2>/dev/null || git reset -q
+rm -f "$SCRATCH/devin/scope_whitelist.txt"
+
 echo "---"
 echo "gate_tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

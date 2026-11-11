@@ -13,10 +13,12 @@
 #      a bare keyword anywhere (a 'no rollback' remark, a column
 #      named 'countdown') does NOT qualify, or
 #   c) an approved roll-forward note exists at
-#      .devin/migration_rollforward.md AND names this migration's
-#      filename or full relative path (the note must enumerate the
-#      specific migration files it authorizes - a blanket note
-#      covers nothing)
+#      .devin/migration_rollforward.md AND lists this migration's
+#      exact repo-relative path (e.g. 'db/migrations/001_up.sql')
+#      as a whole line or a whitespace-delimited token - the note
+#      must enumerate the specific migration files it authorizes;
+#      a blanket note, and a bare-basename or substring mention
+#      ('001_a.sql' inside '0001_a.sql'), cover nothing
 #
 # Optional: if .devin/project.json declares a native dry-run
 # entrypoint under "migration_dry_run_cmd", it is executed in a
@@ -89,11 +91,12 @@ for f in "${staged[@]}"; do
   if [ -z "$covered" ] && git show ":$f" 2>/dev/null | grep -qiE "$ROLLBACK_RE"; then
     covered="embedded rollback section"
   fi
-  # c) approved roll-forward note that explicitly names THIS
-  #    migration (basename or full relative path) - a blanket note
-  #    that does not enumerate files authorizes nothing.
+  # c) approved roll-forward note that lists THIS migration's exact
+  #    repo-relative path as a whole line or whitespace-delimited
+  #    token (-wF: substring matches like '001_a.sql' inside
+  #    '0001_a.sql' do NOT bind).
   if [ -z "$covered" ] && [ -s "$DEVIN_DIR/migration_rollforward.md" ] \
-     && grep -qF "$(basename "$f")" "$DEVIN_DIR/migration_rollforward.md"; then
+     && grep -qwF -- "$f" "$DEVIN_DIR/migration_rollforward.md"; then
     covered="approved roll-forward (.devin/migration_rollforward.md)"
   fi
   if [ -z "$covered" ]; then
@@ -108,9 +111,16 @@ done
 # Optional native dry-run, only via the project-declared command in
 # .devin/project.json ("migration_dry_run_cmd"). The environment is
 # caller-controllable, so a DRY_RUN_CMD env var is never honored.
+# Fail closed: an existing but unreadable/malformed project.json is
+# an error, not a silent skip - a corrupted manifest must not weaken
+# the gate. Absent file = no dry-run declared, skip as before.
 DRY_RUN_CMD=""
-[ -f "$DEVIN_DIR/project.json" ] && \
-  DRY_RUN_CMD=$(python3 -c "import json;print(json.load(open('$DEVIN_DIR/project.json')).get('migration_dry_run_cmd','') or '')" 2>/dev/null || true)
+if [ -f "$DEVIN_DIR/project.json" ]; then
+  if ! DRY_RUN_CMD=$(python3 -c "import json;print(json.load(open('$DEVIN_DIR/project.json')).get('migration_dry_run_cmd','') or '')" 2>/dev/null); then
+    echo "MIGRATION GATE FAIL: $DEVIN_DIR/project.json exists but is not valid JSON" >&2
+    exit 1
+  fi
+fi
 if [ -n "$DRY_RUN_CMD" ]; then
   # GNU coreutils 'timeout' or its BSD/gnu-getopt twin 'gtimeout'.
   TIMEOUT_BIN=$(command -v timeout || command -v gtimeout || true)
