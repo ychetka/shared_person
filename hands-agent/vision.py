@@ -21,7 +21,10 @@ ENV["DISPLAY"] = os.environ.get("HANDS_DISPLAY", ":1")
 ENV["XAUTHORITY"] = os.environ.get("HANDS_XAUTHORITY", os.path.expanduser("~/.Xauthority"))
 
 # mean gray level below which a capture counts as "black" - Xwayland
-# under Wayland can return exit 0 with an all-black frame
+# under Wayland can return exit 0 with an all-black frame. A legit dark
+# fullscreen (dark terminal/video) can false-positive this check and
+# trigger the fallback chain unnecessarily; acceptable here since
+# hands-agent shots target browser content
 _BLACK_MEAN = 5
 
 
@@ -37,8 +40,10 @@ def _gnome_screenshot(path):
     if not exe:
         return False
     try:
-        subprocess.run([exe, "-f", path], check=True, capture_output=True)
-    except subprocess.CalledProcessError:
+        subprocess.run([exe, "-f", path], check=True, capture_output=True, timeout=15)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        # a pending portal permission dialog must not wedge the chain -
+        # treat a timeout like a failure and let CDP take over
         return False
     return not _is_black(path)
 
@@ -48,9 +53,11 @@ def _cdp_screenshot(path):
     page target - read-only inspection per project policy, never an
     action. /json/list exposes no visibility flag, so 'first page
     target' is the closest available proxy for the visible tab."""
-    import cdp
-
     try:
+        # lazy import inside the try - an ImportError must advance the
+        # fail-closed chain like any other CDP failure, not escape it
+        import cdp
+
         pages = [t for t in cdp.targets() if t.get("type") == "page"]
         if not pages:
             return False
