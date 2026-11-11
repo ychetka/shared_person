@@ -62,6 +62,12 @@
 //       fault): a 'skipped'/'enqueue_failed' stamp re-enqueues once
 //       the blocker clears; a settled 'failed' stamp (error, no
 //       reason) NEVER re-arms - the dead-branch guard.
+//   G21 result-shadows-task: done/ holding BOTH pangram-gN.json and
+//       pangram-gN.result.json (the worker always writes the result
+//       then moves the task - alphabetical scan meets the task file
+//       first) -> the task file is consumed WITHOUT classifying and
+//       the sibling result delivers the real label WARN, not an
+//       'inconclusive' first answer.
 //
 // Run:  node tools/check_pangram.js    (exit 0 = all pass)
 
@@ -1083,6 +1089,63 @@ const main = async () => {
         inbox: dirOf(sc2.fakeFs, `${HANDS}/inbox`),
         ai: d2 && d2.ai_check,
       }),
+    );
+  }
+
+  // --- G21 task+result coexist: result file shadows the task file --
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    const text = words(160);
+    seedDraft(sc.fakeFs, "g21", {
+      text,
+      ai_check_pending: {
+        task: "pangram-g21",
+        text_fnv: fnv(text),
+        words: 160,
+        cost: 2,
+        at: new Date().toISOString(),
+      },
+    });
+    // the worker's real on-disk end state: result written first,
+    // task file moved alongside it - the alphabetical scan hands
+    // processArtifact the bare task file FIRST
+    sc.fakeFs.writeFileSync(
+      `${HANDS}/done/pangram-g21.json`,
+      JSON.stringify({ recipe: "pangram_check", params: {} }),
+    );
+    sc.fakeFs.writeFileSync(
+      `${HANDS}/done/pangram-g21.result.json`,
+      JSON.stringify({
+        ok: true,
+        hit_aig: "AI Generated",
+        confidence: "100%",
+        credits_raw: "6 left",
+      }),
+    );
+    await runPoll(sc);
+    const sent = sc.tgCalls.filter((c) => c.method === "sendMessage");
+    check(
+      "G21 shadow: exactly one reply carrying the real label",
+      sent.length === 1 &&
+        /AI-check \(Pangram\): AI Generated 100%.*WARN/.test(String(sent[0].body.text)),
+      JSON.stringify(sent.map((c) => c.body.text)),
+    );
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g21.json`);
+    check(
+      "G21 shadow: ai_check stamped with label, NOT inconclusive",
+      d?.ai_check?.status === "done" &&
+        d.ai_check.label === "AI Generated" &&
+        d.ai_check.confidence === 100 &&
+        !d.ai_check_pending,
+      JSON.stringify(d && d.ai_check),
+    );
+    check(
+      "G21 shadow: both files consumed",
+      sc.fakeFs.existsSync(`${HANDS}/done/pangram-g21.json.consumed`) &&
+        sc.fakeFs.existsSync(`${HANDS}/done/pangram-g21.result.json.consumed`) &&
+        dirOf(sc.fakeFs, `${HANDS}/done`).every((f) => f.endsWith(".consumed")),
+      dirOf(sc.fakeFs, `${HANDS}/done`).join(","),
     );
   }
 
