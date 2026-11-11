@@ -770,16 +770,14 @@ VK credentials mirror sp-publish: cached `state/vk_token.json`,
 is kept in memory for the tick only - sp-publish owns the token file
 and its 0o600 write contract.
 
-### sp-humanizer-eval (schedule, every 2 min - SHIPS INACTIVE)
+### sp-humanizer-eval (schedule, every 2 min - ships active)
 
-Issue #78 humanizer evaluation loop. The spec deploys with
-`"active": false` ON PURPOSE: activating the schedule is a deliberate
-operator step taken when a live eval run is scheduled, never an
-accidental side effect of `deploy_workflow.js` on a fresh volume.
-To run an eval, deploy as usual, then activate the workflow in the
-n8n UI (or flip `active` and `--update` with intent). Leave it
-inactive afterwards - an idle active workflow still ticks every 2
-minutes against the fixture corpus.
+Issue #78 humanizer evaluation loop. Since task 224 the spec deploys
+with `"active": true` - the post-matrix phase expects a live schedule,
+no manual activation step in the n8n UI. Safety is no longer carried
+by the `active` flag but by the backend env knobs: with compose's
+`stub`/`stub` defaults a plain deploy still burns nothing, and the
+deterministic stub scorer/partner runs the whole matrix offline.
 
 Each tick seeds `<chain>__<tier>-<lang>.json` run records under
 `state/humanizer_runs/` for every fixture cell x enabled chain

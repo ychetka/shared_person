@@ -417,7 +417,9 @@ partner's `detector_payload {ai_score, marker_spans[]}` input shape,
 >=150-word fixture cells with parsable `*.spans.json` annotations,
 the `humanizer-seed` lock race guard, cross-backend 'best'
 separation (pangram vs stub scores never compare), the 0-100
-threshold clamp, and the spec shipping `active: false`. Issue #82
+threshold clamp, and the spec shipping `active: true` (task 224 -
+the workflow activates post-matrix while scorer/partner env-gating
+keeps a stub-default deploy inert). Issue #82
 adds the composite `rubric+judge` scorer (blend `max(rubric,
 judge*0.8)`, atomic `scorer_failed` on either leg, judge spans
 unioned into `marker_spans`), the `chain_a`/`stage_a` blind-label
