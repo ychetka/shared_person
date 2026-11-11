@@ -39,6 +39,10 @@
 //       is a per-file terminal drop, not a requeue (issue #58);
 //   S11 a status-less asset GET answer is inconclusive - two in a
 //       row end the poll and the file proceeds to attach.
+//   S9  secret scrub: a registerUpload failure whose error text echoes
+//       the bearer token lands in ledger.media_failed with the token
+//       masked ('***') - the raw LINKEDIN_ACCESS_TOKEN value appears
+//       NOWHERE in the persisted ledger or the result lines.
 //
 // Sandbox contract: the Code node sees require('fs'), $env.NAME and
 // this.helpers.httpRequest - all stubbed here. fs is a small
@@ -768,6 +772,48 @@ const main = async () => {
         pub.media_attached === 1 &&
         pub.media_failed === undefined,
       JSON.stringify({ polls: assetPolls.length, pub }),
+    );
+  }
+
+  // S9: token scrub - a failed registerUpload whose error text echoes
+  // the bearer token is recorded with the token masked. n8n's
+  // httpRequest errors can carry the request config (Authorization
+  // header included) into the message, so the KNOWN_TOKENS mask in
+  // scrub() is the only thing keeping the secret out of the ledger.
+  {
+    const { ledger, results } = await runTick({
+      env: { PUBLISH_SIMULATE: "0" },
+      payload: {
+        id: "d1",
+        platform: "linkedin",
+        post_id: "p1",
+        text: "scrub check [See Fig 2]",
+        media: ["materials/photos/fig1.png", "materials/photos/fig2.png"],
+      },
+      media: MEDIA,
+      regFail: (n) =>
+        n === 2
+          ? Object.assign(
+              new Error(
+                `400 rejected, echoed Bearer ${BASE_ENV.LINKEDIN_ACCESS_TOKEN}`,
+              ),
+              { statusCode: 400 },
+            )
+          : null,
+    });
+    const pub = ledger.find((r) => r && r.status === "published");
+    check(
+      "S9 scrub: dropped file recorded with token masked",
+      !!pub &&
+        Array.isArray(pub.media_failed) &&
+        pub.media_failed.some((m) => m.includes("fig2.png") && m.includes("***")),
+      JSON.stringify(pub && pub.media_failed),
+    );
+    check(
+      "S9 scrub: raw bearer token leaks nowhere observable",
+      !JSON.stringify(ledger).includes(BASE_ENV.LINKEDIN_ACCESS_TOKEN) &&
+        !JSON.stringify(results).includes(BASE_ENV.LINKEDIN_ACCESS_TOKEN),
+      JSON.stringify(pub && pub.media_failed),
     );
   }
 

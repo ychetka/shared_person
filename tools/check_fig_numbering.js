@@ -424,6 +424,7 @@ const main = async () => {
             block: "B2",
             type: "matrix",
             title: "opts",
+            caption: "matrix cap B2",
             dataset: {
               kind: "matrix",
               data: {
@@ -457,6 +458,18 @@ const main = async () => {
         vlines[0].includes("label=opt-a") &&
         vlines[0].includes("values=42|free"),
       JSON.stringify(vlines?.[0]),
+    );
+    check(
+      "S7 dataset visual still sends its caption claim (issue #56)",
+      Array.isArray(vlines) &&
+        vlines[0].includes("columns=speed|cost") &&
+        vlines[0].includes("caption=matrix cap B2"),
+      JSON.stringify(vlines?.[0]),
+    );
+    check(
+      "S7 claim lines bounded at 640 chars incl. head (issue #56)",
+      Array.isArray(vlines) && vlines.every((v) => v.length <= 640),
+      JSON.stringify(vlines && vlines.map((v) => v.length)),
     );
     check(
       "S7 dataset-less image task keeps its caption claim",
@@ -554,9 +567,13 @@ const main = async () => {
       dispatched[0]?.caption_note,
     );
     check(
-      "S9 one perf-summary log line with posts/matched counts",
+      "S9 one perf-summary log line with posts/matched/delivered counts",
       logs.filter((l) => l && l.action === "perf-summary").length === 1 &&
-        logs.some((l) => l && l.action === "perf-summary" && l.posts === 3 && l.matched === 2),
+        logs.some(
+          (l) =>
+            l && l.action === "perf-summary" &&
+            l.posts === 3 && l.matched === 2 && l.delivered === 1,
+        ),
       JSON.stringify(logs.filter((l) => l && l.action === "perf-summary")),
     );
   }
@@ -595,7 +612,11 @@ const main = async () => {
     );
     check(
       "S10 perf-summary log still emitted once",
-      logs.some((l) => l && l.action === "perf-summary" && l.posts === 1 && l.matched === 0),
+      logs.some(
+        (l) =>
+          l && l.action === "perf-summary" &&
+          l.posts === 1 && l.matched === 0 && l.delivered === 0,
+      ),
       JSON.stringify(logs.filter((l) => l && l.action === "perf-summary")),
     );
   }

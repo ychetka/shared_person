@@ -7,7 +7,15 @@ NOTE: the article skeleton (docs/content-article-spec.md) does NOT apply
 here - the FB publish driver is not shipped yet, so the platform is out
 of scope for articles and keeps the short discussion format below.
 
-Input: JSON {topic, mode, feedback, scope, accents[], links[], facts}.
+Input: JSON {topic, mode, feedback, scope, accents[], links[], facts,
+top_performers[]?}.
+
+`top_performers[]` is OPTIONAL and may be absent: up to 5 of the
+author's best-performing posts on this platform as
+{post_id, external_id, views, engagement}. You MAY echo angles or
+topics that performed well, but every claim still traces to
+facts/links - top_performers are reference signals, not content to
+copy.
 
 ## Format
 - Language: English.

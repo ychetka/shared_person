@@ -227,7 +227,11 @@ const check = (name, cond, detail) => {
 const byPlat = (metrics, plat) => metrics.find((r) => r && r.platform === plat);
 
 const main = async () => {
-  // A1: vk + linkedin + facebook candidates in one tick.
+  // one mixed tick covers three scenarios at once: A1 (linkedin
+  // measured via socialActions), the 'facebook' half of A5 (explicit
+  // unsupported verdict, zero calls - the 'fb' alias half runs in its
+  // own tick below) and A6 (vk regression, unsupported counter,
+  // perf_summary write).
   {
     const { calls, metrics, status, perf, out } = await runTick({
       events: [
@@ -264,7 +268,7 @@ const main = async () => {
     );
     const fb = byPlat(metrics, "facebook");
     check(
-      "A1 facebook explicit unsupported verdict, zero fb calls",
+      "A5 facebook explicit unsupported verdict, zero fb calls",
       fb &&
         fb.status === "unsupported" &&
         fb.error === "no facebook api creds (meta app pending)" &&
@@ -273,7 +277,7 @@ const main = async () => {
     );
     const vk = byPlat(metrics, "vk");
     check(
-      "A1 vk still measured (regression)",
+      "A6 vk still measured (regression)",
       vk &&
         vk.status === "measured" &&
         vk.views === 1000 &&
@@ -283,19 +287,19 @@ const main = async () => {
       JSON.stringify(vk),
     );
     check(
-      "A1 status.json counts: 2 measured, 1 unsupported",
+      "A6 status.json counts: 2 measured, 1 unsupported",
       status && status.measured === 2 && status.unsupported === 1 && status.errors === 0,
       JSON.stringify(status),
     );
     check(
-      "A1 perf_summary written with the measured posts",
+      "A6 perf_summary written with the measured posts",
       perf &&
         Array.isArray(perf.posts) &&
         perf.posts.length === 2 &&
         perf.posts.some((r) => r.platform === "linkedin" && r.engagement === 9),
       JSON.stringify(perf),
     );
-    check("A1 tick output not failed", out?.[0]?.json?.ok === true, JSON.stringify(out));
+    check("A6 tick output not failed", out?.[0]?.json?.ok === true, JSON.stringify(out));
   }
 
   // A2: no LINKEDIN_ACCESS_TOKEN - every linkedin id is an explicit
