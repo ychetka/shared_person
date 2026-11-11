@@ -11,8 +11,8 @@ not built.
 
 ## 1. Current state `[RUNNING]`
 
-hands-agent lives inside this repository at `code/hands-agent/`. It
-is a single-host, single-session desktop automation engine:
+hands-agent lives inside this repository at `hands-agent/` (repo
+root). It is a single-host, single-session desktop automation engine:
 
 - `mcp_server.py` - MCP stdio server exposing tools (`screenshot`,
   `click`, `type_text`, `find`, `locate`, `run_recipe`, `dom_text`,
@@ -123,8 +123,9 @@ Session container reference composition:
 |---|---|
 | `POST /leases` | `{director, recipe_set?, proxy_profile?, account_profile?, ttl_s}` -> `{lease_id, session_handle, expires_at}` |
 | `DELETE /leases/{id}` | release; container reclaimed |
-| `POST /leases/{id}/renew` | extend TTL |
-| `POST /leases/{id}/tasks` | `{recipe, params}` -> `{task_id}` (or 429) |
+| `POST /leases/{id}/renew` | extend TTL, bounded by a server-enforced max lease lifetime (`max_lease_lifetime_s`, e.g. 8h) measured from lease creation; renewals past the cap return `409 lease_expired` and the reaper still reclaims on schedule |
+| `POST /leases/{id}/tasks` | `{task_id, recipe, params}` -> `{task_id}` (or 429). `task_id` is client-supplied and doubles as the idempotency key: the server dedupes on `(lease_id, task_id)` - a retry of the same submission returns the original task record (`200`, not a second execution); a `task_id` already used with a different payload is rejected `409 task_id_conflict`. This makes submit-retry safe across timeouts and 5xx. |
+| `POST /leases/{id}/webhooks` | register a callback URL for task-state events (`task.done`, `task.failed`, `task.cancelled`); deliveries carry `{task_id, status, result_ref}` and are signed per director |
 | `GET /leases/{id}/tasks/{task_id}` | status + result (same shape as `<task_id>.result.json`) |
 | `DELETE /leases/{id}/tasks/{task_id}` | cancel |
 | `GET /leases/{id}/artifacts` | list/download screenshots + logs |
@@ -148,7 +149,7 @@ Session container reference composition:
 |---|---|
 | Privilege | Session containers run non-root; `no-new-privileges`; drop all caps. Browser sandbox needs either `--no-sandbox` (inside the already-isolated container, acceptable) or a seccomp profile - never run privileged for it. |
 | Docker socket | **The host Docker socket is NEVER mounted into session containers.** Container lifecycle is owned by the fleet API on the host only. |
-| Secrets | Broker pattern: secrets (account passwords, TOTP seeds, API keys like `GEMINI_API_KEY`) live in a secrets store; the API injects them into the container env/mount at lease start. Task payloads NEVER carry secrets - recipes reference a logical `secret_ref` resolved at injection time. |
+| Secrets | Broker pattern: secrets (account passwords, TOTP seeds, API keys like `GEMINI_API_KEY`) live in a secrets store; the API mounts them into the container as read-only secret files (e.g. tmpfs `/run/secrets/<secret_ref>`) at lease start. Mounted files are preferred over env injection: env values leak via `docker inspect` and `/proc/<pid>/environ`, files do not. Task payloads NEVER carry secrets - recipes reference a logical `secret_ref` resolved at injection time. |
 | Resources | `memory` limit, `pids_limit`, `shm_size` (browsers die at default 64MB shm - plan >= 512MB), CPU quota, `init: true`, tmpfs `/tmp`. |
 | Mounts | Engine + recipes read-only inside the image; only `/state` and the artifact dir writable; media inputs mounted read-only (the current `../materials:ro` pattern generalizes). |
 | Network | Session containers on an isolated bridge; only egress + API callback allowed; no inbound except the loopback control channel via the API. |
@@ -197,8 +198,8 @@ Two adapter modes during migration:
 
 | Mode | How it works | For |
 |---|---|---|
-| (a) File adapter | A fleet-side adapter process polls the SAME `inbox/` dirs (bind-mounted into the adapter, not the session containers) and submits through the lease API internally, writing results back to `done|failed/`. n8n sees zero change. | Existing n8n workflows (habr publish, pangram gate) |
-| (b) HTTP consumer | New consumers call `POST /leases` + `POST /tasks` directly, get results via `GET` or webhook. | New directors, sp-publish v2 |
+| (a) File adapter | A fleet-side adapter process polls the SAME `inbox/` dirs (bind-mounted into the adapter, not the session containers) and submits through the lease API internally, writing results back to `done|failed/`. Identity + correlation are explicit: each queue root is bound to one director (per-director `queue/` dir + adapter credential), so the adapter authenticates as that director and acquires/releases leases on its behalf; the inbox filename `<task_id>.json` is forwarded as the client-supplied `task_id` on `POST /leases/{id}/tasks`, and the adapter keeps a `{task_id -> (lease_id, task_id)}` journal so retries dedupe and results land back under the same id. n8n sees zero change. | Existing n8n workflows (habr publish, pangram gate) |
+| (b) HTTP consumer | New consumers call `POST /leases` + `POST /tasks` directly, get results via `GET` or a registered webhook (`POST /leases/{id}/webhooks`, see 3.2). | New directors, sp-publish v2 |
 
 Recipe portability: recipes stay YAML, same DSL; the recipe set is
 versioned in the session image (or mounted per director), so
