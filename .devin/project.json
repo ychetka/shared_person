@@ -1,0 +1,10 @@
+{
+  "text_language": "en",
+  "cyrillic_paths": [
+    ".devin/agents/",
+    "docs/patches/",
+    "controller-manager/",
+    "fixtures/humanizer/",
+    "prompts/"
+  ]
+}
