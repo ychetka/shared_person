@@ -111,7 +111,10 @@ def set_clipboard(text):
     """
     import gi
 
+    # Gdk must be pinned too: the from-import resolves Gdk first and
+    # unversioned, so the host default (4.0) wins and breaks the Gtk pin.
     gi.require_version("Gtk", "3.0")
+    gi.require_version("Gdk", "3.0")
     from gi.repository import Gdk, Gtk
 
     os.environ.setdefault("DISPLAY", ENV["DISPLAY"])
