@@ -93,8 +93,10 @@ def main():
         "source": "tools/learn_voice.py over "
         "fixtures/humanizer/clean_human/{en,ru}.txt - the "
         "only committed, verifiably human-authored corpus "
-        "in the repo (docs/prompts are agent prose, "
-        "context/ is gitignored)",
+        "in the repo (fixtures/humanizer/real_draft is the "
+        "author's own pipeline draft - human-reviewable "
+        "artifact, not human-authored; docs/prompts are "
+        "agent prose, context/ is gitignored)",
         "use": "flat_for_you = stdev_words < rhythm.stdev_words * "
         "FLAT_FOR_YOU (vendored nomisread convention)",
     }

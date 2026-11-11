@@ -304,21 +304,32 @@ if LIVE:
         scores = {t: verdicts[t]["score"] for t in TIERS}
         # Hard fail only on the FLUENCY axis the judge exists to catch:
         # broken_fluency is genuinely broken grammar and MUST score
-        # strictly worse than clean_human. The slop ordering
-        # (clean_human < borderline < ai_flop) is a WARNING, not a
-        # fail: slop can be perfectly fluent, so a live model that
-        # scores ai_flop at or below clean_human is reporting a legit
-        # fluency outcome - treat it as a drift signal only.
+        # strictly worse than clean_human. The full ordering
+        # (clean_human < borderline < ai_flop < broken_fluency) is a
+        # WARNING, not a fail: slop can be perfectly fluent, so a live
+        # model that scores ai_flop at or below clean_human is
+        # reporting a legit fluency outcome - but a judge that also
+        # ranks slop at-or-worse than broken grammar has lost the
+        # fluency axis entirely, so the whole 4-way order is the drift
+        # signal.
         check(
             "J4 live: broken_fluency scores strictly worse than clean_human",
             scores["broken_fluency"] > scores["clean_human"],
             scores,
         )
-        if not scores["clean_human"] < scores["borderline"] < scores["ai_flop"]:
+        if not (
+            scores["clean_human"]
+            < scores["borderline"]
+            < scores["ai_flop"]
+            < scores["broken_fluency"]
+        ):
             print(
-                "warn J4 live: strict order clean < borderline < ai_flop "
-                f"not held - slop can be fluent, treat as drift "
-                f"signal not failure: {scores}"
+                "warn J4 live: strict 4-way order clean < borderline "
+                "< ai_flop < broken_fluency not held - slop can be "
+                "fluent so slop-tier inversions are legit drift, but a "
+                "judge ranking slop at-or-worse than broken grammar is "
+                "blind on its own axis: "
+                f"{scores}"
             )
 else:
     verdicts = run_tiers(judge_mock)
