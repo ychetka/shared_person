@@ -5,6 +5,15 @@ Source of truth: `ai_controller/controller-manager/harness.md`
 (orchestration project); this file carries the sections adopted by
 this repository.
 
+> **Scope note:** this file carries ONLY the adopted "director
+> session model" section below. Sections NOT carried over -
+> including the step-state spec (referenced elsewhere as
+> "harness.md, section 9"), the `failure_class` enum, G/W/T
+> conventions, escalation ladders and the full two-committee
+> cycle - remain authoritative at
+> `ai_controller/controller-manager/harness.md`. Any reference to
+> a section absent from this file resolves there, not here.
+
 ## Director session model (event-driven, approved 2026-11-11)
 
 A worker session is the project director: it does not write code

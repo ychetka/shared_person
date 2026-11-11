@@ -14,23 +14,24 @@ allowed-tools:
 # ПОРЯДОК ДЕЙСТВИЙ
 
 1. Подготовьте доступ ревьювера:
-   * ЖЁСТКОЕ ПРАВИЛО: вместо `gh` ВСЕГДА вызывайте wrapper `/home/alexandr/projects/myself_code_review/bin/gh-askon` — он сам загружает токен ревьювера и выполняет команду от ASKON-1989. Каждый exec — новый шелл: переменные, экспортированные в одном вызове, в следующем уже пусты, поэтому `GH_TOKEN=... gh` через переменную НЕНАДЁЖНО и запрещено. Голый `gh` уйдёт от сохранённой учётки (ychetka) — это недопустимо.
-   * Проверьте личность до любой публикации: `/home/alexandr/projects/myself_code_review/bin/gh-askon api user --jq .login` — обязано вернуть `ASKON-1989`. Иначе немедленно верните родителю ошибку «токен ревьювера недоступен», ничего не публикуйте.
+   * ЖЁСТКОЕ ПРАВИЛО: вместо `gh` ВСЕГДА вызывайте wrapper `gh-askon` — он сам загружает токен ревьювера и выполняет команду от ASKON-1989. Каждый exec — новый шелл: переменные, экспортированные в одном вызове, в следующем уже пусты, поэтому `GH_TOKEN=... gh` через переменную НЕНАДЁЖНО и запрещено. Голый `gh` уйдёт от сохранённой учётки (ychetka) — это недопустимо.
+   * Разрешите путь к wrapper в первом же exec: сначала `$GH_ASKON_BIN` из окружения, при его отсутствии — канонический путь `/home/alexandr/projects/myself_code_review/bin/gh-askon`. Если не существует ни переменная, ни файл — немедленно верните родителю ошибку «токен ревьювера недоступен» (reviewer token unavailable), ничего не выполняйте. Проверка: `[ -n "${GH_ASKON_BIN:-}" ] && [ -x "$GH_ASKON_BIN" ] || GH_ASKON_BIN=/home/alexandr/projects/myself_code_review/bin/gh-askon; [ -x "$GH_ASKON_BIN" ] || { echo 'reviewer token unavailable'; exit 1; }`. Все упоминания «wrapper»/«gh-askon» ниже означают `$GH_ASKON_BIN`.
+   * Проверьте личность до любой публикации: `$GH_ASKON_BIN api user --jq .login` — обязано вернуть `ASKON-1989`. Иначе немедленно верните родителю ошибку «токен ревьювера недоступен», ничего не публикуйте.
 2. Извлеките метаданные PR:
-   `/home/alexandr/projects/myself_code_review/bin/gh-askon pr view <URL> --json number,title,body,author,headRefOid,baseRefName,headRepository`
+   `$GH_ASKON_BIN pr view <URL> --json number,title,body,author,headRefOid,baseRefName,headRepository`
    По `title`/`body` PR и связанному issue определите язык задачи — на нём целиком пишется всё ревью (сводка и инлайн-комментарии). Язык этого промпта (русский) НЕ является языком ревью.
 2.1. Если в задаче передан контекстный пакет (двухкомитетный цикл): примите его как спецификацию проверки — текст пункта roadmap с критериями и G/W/T-сценариями, путь к контракту в репо, белый список файлов, выжимку kb_rules, предыдущий вердикт. Контракт читайте сами из репозитория по указанному пути, не полагайтесь на инлайн-копию. При повторном ревью проверяйте дельту к предыдущему вердикту.
-3. Получите diff: `/home/alexandr/projects/myself_code_review/bin/gh-askon pr diff <URL>`
+3. Получите diff: `$GH_ASKON_BIN pr diff <URL>`
 4. Определите стек проекта по манифестам и конфигам репозитория (`package.json`, `go.mod`, `pom.xml`/`build.gradle`, `requirements.txt`/`pyproject.toml`, `Cargo.toml`, `*.csproj` и т.п.) и линтер-конфигам. Применяйте идиомы и соглашения конкретного стека поверх универсальных правил ниже.
 5. Соберите контекст изменённых файлов по head-версии PR:
-   * Если репозиторий есть в текущем workspace — переключитесь на ветку PR (`/home/alexandr/projects/myself_code_review/bin/gh-askon pr checkout <URL>` или `git fetch origin pull/<N>/head && git checkout FETCH_HEAD`) и читайте файлы с диска.
-   * Если репозитория нет — читайте файлы через `/home/alexandr/projects/myself_code_review/bin/gh-askon api repos/{owner}/{repo}/contents/{path}?ref={headRefOid}` или склонируйте во временный каталог.
+   * Если репозиторий есть в текущем workspace — переключитесь на ветку PR (`$GH_ASKON_BIN pr checkout <URL>` или `git fetch origin pull/<N>/head && git checkout FETCH_HEAD`) и читайте файлы с диска.
+   * Если репозитория нет — читайте файлы через `$GH_ASKON_BIN api repos/{owner}/{repo}/contents/{path}?ref={headRefOid}` или склонируйте во временный каталог.
    * Перед замечанием по подозрительному месту проверьте остальной репозиторий: возможно, проблема уже решена обёрткой, мидлварой или соглашением проекта.
 5.1. Если diff задевает trigger-области из шапки `docs/CODING_HAZARDS.md` (async/события, внешние вызовы, транзакции/миграции, финансовая арифметика, метки времени, запросы/кэши, ошибки, доступ по ID, секреты, внешние API/зависимости) — прочитайте `docs/REVIEW_HAZARDS.md` репозитория и примените его независимые проверки.
 6. Проведите ревью строго по правилам ниже.
    * При наличии контекстного пакета — применяйте правила разделов 0.2 и 0.3 и дополнительно проверяйте: тесты и реализация идут в одном коммите; межпунктовая согласованность (пункты ветки не ломают друг друга). Пакета нет — эти проверки пропускаются.
 7. Опубликуйте результат ОДНИМ PR review от ASKON-1989 с инлайн-комментариями к конкретным строкам кода (как это делает Copilot). Сформируйте `review.json` и отправьте:
-   `/home/alexandr/projects/myself_code_review/bin/gh-askon api -X POST repos/{owner}/{repo}/pulls/{N}/reviews --input review.json`
+   `$GH_ASKON_BIN api -X POST repos/{owner}/{repo}/pulls/{N}/reviews --input review.json`
    Формат review.json:
    ```json
    {
@@ -51,8 +52,8 @@ allowed-tools:
    * Если POST вернул 422 (невалидная позиция) — уберите проблемный комментарий из массива, перенесите его текст в `body` и повторите запрос. Замечания терять нельзя.
    Маппинг вердикта из «Итога»: `APPROVE` → `APPROVE`, `APPROVE WITH COMMENTS` → `APPROVE` (неблокирующие замечания остаются в body и инлайн-комментариях), `REQUEST CHANGES` → `REQUEST_CHANGES`. Event `COMMENT` допустим только как ПРОМЕЖУТОЧНЫЙ исход без вердикта - уточняющие вопросы автору, метки [UNCERTAIN], частичное ревью; он НЕ является терминальным вердиктом и не закрывает цикл: после ответа/доработок следует финальный проход с `APPROVE` или `REQUEST_CHANGES`. Если по итогам проверки вердикт выносим - публикуем `APPROVE`/`REQUEST_CHANGES`, а не COMMENT: branch protection засчитывает только APPROVED.
 7.1. Уборка устаревших вердиктов (обязательно при повторном ревью): если ваш новый вердикт — `APPROVE` (все находки сняты или остались только minor), снимите свои прежние `CHANGES_REQUESTED` на этом PR, чтобы в интерфейсе не висел устаревший запрос изменений. Проверьте свои ревью и отзовите каждое со статусом CHANGES_REQUESTED:
-   `/home/alexandr/projects/myself_code_review/bin/gh-askon api -X PUT repos/{owner}/{repo}/pulls/{N}/reviews/{review_id}/dismissals -f message="Superseded by re-review"`
-   Список своих ревью: `/home/alexandr/projects/myself_code_review/bin/gh-askon api repos/{owner}/{repo}/pulls/{N}/reviews --jq '.[] | select(.user.login=="ASKON-1989") | {id, state}'`. Отзываются ТОЛЬКО ревью от ASKON-1989 и только когда новый вердикт не REQUEST_CHANGES.
+   `$GH_ASKON_BIN api -X PUT repos/{owner}/{repo}/pulls/{N}/reviews/{review_id}/dismissals -f message="Superseded by re-review"`
+   Список своих ревью: `$GH_ASKON_BIN api repos/{owner}/{repo}/pulls/{N}/reviews --jq '.[] | select(.user.login=="ASKON-1989") | {id, state}'`. Отзываются ТОЛЬКО ревью от ASKON-1989 и только когда новый вердикт не REQUEST_CHANGES.
 8. Верните родителю краткий отчёт: вердикт, количество замечаний по уровням, ссылка на опубликованный review.
 
 # ПРАВИЛА РЕВЬЮ

@@ -45,7 +45,13 @@ if [ -f "$WL" ]; then
     done < "$WL"
     [ "$ok" -eq 0 ] && bad="$bad$f"$'\n'
   done <<EOF
-$(git diff --cached --name-only)
+$(git diff --cached --name-status | awk '{
+  # name-status emits "STATUS<TAB>path" and, for renames/copies,
+  # "R100<TAB>old<TAB>new" - print EVERY path field so the old path
+  # of a rename cannot smuggle out-of-whitelist content into an
+  # allowed one (name-only would show just the new path).
+  for (i = 2; i <= NF; i++) print $i
+}')
 EOF
   if [ -n "$bad" ]; then
     echo "SCOPE_GATE: staged files outside $WL:" >&2

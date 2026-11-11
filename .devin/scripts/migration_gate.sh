@@ -7,16 +7,23 @@
 # production database. It only verifies that for every staged
 # migration file one of these holds:
 #   a) a paired rollback path is staged (down/undo/rollback file), or
-#   b) the file itself contains a rollback/downgrade section
-#      (down|undo|rollback|revert|downgrade), or
+#   b) the file itself contains a rollback/downgrade section MARKER:
+#      a comment-style line anchored at line start
+#      (--|#|// followed by down|undo|rollback|revert|downgrade) -
+#      a bare keyword anywhere (a 'no rollback' remark, a column
+#      named 'countdown') does NOT qualify, or
 #   c) an approved roll-forward note exists at
-#      .devin/migration_rollforward.md (human-approved, contains the
-#      justification for going forward-only)
+#      .devin/migration_rollforward.md AND names this migration's
+#      filename or full relative path (the note must enumerate the
+#      specific migration files it authorizes - a blanket note
+#      covers nothing)
 #
-# Optional: if the project provides a native dry-run entrypoint via
-# DRY_RUN_CMD env var, it is executed in a subshell with a timeout —
-# it must be the project's own manifest-declared command, never an
-# ad-hoc production command.
+# Optional: if .devin/project.json declares a native dry-run
+# entrypoint under "migration_dry_run_cmd", it is executed in a
+# subshell with a timeout - it must be the project's own
+# manifest-declared command, never an ad-hoc production command.
+# The command is read ONLY from project.json, never from the
+# environment (env vars are caller-controllable).
 #
 # Usage: migration_gate.sh [--check]   # --check: verify only, no stamp
 # Exit: 0 verified (stamp written unless --check), 1 violations found.
@@ -55,8 +62,11 @@ if [ ${#staged[@]} -eq 0 ]; then
   exit 1
 fi
 
-# Rollback vocabulary, language-neutral heuristic.
-ROLLBACK_RE='downgrade|rollback|revert|\bundo\b|\bdown\b'
+# Rollback section marker, language-neutral heuristic: a comment-
+# style line anchored at line start ("-- rollback:", "# undo:",
+# "// revert:"). A keyword appearing mid-text (e.g. "no rollback",
+# a 'countdown' column) is prose, not a rollback section.
+ROLLBACK_RE='^[[:space:]]*(--|#|//)[[:space:]]*(down|undo|rollback|revert|downgrade)\b'
 
 # Stem of a migration filename: the leading identifier that a paired
 # rollback file must share (001_x <-> 001_y, V2__x <-> U2__y share "2",
@@ -79,8 +89,11 @@ for f in "${staged[@]}"; do
   if [ -z "$covered" ] && git show ":$f" 2>/dev/null | grep -qiE "$ROLLBACK_RE"; then
     covered="embedded rollback section"
   fi
-  # c) approved roll-forward note
-  if [ -z "$covered" ] && [ -s "$DEVIN_DIR/migration_rollforward.md" ]; then
+  # c) approved roll-forward note that explicitly names THIS
+  #    migration (basename or full relative path) - a blanket note
+  #    that does not enumerate files authorizes nothing.
+  if [ -z "$covered" ] && [ -s "$DEVIN_DIR/migration_rollforward.md" ] \
+     && grep -qF "$(basename "$f")" "$DEVIN_DIR/migration_rollforward.md"; then
     covered="approved roll-forward (.devin/migration_rollforward.md)"
   fi
   if [ -z "$covered" ]; then
@@ -92,10 +105,22 @@ for f in "${staged[@]}"; do
 done
 [ $fail -ne 0 ] && exit 1
 
-# Optional native dry-run, only via project-declared command.
-if [ -n "${DRY_RUN_CMD:-}" ]; then
+# Optional native dry-run, only via the project-declared command in
+# .devin/project.json ("migration_dry_run_cmd"). The environment is
+# caller-controllable, so a DRY_RUN_CMD env var is never honored.
+DRY_RUN_CMD=""
+[ -f "$DEVIN_DIR/project.json" ] && \
+  DRY_RUN_CMD=$(python3 -c "import json;print(json.load(open('$DEVIN_DIR/project.json')).get('migration_dry_run_cmd','') or '')" 2>/dev/null || true)
+if [ -n "$DRY_RUN_CMD" ]; then
+  # GNU coreutils 'timeout' or its BSD/gnu-getopt twin 'gtimeout'.
+  TIMEOUT_BIN=$(command -v timeout || command -v gtimeout || true)
+  if [ -z "$TIMEOUT_BIN" ]; then
+    echo "MIGRATION GATE FAIL: dry-run declared but neither 'timeout'" >&2
+    echo "nor 'gtimeout' is available on PATH - cannot bound it" >&2
+    exit 1
+  fi
   echo "running project dry-run: $DRY_RUN_CMD"
-  timeout 120 env DRY_RUN=1 bash -c "$DRY_RUN_CMD" || {
+  "$TIMEOUT_BIN" 120 env DRY_RUN=1 bash -c "$DRY_RUN_CMD" || {
     echo "MIGRATION GATE FAIL: dry-run exited non-zero" >&2; exit 1; }
 fi
 
