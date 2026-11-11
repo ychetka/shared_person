@@ -10,4 +10,4 @@ refs: PR #109, issue #86
 ---
 
 ## Spec impact
-- "-"
+-
