@@ -1,6 +1,6 @@
 {
   "name": "sp-humanizer-eval",
-  "active": false,
+  "active": true,
   "nodes": [
     {
       "parameters": {

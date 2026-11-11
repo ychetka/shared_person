@@ -71,8 +71,8 @@
 //       to a fresh baseline (best-reset-backend trace) instead of a
 //       false 'reverted';
 //   E21 HUMANIZER_THRESHOLD is clamped to the 0-100 score domain;
-//   E22 the workflow spec ships "active": false (deploy never
-//       activates the eval schedule on its own);
+//   E22 the workflow spec ships "active": true (activated post-matrix
+//       in task 224; deploy propagates the eval schedule);
 //   E23 detector_payload contract: the partner input carries
 //       {ai_score, marker_spans:[{text,marker_type,reason}]} - never
 //       the raw last_score blob (checked inside E9);
@@ -1206,8 +1206,8 @@ const main = async () => {
       JSON.stringify(out?.[0]?.json?.threshold),
     );
     check(
-      "E22 deploy: workflow spec ships active:false",
-      spec.active === false,
+      "E22 deploy: workflow spec ships active:true",
+      spec.active === true,
       JSON.stringify(spec.active),
     );
   }
