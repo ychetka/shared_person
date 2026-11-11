@@ -11,7 +11,7 @@ dev_summary: >-
   perf-summary line; render_viz disables mathtext so literal '$$' in
   matrix cells no longer kills chart renders; check_analytics printed
   labels now match their documented scenario ids; writer-fb documents
-  the optional top_performers brief field; check_li_media gains an S9
+  the optional top_performers brief field; check_li_media gains an S12
   bearer-token scrub assertion.
 why: >-
   PR #55 review follow-ups (issue #56): captions on dataset-backed

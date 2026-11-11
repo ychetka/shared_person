@@ -571,8 +571,11 @@ const main = async () => {
       logs.filter((l) => l && l.action === "perf-summary").length === 1 &&
         logs.some(
           (l) =>
-            l && l.action === "perf-summary" &&
-            l.posts === 3 && l.matched === 2 && l.delivered === 1,
+            l &&
+            l.action === "perf-summary" &&
+            l.posts === 3 &&
+            l.matched === 2 &&
+            l.delivered === 1,
         ),
       JSON.stringify(logs.filter((l) => l && l.action === "perf-summary")),
     );
@@ -614,8 +617,7 @@ const main = async () => {
       "S10 perf-summary log still emitted once",
       logs.some(
         (l) =>
-          l && l.action === "perf-summary" &&
-          l.posts === 1 && l.matched === 0 && l.delivered === 0,
+          l && l.action === "perf-summary" && l.posts === 1 && l.matched === 0 && l.delivered === 0,
       ),
       JSON.stringify(logs.filter((l) => l && l.action === "perf-summary")),
     );

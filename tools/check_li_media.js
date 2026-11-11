@@ -39,7 +39,7 @@
 //       is a per-file terminal drop, not a requeue (issue #58);
 //   S11 a status-less asset GET answer is inconclusive - two in a
 //       row end the poll and the file proceeds to attach.
-//   S9  secret scrub: a registerUpload failure whose error text echoes
+//   S12 secret scrub: a registerUpload failure whose error text echoes
 //       the bearer token lands in ledger.media_failed with the token
 //       masked ('***') - the raw LINKEDIN_ACCESS_TOKEN value appears
 //       NOWHERE in the persisted ledger or the result lines.
@@ -775,7 +775,7 @@ const main = async () => {
     );
   }
 
-  // S9: token scrub - a failed registerUpload whose error text echoes
+  // S12: token scrub - a failed registerUpload whose error text echoes
   // the bearer token is recorded with the token masked. n8n's
   // httpRequest errors can carry the request config (Authorization
   // header included) into the message, so the KNOWN_TOKENS mask in
@@ -794,23 +794,21 @@ const main = async () => {
       regFail: (n) =>
         n === 2
           ? Object.assign(
-              new Error(
-                `400 rejected, echoed Bearer ${BASE_ENV.LINKEDIN_ACCESS_TOKEN}`,
-              ),
+              new Error(`400 rejected, echoed Bearer ${BASE_ENV.LINKEDIN_ACCESS_TOKEN}`),
               { statusCode: 400 },
             )
           : null,
     });
     const pub = ledger.find((r) => r && r.status === "published");
     check(
-      "S9 scrub: dropped file recorded with token masked",
+      "S12 scrub: dropped file recorded with token masked",
       !!pub &&
         Array.isArray(pub.media_failed) &&
         pub.media_failed.some((m) => m.includes("fig2.png") && m.includes("***")),
       JSON.stringify(pub && pub.media_failed),
     );
     check(
-      "S9 scrub: raw bearer token leaks nowhere observable",
+      "S12 scrub: raw bearer token leaks nowhere observable",
       !JSON.stringify(ledger).includes(BASE_ENV.LINKEDIN_ACCESS_TOKEN) &&
         !JSON.stringify(results).includes(BASE_ENV.LINKEDIN_ACCESS_TOKEN),
       JSON.stringify(pub && pub.media_failed),
