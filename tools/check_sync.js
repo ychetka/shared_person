@@ -140,6 +140,11 @@ const GROUPS = {
       [/writeJsonAtomic\(DRAFTS \+ '\/' \+ id \+ '\.json', cur\);/, "SAVE;"],
     ],
   },
+  // validateDraftShape light shape gate (issue #69): identical
+  // copies in Handle TG Update, Prepare Draft, Compose Message and
+  // Handle Pangram Results (all sp-tg-moderation) - every draft-file
+  // write path validates before the tmp+rename
+  "draft-shape": { expect: 4 },
   // the guarded-write snapshot comparator: sameDraftSnapshot (an arrow
   // helper in Handle TG Update) vs the inline sameSnapshot const in
   // Compose Message - same field list, different binding names and

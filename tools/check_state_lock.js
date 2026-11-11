@@ -780,6 +780,108 @@ const main = async () => {
     );
   }
 
+  // --- V draft-shape gate: malformed writes die pre-rename --------
+  {
+    // V1: a draft file already missing created_at (corrupt state on
+    // disk) must fail the Approve write at validateDraftShape BEFORE
+    // writeJsonAtomic's rename - the file keeps its old status, no
+    // queue file is enqueued and no tmp debris is left in drafts/
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    seedDraft(sc.fakeFs, "d8");
+    const broken = JSON.parse(sc.fakeFs.readFileSync(`${DRAFTS}/d8.json`, "utf8"));
+    delete broken.created_at;
+    sc.fakeFs.writeFileSync(`${DRAFTS}/d8.json`, JSON.stringify(broken));
+    sc.items = [cbItem("ap:d8:v1", 9401)];
+    await execNode(htuFactory, sc);
+    const d = readJson(sc.fakeFs, `${DRAFTS}/d8.json`);
+    check(
+      "V1 malformed draft: status unchanged (write refused pre-rename)",
+      !!d && d.status === "pending",
+      d && d.status,
+    );
+    check(
+      "V1 malformed draft: no tmp debris in drafts/",
+      sc.fakeFs.readdirSync(DRAFTS).filter((f) => f.includes("d8.json.tmp-")).length === 0,
+    );
+    // deliberate contract: the queue file was already linked BEFORE
+    // the draft save, so on a refused write the publish stays live
+    // and the operator is told 'draft state save failed' - never a
+    // silent corrupt persist, never a silently lost publish
+    const ans = sc.tgCalls.find((c) => c.method === "answerCallbackQuery");
+    check(
+      "V1 malformed draft: operator told the save failed",
+      !!ans && /state save failed/i.test(String(ans.body.text)),
+      ans && ans.body.text,
+    );
+    check(
+      "V1 malformed draft: 'approve-save-failed' logged",
+      logLines(sc.fakeFs).some((l) => l.action === "approve-save-failed"),
+    );
+  }
+  {
+    // V2: a moderation-draft body whose platform is outside the enum
+    // makes Prepare Draft's validateDraftShape throw - the caller gets
+    // the same in-band ok:false answer a write failure produces, and
+    // no malformed file lands in drafts/
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.items = [
+      {
+        json: {
+          headers: { "x-shared-token": BASE_ENV.DRAFT_WEBHOOK_SECRET },
+          body: {
+            draft_id: "d9",
+            platform: "bogus-platform",
+            topic: "t",
+            text: "fresh draft text",
+          },
+        },
+      },
+    ];
+    const out = await execNode(prepFactory, sc);
+    const msg = (out || []).find((i) => i.json && i.json.kind === "msg");
+    check(
+      "V2 malformed draft: in-band ok:false refusal",
+      !!msg && msg.json.ok === false && /malformed|write failed/i.test(String(msg.json.error)),
+      msg && JSON.stringify(msg.json),
+    );
+    check(
+      "V2 malformed draft: refused write did not create a draft file",
+      !sc.fakeFs.existsSync(`${DRAFTS}/d9.json`),
+    );
+    check(
+      "V2 malformed draft: no tmp debris in drafts/",
+      sc.fakeFs.readdirSync(DRAFTS).filter((f) => f.includes("d9")).length === 0,
+    );
+  }
+  {
+    // V3 sanity: a WELL-FORMED moderation-draft still writes - the
+    // gate refuses shape violations only, never valid drafts
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.items = [
+      {
+        json: {
+          headers: { "x-shared-token": BASE_ENV.DRAFT_WEBHOOK_SECRET },
+          body: {
+            draft_id: "d10",
+            platform: "vk",
+            topic: "t",
+            text: "fresh draft text",
+          },
+        },
+      },
+    ];
+    await execNode(prepFactory, sc);
+    const d = readJson(sc.fakeFs, `${DRAFTS}/d10.json`);
+    check(
+      "V3 well-formed draft: file persisted 'delivering'",
+      !!d && d.status === "delivering",
+      d && d.status,
+    );
+  }
+
   if (failures) {
     console.log(`\n${failures} state-lock check(s) failed`);
     process.exit(1);
