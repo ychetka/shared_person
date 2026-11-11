@@ -1195,7 +1195,7 @@ const main = async () => {
     );
   }
 
-  // --- E21 threshold clamp + E22 ships inactive -----------------------
+  // --- E21 threshold clamp + E22 ships active -------------------------
   {
     const sc = mkSc();
     sc.env = { HUMANIZER_THRESHOLD: "250" };

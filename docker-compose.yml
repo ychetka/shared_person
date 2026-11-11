@@ -176,8 +176,9 @@ services:
       - PANGRAM_DAILY_CREDITS=${PANGRAM_DAILY_CREDITS:-}
       # humanizer eval loop (issue #78, sp-humanizer-eval): STUB
       # defaults so a plain deploy burns nothing - the workflow ships
-      # active:false and the deterministic stub scorer/partner runs
-      # the whole matrix offline. HUMANIZER_SCORER=pangram draws on
+      # active:true (task 224, post-matrix) but the deterministic stub
+      # scorer/partner still runs the whole matrix offline unless real
+      # backends are enabled via env. HUMANIZER_SCORER=pangram draws on
       # the shared pangram credits via the hands-queue mount;
       # HUMANIZER_SCORER=rubric (issue #80) scores synchronously via
       # POST $RUBRIC_URL/score on the shared-person-rubric service
