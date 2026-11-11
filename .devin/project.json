@@ -5,6 +5,7 @@
     "docs/patches/",
     "controller-manager/",
     "fixtures/humanizer/",
+    "n8n/workflows/",
     "prompts/"
   ]
 }

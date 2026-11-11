@@ -18,6 +18,16 @@ name: habr_post
 #                 retracts the publication back to drafts and reports
 #                 {retracted:true} (a real boolean - emit passes
 #                 non-string YAML literals through typed)
+#   publish_go  - the publish-arm latch. EVERY step from the CLICK
+#                 BOUNDARY onward is gated on {publish_go}; the DSL
+#                 if-semantics skip on empty/0/false/no and absent
+#                 params format to '', so a task without publish_go
+#                 fills the composer, takes habr_2_filled.png and
+#                 stops = DRY RUN by default (fail-safe direction:
+#                 an absent flag can never publish). The live driver
+#                 (sp-publish Publish Tick) always sends
+#                 publish_go: true; manual proof runs drop the param.
+#                 The result records publish_armed (empty = dry).
 #
 # Result: {ok, url, retracted?, media_attached?, abort_reason?,
 # last_step, publish_step} - url comes from the post-publish location
@@ -38,11 +48,12 @@ name: habr_post
 # result, which is how the driver's operator_escalation classification
 # gets its evidence instead of regexing a generic 'element not found'.
 #
-# HONEST STATUS: this is a scaffold - the composer DOM targets below
-# follow Habr's current RU UI labels but the recipe has NOT been run
-# against a live profile end-to-end. Verify on the desktop browser
-# (DISPLAY :1) before enabling PUBLISH_PLATFORMS+=habr; tune targets
-# with shot evidence the way linkedin_post.yaml was verified.
+# HONEST STATUS: navigation + blocked-surface probes live-verified
+# 2026-11-12 against the real site (the logged-out blk_login probe
+# caught the login wall on /ru/articles/new/ as designed); the
+# composer fill is verified pending a logged-in account. Without
+# publish_go the recipe is a dry-run proof: filled composer, proof
+# shots, never publishes. See docs/habr-driver-spec.md.
 steps:
   # ---------- open the composer ----------
   # article: /ru/articles/new/ gated on {title} (present only for
@@ -196,26 +207,45 @@ steps:
     value: 1
     if: "{image_path}"
   # ---------- PUBLISH CLICK (the boundary) ----------
+  # publish_go latch: an absent/empty flag skips everything from here
+  # on - the run ends as a dry-run proof with a filled composer and
+  # habr_2_filled.png. publish_armed lands in every result (empty =
+  # dry) so the driver/operator can tell an armed run from a dry one.
+  - action: emit
+    key: publish_armed
+    value: "{publish_go}"
   - action: click_dom
     url: habr.com
     target: "Опубликовать"
     marks: publish
+    if: "{publish_go}"
   - action: wait
     seconds: 8
+    if: "{publish_go}"
   - action: shot
     name: habr_3_published.png
+    if: "{publish_go}"
   # ---------- URL read-back (the verification) ----------
   # empty target -> the tab's location.href/document.title
   - action: dom_text
     url: "habr.com"
     into: page
+    if: "{publish_go}"
   - action: emit
     key: url
     value: "{page}"
+    if: "{publish_go}"
   # ---------- test retract (optional) ----------
   # 'unpublish' on Habr = the article's edit menu 'В черновики'
   # (back to drafts). Emit retracted so the driver records
   # test-published-retracted vs test-retract-failed.
+  # Gate note: `test` is only ever sent by the armed driver path -
+  # the dry-run procedure never sets it (there is nothing published
+  # to retract). The DSL `if` has no AND/NOT (concatenated params
+  # are OR, not AND - '{publish_go}{test}' would retract EVERY armed
+  # run), so `{test}` IS the publish-armed condition here; a manual
+  # task that sets test without publish_go can only error this
+  # click on the filled composer - it can never publish.
   - action: click_dom
     url: habr.com
     target: "В черновики"

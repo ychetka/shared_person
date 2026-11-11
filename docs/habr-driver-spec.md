@@ -8,12 +8,19 @@ hub model, karma, moderation tiers, AI-content policy, rate limits)
 are researched in `docs/habr-integration-spec.md`; this spec does NOT
 duplicate them - it defines the driver contract on top of them.
 
-Status: spec (2026-11-08), no implementation. Platform research:
-complete, see docs/habr-integration-spec.md. Headline constraint:
-Habr rule #4 bans generated text, so the TG moderation card is the
-accountable human gate - the driver publishes only card-approved
-text, and the card decision travels with the draft as an explicit
-field, not an implied gate.
+Status: spec + live-verification in progress. Platform research:
+complete, see docs/habr-integration-spec.md. Verification state
+(issue #74): the recipe's front section - composer navigation and
+the blocked-surface probes - was live-verified 2026-11-12 against
+the real site on the audit browser (CDP :9223): the logged-out
+account hit the blk_login probe on `/ru/articles/new/` exactly as
+designed (the composer 404s anonymous users; the login redirect is
+`/kek/v1/auth/...?back=/ru/articles/new/`). Composer fill is
+verified pending a logged-in account - see the dry-run procedure
+in 2.4. Headline constraint: Habr rule #4 bans generated text, so
+the TG moderation card is the accountable human gate - the driver
+publishes only card-approved text, and the card decision travels
+with the draft as an explicit field, not an implied gate.
 
 ## 1. Platform research (pointer, not a copy)
 
@@ -151,10 +158,42 @@ test?, retries?}`.
 Driver drops
 `{"recipe": "habr_post", "params": {"title": ..., "hubs": [...],
 "text_md": ..., "image_path": ..., "media": [...], "kind": ...,
-"tags": [...], "test": bool}}` into `hands-agent/queue/inbox/` - the
+"tags": [...], "test": bool, "publish_go": true}}` into
+`hands-agent/queue/inbox/` - the
 queue contract of habr-integration-spec 2.4, extended with `media[]`
-(inline figures) and `kind`/`test`/`tags` so the recipe does not
-re-derive them. Poller lands the task file in `done/`/`failed/`.
+(inline figures) and `kind`/`test`/`tags`/`publish_go` so the recipe
+does not re-derive them. Poller lands the task file in
+`done/`/`failed/`.
+
+`publish_go` is the recipe's publish-arm latch: every step from the
+publish-click boundary onward (the click itself, post-click
+wait/shot, the URL read-back) is gated on it, and the DSL's
+if-semantics skip on absent/empty/false - so a task WITHOUT
+`publish_go` fills the composer, takes `habr_2_filled.png`, records
+`publish_armed: ""` and stops. Dry run is the default; the flag is
+fail-safe (an absent flag can never publish). The driver only runs
+in the live path, so it always sends `publish_go: true` - the flag
+exists for manual proof runs, not for the driver to decide per-task.
+The `test` retract block stays gated on `{test}`: the DSL `if` has
+no AND (concatenated params are OR - `{publish_go}{test}` would
+retract EVERY armed run), and `test` is only ever sent armed, so
+`{test}` is already the armed+test condition; a dry-run task must
+not set `test` (nothing published exists to retract - it would just
+error the click, never publish).
+
+Manual dry-run procedure (live-verification milestone, issue #74):
+
+1. Drop `{"recipe": "habr_post", "params": {"title": ...,
+   "hubs": [...], "text_md": ..., "kind": "article", ...}}` - NO
+   `publish_go`, NO `test` - into `hands-agent/queue/inbox/`.
+2. The worker runs the front section: navigation shot
+   `habr_0_start.png`/`habr_1_composer.png`, blocked-surface probes
+   (a logged-out or CAPTCHA wall aborts here with `abort_reason`),
+   composer fill, `habr_2_filled.png`.
+3. Collect `queue/done/<task_id>.result.json` plus the shots from
+   `queue/done/`: `publish_armed` empty confirms the run was dry;
+   `last_step` < `publish_step` confirms it stopped before the
+   click boundary.
 
 Result channel (precondition, spec 2.4): on success the worker writes
 `queue/done/<task_id>.result.json` carrying `{"url":
