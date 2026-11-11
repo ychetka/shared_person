@@ -213,7 +213,11 @@ steps:
   # dry) so the driver/operator can tell an armed run from a dry one.
   - action: emit
     key: publish_armed
-    value: "{publish_go}"
+    # `from:` carries the ctx value typed - publish_go: true lands as
+    # JSON true, and an absent key emits '' via the emit default, which
+    # is the documented dry-run marker (value: "{publish_go}" would
+    # format the bool through str() into the string "True").
+    from: publish_go
   - action: click_dom
     url: habr.com
     target: "Опубликовать"

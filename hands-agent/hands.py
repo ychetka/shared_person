@@ -11,6 +11,7 @@ import random
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 ENV = dict(os.environ)
@@ -117,8 +118,11 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk
 
 Gtk.init([])
+# The payload arrives on stdin, not argv: argv is world-visible in
+# /proc/<pid>/cmdline for the holder's whole lifetime and tops out
+# around 128KiB, under large paste bodies.
 cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-cb.set_text(sys.argv[1], -1)
+cb.set_text(sys.stdin.read(), -1)
 cb.store()
 GLib.timeout_add_seconds(120, Gtk.main_quit)  # self-TTL: stale holders die
 Gtk.main()
@@ -146,15 +150,37 @@ def set_clipboard(text):
             _clip_holder.send_signal(signal.SIGTERM)
         except OSError:
             pass
+    # stderr goes to a per-invocation log so a holder that dies during
+    # startup leaves a traceback for postmortem instead of a silent
+    # stale-clipboard paste.
+    err_log = tempfile.NamedTemporaryFile(
+        mode="wb", delete=False, prefix="hands-clip-", suffix=".log"
+    )
     _clip_holder = subprocess.Popen(
-        [sys.executable, "-c", _HOLDER_SRC, str(text)],
+        [sys.executable, "-c", _HOLDER_SRC],
         env=ENV,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=err_log,
         start_new_session=True,
     )
-    time.sleep(0.3)  # let the holder claim ownership before the next ctrl+v
+    # Feed the payload and close stdin BEFORE returning: the child
+    # blocks on sys.stdin.read() until EOF. stdin is nulled so the
+    # SIGTERM-and-replace path above can never double-close it.
+    _clip_holder.stdin.write(str(text).encode())
+    _clip_holder.stdin.close()
+    _clip_holder.stdin = None
+    # Dead-child detection: a holder that crashed during init already
+    # exited by now; without this the next ctrl+v pastes whatever a
+    # previous owner left on CLIPBOARD.
+    for _ in range(3):
+        time.sleep(0.2)
+        rc = _clip_holder.poll()
+        if rc is not None:
+            raise RuntimeError(
+                f"clipboard holder exited at startup (rc={rc}), "
+                f"see {err_log.name}"
+            )
 
 
 def wait_for_image(template_path, timeout=10, confidence=0.85):
