@@ -15,7 +15,8 @@
 #   c) an approved roll-forward note exists at
 #      .devin/migration_rollforward.md AND lists this migration's
 #      exact repo-relative path (e.g. 'db/migrations/001_up.sql')
-#      as a whole line or a whitespace-delimited token - the note
+#      as a whole line or a word-boundary token (bounded by
+#      whitespace or punctuation) - the note
 #      must enumerate the specific migration files it authorizes;
 #      a blanket note, and a bare-basename or substring mention
 #      ('001_a.sql' inside '0001_a.sql'), cover nothing
@@ -92,9 +93,10 @@ for f in "${staged[@]}"; do
     covered="embedded rollback section"
   fi
   # c) approved roll-forward note that lists THIS migration's exact
-  #    repo-relative path as a whole line or whitespace-delimited
-  #    token (-wF: substring matches like '001_a.sql' inside
-  #    '0001_a.sql' do NOT bind).
+  #    repo-relative path as a whole line or a token bounded by
+  #    whitespace or punctuation (grep -wF word-boundary match:
+  #    '001_a.sql' inside '0001_a.sql' does NOT bind, but
+  #    '004_up.sql.bak' DOES bind '004_up.sql').
   if [ -z "$covered" ] && [ -s "$DEVIN_DIR/migration_rollforward.md" ] \
      && grep -qwF -- "$f" "$DEVIN_DIR/migration_rollforward.md"; then
     covered="approved roll-forward (.devin/migration_rollforward.md)"
@@ -116,6 +118,10 @@ done
 # the gate. Absent file = no dry-run declared, skip as before.
 DRY_RUN_CMD=""
 if [ -f "$DEVIN_DIR/project.json" ]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "MIGRATION GATE FAIL: python3 required to read $DEVIN_DIR/project.json" >&2
+    exit 1
+  fi
   if ! DRY_RUN_CMD=$(python3 -c "import json;print(json.load(open('$DEVIN_DIR/project.json')).get('migration_dry_run_cmd','') or '')" 2>/dev/null); then
     echo "MIGRATION GATE FAIL: $DEVIN_DIR/project.json exists but is not valid JSON" >&2
     exit 1
