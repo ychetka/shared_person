@@ -419,6 +419,38 @@ for (const [group, cfg] of Object.entries(GROUPS)) {
   );
 }
 
+// cross-group platform guard (issue #69 review): DRAFT_PLATFORMS
+// inside the draft-shape copies is a fifth spelling of the platform
+// list, living outside the enabled-platforms marker - its token set
+// must equal the enabled-platforms set minus the 'all' fan-out
+// token, so a platform added on either side fails here instead of
+// drifting silently
+{
+  const tok = (b) =>
+    [
+      ...new Set(b.lines.join("\n").match(PLATFORM_TOKEN_RE) || []),
+    ].sort();
+  const ep = blocks.find((b) => b.group === "enabled-platforms");
+  const want = ep ? tok(ep).filter((t) => t !== "all") : [];
+  let drift = 0;
+  for (const m of blocks.filter((b) => b.group === "draft-shape")) {
+    const got = tok(m);
+    if (got.join(",") !== want.join(",")) {
+      console.log(
+        "FAIL draft-shape %s: platform tokens %s != enabled-platforms %s (minus 'all')",
+        m.where,
+        got.join(","),
+        want.join(","),
+      );
+      drift++;
+      bad++;
+    }
+  }
+  if (ep && !drift) {
+    console.log("ok   draft-shape: platform set matches enabled-platforms minus 'all'");
+  }
+}
+
 // a marker group with no GROUPS entry would silently go unchecked -
 // treat it as a failure so new helpers must be registered here
 for (const b of blocks) {

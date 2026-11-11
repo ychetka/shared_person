@@ -881,6 +881,39 @@ const main = async () => {
       d && d.status,
     );
   }
+  {
+    // V4: prototype-chain false positive - DRAFT_PLATFORMS is a plain
+    // object literal, so DRAFT_PLATFORMS['toString'] reads back truthy
+    // from Object.prototype unless the membership test is own-property.
+    // A 'toString' platform value must be refused like any other
+    // out-of-enum value
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.items = [
+      {
+        json: {
+          headers: { "x-shared-token": BASE_ENV.DRAFT_WEBHOOK_SECRET },
+          body: {
+            draft_id: "d11",
+            platform: "toString",
+            topic: "t",
+            text: "fresh draft text",
+          },
+        },
+      },
+    ];
+    const out = await execNode(prepFactory, sc);
+    const msg = (out || []).find((i) => i.json && i.json.kind === "msg");
+    check(
+      "V4 prototype-key platform: in-band ok:false refusal",
+      !!msg && msg.json.ok === false && /malformed|write failed/i.test(String(msg.json.error)),
+      msg && JSON.stringify(msg.json),
+    );
+    check(
+      "V4 prototype-key platform: refused write created no draft file",
+      !sc.fakeFs.existsSync(`${DRAFTS}/d11.json`),
+    );
+  }
 
   if (failures) {
     console.log(`\n${failures} state-lock check(s) failed`);
