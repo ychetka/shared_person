@@ -7,7 +7,7 @@ JSON=$(gh pr view "$PR" --json headRefOid,mergeable,mergeStateStatus,reviews,sta
 HEAD=$(printf '%s' "$JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["headRefOid"])')
 STATE=$(printf '%s' "$JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["state"])')
 APPROVED=$(printf '%s' "$JSON" | python3 -c 'import json,sys;print(any(r["state"]=="APPROVED" for r in json.load(sys.stdin)["reviews"]))')
-BAD=$(printf '%s' "$JSON" | python3 -c 'import json,sys;print([c["name"] for c in json.load(sys.stdin)["statusCheckRollup"] if c.get("conclusion") not in ("SUCCESS","NEUTRAL","SKIPPED",None)])')
+BAD=$(printf '%s' "$JSON" | python3 -c 'import json,sys;print([c["name"] for c in json.load(sys.stdin)["statusCheckRollup"] if c.get("conclusion") not in ("SUCCESS","NEUTRAL","SKIPPED")])')
 if [ "$STATE" != "OPEN" ]; then echo "GATE_BLOCK: pr state=$STATE" >&2; exit 4; fi
 if [ "$HEAD" != "$EXPECTED" ]; then echo "GATE_BLOCK: head $HEAD != expected $EXPECTED" >&2; exit 4; fi
 if [ "$APPROVED" != "True" ]; then echo "GATE_BLOCK: no approving review" >&2; exit 4; fi
@@ -19,4 +19,4 @@ ENTRY=$(bash "$(git rev-parse --show-toplevel)/tools/check_changes_entry.sh" --p
 echo "$ENTRY" | python3 -c 'import json,sys
 sys.exit(0 if json.load(sys.stdin).get("status") == "pass" else 1)' 2>/dev/null \
   || { echo "GATE_BLOCK: missing_changes_entry $ENTRY" >&2; exit 4; }
-gh pr merge "$PR" --squash
+gh pr merge "$PR" --squash --match-head-commit "$EXPECTED"

@@ -50,6 +50,9 @@ jobs:
           npm ci
           npx tsc --noEmit
 
+      - name: Check spec anchors
+        run: bash tools/check_spec_anchors.sh
+
       - name: Check changes entry
         if: github.event_name == 'pull_request'
         env:

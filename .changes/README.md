@@ -5,7 +5,7 @@ slug). Copy `_template.md`, fill the frontmatter, keep the content
 public-safe - this repository is public and these entries feed the
 published CHANGELOG/release notes.
 
-## Enforcement (issue #135)
+## Enforcement (canonical devin-session-bridge issue #135)
 
 The entry is gated, not just conventional: `tools/check_changes_entry.sh`
 runs in the CI lint job on every pull request and as a pre-merge guard
@@ -43,11 +43,12 @@ the previous field's value):
 - `refs`: task IDs, issue/PR numbers, directive or decision links
 
 ADR rule: `type: feat`, `breaking: true`, or a cross-module refactor
-requires a real ADR under `docs/adr/` (see its README). For
+requires a real ADR under `docs/adr/` where that registry exists. For
 fix/docs/chore this file IS the micro-ADR - make `why` carry the
 decision.
 
-Required body section (issue #107, living spec): after the
+Required body section (canonical devin-session-bridge issue #107,
+living spec): after the
 frontmatter, every entry carries `## Spec impact` listing the
 requirement anchors it touches - `adds:` / `modifies:` / `removes:`
 lines of the form `docs/specs/<domain>.md#<requirement-anchor>`, or a
@@ -55,7 +56,7 @@ bare `-` when the change touches no documented behavior. The PR
 applies its own spec delta in the same commit, so at merge time
 `adds:`/`modifies:` anchors resolve in `docs/specs/` and `removes:`
 anchors are gone; `tools/check_spec_anchors.sh` enforces it in the
-CI lint job (and in the orchestration layer's verify gate). Release
+CI lint job in repos that carry a docs/specs registry. Release
 notes and the spec delta come from the same file - no double
 bookkeeping.
 
