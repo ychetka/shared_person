@@ -4,10 +4,12 @@ Decision document for the content pipeline. Question: can AI-generated
 or AI-edited text pass the Pangram AI detector at the moderation gate,
 and which production pattern is viable?
 
-Budget: ~22 calls approved of the 40-call cap; 7 spent in this round
-(plus 18 in earlier stages). All artifacts (variant texts, scan JSON,
-ledger) live in the untracked runtime dir `.devin/pilot_pangram/` —
-corpus-derived texts contain personal writing and are not committed.
+Budget: the approved plan allows spending within the ~22 remaining
+calls of the 40-call cap; 7 were spent in this round (18 were spent
+in earlier pilot stages before this plan). All artifacts (variant
+texts, scan JSON, ledger) live in the untracked runtime dir
+`.devin/pilot_pangram/` — corpus-derived texts contain personal
+writing and are not committed.
 
 ## Method
 
@@ -49,9 +51,11 @@ Earlier-stage evidence consistent with this result:
 
 1. **HUMAN-CORE confirmed, stronger than expected.** Not only light
    polish (~15-20%) but a ~50% restructure into flowing prose keeps
-   the document Human at ~0%. The detector weights document-level
-   provenance far above surface edits; human-authored informational
-   structure survives heavy AI rewording.
+   the document Human at ~0%. The observed behavior is consistent
+   with document-level scoring that tolerates heavy AI rewording as
+   long as the source was human-authored — the internal mechanism is
+   not public, so this stays a behavioral observation, not a claim
+   about how the detector works.
 2. **VOICE-MIMIC failed.** Style conditioning (register, typos,
    telegraphic rhythm) does not transfer human-ness — both iterations
    saturated at 100% AI. Mimicking the author's voice is not a path
