@@ -175,9 +175,7 @@ def dismiss(url_substr=None, target_id=None, accept=True):
     is the deliberate opt-in a probe/test sets; a future service that
     wires this in must set it consciously."""
     if os.environ.get("EYES_ALLOW_DISMISS") != "1":
-        return {
-            "error": "dismiss disabled - mutating CDP path requires EYES_ALLOW_DISMISS=1"
-        }
+        return {"error": "dismiss disabled - mutating CDP path requires EYES_ALLOW_DISMISS=1"}
     ws, err = attach(url_substr=url_substr, target_id=target_id)
     if ws is None:
         return {"error": err or "no matching page target"}
