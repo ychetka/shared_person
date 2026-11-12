@@ -108,6 +108,12 @@ steps:
     # on software rendering after navigation; the 30s floor covers the
     # observed init window. Longer hangs are environmental, not recipe.
     seconds: 30
+  - action: key
+    # reload path yields a responsive renderer where the cold
+    # navigation left it CPU-bound
+    keys: "ctrl+r"
+  - action: wait
+    seconds: 15
   - action: shot
     name: habr_1_composer.png
   # ---------- blocked-surface probes ----------
