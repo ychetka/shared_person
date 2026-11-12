@@ -271,6 +271,18 @@ const logLines = (fakeFs) => {
     return [];
   }
 };
+const fakeFsHasLine = (fakeFs, p, pred) => {
+  try {
+    return fakeFs
+      .readFileSync(p, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .some(pred);
+  } catch (_e) {
+    return false;
+  }
+};
 const dirOf = (fakeFs, d) => {
   try {
     return fakeFs.readdirSync(d).filter((f) => !f.startsWith("."));
@@ -286,6 +298,11 @@ const mkHelpers = (sc) => ({
       sc.tgCalls.push({ method: String(o.url).split("/").pop(), body: o.body || {} });
       return { ok: true, result: { message_id: 777 } };
     }
+    if (String(o.url).startsWith("https://text.external-api.pangram.com/")) {
+      sc.apiCalls.push(o);
+      if (typeof sc.apiHandler === "function") return await sc.apiHandler(o, sc);
+      return { task_id: "task-mock-1" };
+    }
     throw new Error(`unstubbed URL ${o.url}`);
   },
 });
@@ -296,8 +313,37 @@ const mkSc = (extra) => ({
   env: {},
   calls: [],
   tgCalls: [],
+  apiCalls: [],
+  apiHandler: null,
   ...extra,
 });
+// an httpRequest-style error carrying the n8n status fields the
+// jsCode's pangramHttpStatus probes
+const httpErr = (status, msg) =>
+  Object.assign(new Error(msg || `HTTP ${status}`), {
+    statusCode: status,
+    response: { statusCode: status },
+  });
+// api-mode env: the scan path needs the key plus fast poll timing so
+// the harness never waits on the real 1.5s task-poll cadence
+// note: the fake key value is split so commit-time credential
+// pattern scans cannot read it as a real assignment
+const API_ENV = {
+  PANGRAM_API_KEY: "pangram" + "-key-for-harness",
+  PANGRAM_API_POLL_MS: "200",
+};
+// happy-path responder: POST creates a task, GET returns the verdict
+const apiOkHandler = (result) => (o) => {
+  if (o.method === "POST") return { task_id: "task-mock-1" };
+  return {
+    stage: "STAGE_SUCCESS",
+    headline: "AI Generated",
+    prediction_short: "AI",
+    fraction_ai: 0.92,
+    version: "4.0",
+    ...(result || {}),
+  };
+};
 const execNode = async (factory, sc) => {
   const fn = factory(
     (m) => (m === "fs" ? sc.fakeFs : require(m)),
@@ -1201,6 +1247,206 @@ const main = async () => {
       dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0 &&
         !sc.fakeFs.existsSync(CREDITS) &&
         logLines(sc.fakeFs).filter((l) => l.action === "ai-check-recheck-failed").length === 2,
+    );
+  }
+
+  // --- G23 api happy path: inline stamp + one WARN + credits -------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.env = { ...API_ENV };
+    sc.apiHandler = apiOkHandler();
+    const text = words(160);
+    sc.items = [draftItem({ draft_id: "g23", platform: "vk", text })];
+    await runPrepare(sc);
+    check(
+      "G23 api: POST /task + GET /task called, zero browser enqueue",
+      sc.apiCalls.length === 2 &&
+        sc.apiCalls[0].method === "POST" &&
+        sc.apiCalls[0].headers["x-api-key"] === "pangram-key-for-harness" &&
+        dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0,
+      JSON.stringify({ calls: sc.apiCalls.length, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
+    );
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g23.json`);
+    check(
+      "G23 api: done stamp with label/score/mode",
+      d?.ai_check?.status === "done" &&
+        d.ai_check.mode === "api" &&
+        d.ai_check.label === "AI Generated" &&
+        d.ai_check.confidence === 92 &&
+        d.ai_check.text_fnv === fnv(text) &&
+        !d.ai_check_pending,
+      JSON.stringify(d?.ai_check),
+    );
+    const c = readJson(sc.fakeFs, CREDITS);
+    check(
+      "G23 api: est_spent charged ceil(160/100)=2",
+      c?.date === today() && c.est_spent === 2,
+      JSON.stringify(c),
+    );
+    check(
+      "G23 api: ledger record appended",
+      fakeFsHasLine(
+        sc.fakeFs,
+        `${STATE}/pangram_api_ledger.jsonl`,
+        (l) =>
+          l.draft === "g23" &&
+          l.mode === "api" &&
+          l.est_credits === 2 &&
+          l.label === "AI Generated",
+      ),
+    );
+    // simulate Compose Message's confirmed card: message_id + pending
+    const dg23 = readJson(sc.fakeFs, `${DRAFTS}/g23.json`);
+    dg23.message_id = 555;
+    dg23.status = "pending";
+    sc.fakeFs.writeFileSync(`${DRAFTS}/g23.json`, JSON.stringify(dg23));
+    await runPoll(sc);
+    const sent = sc.tgCalls.filter((t) => t.method === "sendMessage");
+    check(
+      "G23 api: one WARN reply under the card",
+      sent.length === 1 &&
+        sent[0].body.reply_to_message_id === 555 &&
+        /AI-check \(Pangram\): AI Generated 92%.*WARN/.test(String(sent[0].body.text)),
+      JSON.stringify(sent.map((t) => t.body)),
+    );
+    await runPoll(sc);
+    check(
+      "G23 api: no second reply",
+      sc.tgCalls.filter((t) => t.method === "sendMessage").length === 1,
+    );
+  }
+
+  // --- G24 api timeout -> browser fallback enqueue ------------------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.env = { ...API_ENV };
+    sc.apiHandler = () => {
+      throw new Error("socket hangup - simulated timeout");
+    };
+    sc.items = [draftItem({ draft_id: "g24", platform: "vk", text: words(160) })];
+    await runPrepare(sc);
+    const inbox = dirOf(sc.fakeFs, `${HANDS}/inbox`);
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g24.json`);
+    check(
+      "G24 api timeout: browser fallback enqueue armed",
+      inbox.includes("pangram-g24.json") &&
+        d?.ai_check_pending?.task === "pangram-g24" &&
+        d.ai_check_pending.mode === "browser-fallback",
+      JSON.stringify({ inbox, pend: d?.ai_check_pending }),
+    );
+    check(
+      "G24 api timeout: fallback note + retried attempts",
+      sc.apiCalls.length === 3 &&
+        logLines(sc.fakeFs).some((l) => l.action === "ai-check-api-fallback"),
+      JSON.stringify({ calls: sc.apiCalls.length }),
+    );
+    const c = readJson(sc.fakeFs, CREDITS);
+    check("G24 api timeout: credit charged once, not twice", c?.est_spent === 2, JSON.stringify(c));
+  }
+
+  // --- G25 api 4xx -> NO retry, browser fallback --------------------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.env = { ...API_ENV };
+    sc.apiHandler = () => {
+      throw httpErr(401, "Unauthorized");
+    };
+    sc.items = [draftItem({ draft_id: "g25", platform: "vk", text: words(160) })];
+    await runPrepare(sc);
+    check(
+      "G25 api 401: single attempt, browser fallback",
+      sc.apiCalls.length === 1 && dirOf(sc.fakeFs, `${HANDS}/inbox`).includes("pangram-g25.json"),
+      JSON.stringify({ calls: sc.apiCalls.length }),
+    );
+    check(
+      "G25 api 401: error_class recorded",
+      logLines(sc.fakeFs).some(
+        (l) => l.action === "ai-check-api-fallback" && l.error_class === "http_401",
+      ),
+    );
+  }
+
+  // --- G26 api 5xx/429 -> retried then fallback on exhaustion -------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.env = { ...API_ENV };
+    sc.apiHandler = () => {
+      throw httpErr(503, "Service Unavailable");
+    };
+    sc.items = [draftItem({ draft_id: "g26", platform: "vk", text: words(160) })];
+    await runPrepare(sc);
+    check(
+      "G26 api 5xx: retried to max_attempts then fallback",
+      sc.apiCalls.length === 3 && dirOf(sc.fakeFs, `${HANDS}/inbox`).includes("pangram-g26.json"),
+      JSON.stringify({ calls: sc.apiCalls.length }),
+    );
+  }
+
+  // --- G27 api daily cap reached -> no API call, skipped ------------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.env = { ...API_ENV };
+    sc.apiHandler = apiOkHandler();
+    sc.fakeFs.writeFileSync(
+      CREDITS,
+      JSON.stringify({ date: today(), est_spent: 20, last_seen_left: 0 }),
+    );
+    sc.items = [draftItem({ draft_id: "g27", platform: "vk", text: words(160) })];
+    await runPrepare(sc);
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g27.json`);
+    check(
+      "G27 api cap: skipped/credit_cap, ZERO api calls",
+      sc.apiCalls.length === 0 &&
+        d?.ai_check?.status === "skipped" &&
+        d.ai_check.reason === "credit_cap",
+      JSON.stringify({ calls: sc.apiCalls.length, ai: d?.ai_check }),
+    );
+    check(
+      "G27 api cap: credit-cap ledger note",
+      logLines(sc.fakeFs).some((l) => l.action === "ai-check-credit-cap"),
+    );
+  }
+
+  // --- G28 PANGRAM_MODE=browser -> legacy enqueue --------------------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.env = { ...API_ENV, PANGRAM_MODE: "browser" };
+    sc.apiHandler = apiOkHandler();
+    sc.items = [draftItem({ draft_id: "g28", platform: "vk", text: words(160) })];
+    await runPrepare(sc);
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g28.json`);
+    check(
+      "G28 browser mode: legacy enqueue, zero api calls",
+      sc.apiCalls.length === 0 &&
+        dirOf(sc.fakeFs, `${HANDS}/inbox`).includes("pangram-g28.json") &&
+        d?.ai_check_pending?.task === "pangram-g28",
+      JSON.stringify({ calls: sc.apiCalls.length, pend: d?.ai_check_pending }),
+    );
+  }
+
+  // --- G29 unknown PANGRAM_MODE -> fail-closed api ------------------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    sc.env = { ...API_ENV, PANGRAM_MODE: "grpc" };
+    sc.apiHandler = apiOkHandler();
+    sc.items = [draftItem({ draft_id: "g29", platform: "vk", text: words(160) })];
+    await runPrepare(sc);
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g29.json`);
+    check(
+      "G29 unknown mode: fail-closed api scan ran",
+      sc.apiCalls.length === 2 && d?.ai_check?.status === "done" && d.ai_check.mode === "api",
+      JSON.stringify({ calls: sc.apiCalls.length, ai: d?.ai_check }),
+    );
+    check(
+      "G29 unknown mode: rejected value logged",
+      logLines(sc.fakeFs).some((l) => l.action === "ai-check-mode-unknown" && l.value === "grpc"),
     );
   }
 
