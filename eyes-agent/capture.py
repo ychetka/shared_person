@@ -283,7 +283,8 @@ def screenshot(source=None, path=None, methods=None):
     Returns {ok, path?, method, ts, usable, reason?, attempts[]} -
     usable mirrors ok (kept explicit so a future 'pixels exist but are
     known-unreliable' state has a place to live)."""
-    if path is None:
+    own_path = path is None
+    if own_path:
         fd, path = tempfile.mkstemp(suffix=".png", prefix="eyes_")
         os.close(fd)
     chain = []
@@ -307,6 +308,14 @@ def screenshot(source=None, path=None, methods=None):
                 "reason": None,
                 "attempts": attempts,
             }
+    if own_path:
+        # the mkstemp placeholder (possibly holding a black/garbage
+        # frame from the last failed method) must not linger when the
+        # result reports path:None - all-fail means no artifact exists
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
     return {
         "ok": False,
         "path": None,

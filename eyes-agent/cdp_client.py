@@ -58,12 +58,21 @@ def _call(ws_url, method, params=None, mid=1, timeout=30):
 
 
 def eval_js(ws_url, expr):
+    """Evaluate expr on a page target; returns the JS value (None for
+    a legit undefined/null). Raises RuntimeError on a JS exception AND
+    on transport failure (timeout / dead socket) - a suspended
+    renderer must never read as a clean 'undefined' result."""
     r = _call(
         ws_url,
         "Runtime.evaluate",
         {"expression": expr, "returnByValue": True, "awaitPromise": True},
     )
     res = r.get("result", {})
+    if r.get("error"):
+        # transport failure (e.g. a renderer suspended behind a native
+        # dialog timed the call out) - surfaced as an exception so a
+        # caller can never mistake it for a legit JS undefined/None
+        raise RuntimeError(f"cdp transport: {r['error']}")
     if res.get("exceptionDetails"):
         raise RuntimeError(
             str(res["exceptionDetails"].get("exception", {}).get("description", "js error"))[:200]
@@ -117,14 +126,22 @@ def close_tab(target_id):
     """Close a tab by target id (browser-domain command). A dirty page's
     beforeunload prompt can appear here too - callers needing a clean
     close on a possibly-armed page should dismiss first."""
-    r = _call(_browser_ws_url(), "Target.closeTarget", {"targetId": target_id})
+    try:
+        ws_url = _browser_ws_url()
+    except Exception as e:  # noqa: BLE001 - CDP outage must still honour the {error} contract
+        return {"error": f"browser ws: {e}"}
+    r = _call(ws_url, "Target.closeTarget", {"targetId": target_id})
     if r.get("error"):
         return {"error": f"Target.closeTarget: {r['error']}"}
     return {"ok": True}
 
 
 def activate_tab(target_id):
-    r = _call(_browser_ws_url(), "Target.activateTarget", {"targetId": target_id})
+    try:
+        ws_url = _browser_ws_url()
+    except Exception as e:  # noqa: BLE001 - same {error} contract as close_tab/open_tab
+        return {"error": f"browser ws: {e}"}
+    r = _call(ws_url, "Target.activateTarget", {"targetId": target_id})
     if r.get("error"):
         return {"error": f"Target.activateTarget: {r['error']}"}
     return {"ok": True}
@@ -155,6 +172,12 @@ class PageWs:
         deadline = time.time() + timeout
         try:
             while time.time() < deadline:
+                # re-arm the socket timeout on EVERY recv: poll_event
+                # narrows it to the wait remainder, and without this a
+                # send_cmd right after a long watch would inherit a
+                # near-zero timeout and fail spuriously. Also bounds
+                # each recv so the loop can't overshoot the deadline.
+                self.ws.settimeout(max(0.1, deadline - time.time()))
                 msg = json.loads(self.ws.recv())
                 if msg.get("id") == mid:
                     return msg

@@ -47,11 +47,13 @@ captcha-in-page) are detected by **templates** (`detector.py` +
   chain: import → scrot → gnome-screenshot → GNOME Shell D-Bus →
   XDG portal → CDP. Every attempted method is recorded with its failure
   reason; **degraded paths report unusable, never fake success**.
-- `dialog_watch.py` — `attach()` + `poll_event()` (production shape:
-  persistent per-target subscription feeding a pull-model buffer),
-  `watch_for_dialog()` (sync probe helper), `dismiss()` (**MUTATION** —
-  tests/demos/operator-approved flows only; production dismissal stays
-  OS-level via xdotool).
+- `dialog_watch.py` — `attach()` → `(PageWs|None, error|None)` +
+  `poll_event()` (production shape: persistent per-target subscription
+  feeding a pull-model buffer), `watch_for_dialog()` →
+  `{ok, observation, error}` (sync probe helper; a broken watcher can
+  never read as a clean page), `dismiss()` (**MUTATION** — hard-gated
+  on `EYES_ALLOW_DISMISS=1`; tests/demos/operator-approved flows only,
+  production dismissal stays OS-level via xdotool).
 - `detector.py` — `match(image)` → best
   `{class, confidence, template_id, bbox}` above per-exemplar
   `match_threshold` (0.85 default, multi-scale ±25%); `ocr()` stub

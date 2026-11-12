@@ -40,7 +40,14 @@ import time
 import capture
 import detector
 
-_GENERATION = 0
+# Pull model keeps latest observation + generation PER TARGET, so the
+# counter is keyed by the observe() selector (url_substr) rather than
+# one global sequence - a driver must be able to use generation to
+# detect staleness of ITS target, not of an unrelated tab. The
+# get/increment pair is only incidentally atomic under the GIL - fine
+# for this spike; the threaded service should hold its own per-target
+# counter under a lock.
+_GENERATIONS = {}
 
 
 def _cdp_state(url_substr=None):
@@ -91,8 +98,9 @@ def observe(url_substr=None, max_age_ms=None, last=None, methods=None):
         if (time.time() - last.get("ts", 0)) * 1000 <= max_age_ms:
             return last
 
-    global _GENERATION
-    _GENERATION += 1
+    gen_key = url_substr or "__default__"
+    generation = _GENERATIONS.get(gen_key, 0) + 1
+    _GENERATIONS[gen_key] = generation
 
     cdp_state = _cdp_state(url_substr)
     shot = capture.screenshot(source=url_substr, methods=methods)
@@ -115,6 +123,6 @@ def observe(url_substr=None, max_age_ms=None, last=None, methods=None):
         "capture_method": shot["method"],
         "detected_blocker": blocker,
         "cdp_state": cdp_state,
-        "generation": _GENERATION,
+        "generation": generation,
         "capture_attempts": shot["attempts"],
     }

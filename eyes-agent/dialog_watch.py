@@ -29,6 +29,7 @@ service directive. watch_for_dialog() below is the thin sync helper
 for probes/tests; it is NOT the service loop.
 """
 
+import os
 import time
 
 import cdp_client
@@ -56,11 +57,18 @@ def attach(url_substr=None, target_id=None):
     """Open a PageWs on the given page target and Page.enable it.
 
     Exactly one of url_substr / target_id selects the target. Returns
-    the PageWs (already enabled) or None if no such target exists.
-    The caller owns the socket - close() it when done.
+    (PageWs, None) on success or (None, error_str) on failure - the
+    error string distinguishes 'no such target' / 'CDP endpoint down'
+    / 'Page.enable failed' so a caller can never mistake a broken
+    watcher for a healthy page that simply showed no dialog. The
+    caller owns the socket - close() it when done.
     """
+    try:
+        cands = cdp_client.targets()
+    except Exception as e:  # noqa: BLE001 - CDP outage is a typed failure, not a crash
+        return None, f"targets: {str(e)[:160]}"
     t = None
-    for cand in cdp_client.targets():
+    for cand in cands:
         if cand.get("type") != "page":
             continue
         if target_id and cand.get("id") == target_id:
@@ -70,18 +78,29 @@ def attach(url_substr=None, target_id=None):
             t = cand
             break
     if t is None:
-        return None
-    ws = cdp_client.PageWs(t["webSocketDebuggerUrl"])
+        return None, "no matching page target"
+    try:
+        ws = cdp_client.PageWs(t["webSocketDebuggerUrl"])
+    except Exception as e:  # noqa: BLE001 - unattachable target (suspended/dead renderer)
+        return None, f"connect: {str(e)[:160]}"
     r = ws.send_cmd("Page.enable")
     if r.get("error"):
         ws.close()
-        return None
-    return ws
+        return None, f"Page.enable: {r['error']}"
+    return ws, None
 
 
 def watch_for_dialog(ws_url_or_substr, seconds):
     """Sync helper for probes/tests: watch a page for up to `seconds`
-    and return the FIRST dialog observation, or None.
+    and return a TYPED result (never a bare observation/None):
+
+      {"ok": True,  "observation": {...}, "error": None}  - dialog seen
+      {"ok": True,  "observation": None,  "error": None}  - clean window
+      {"ok": False, "observation": None,  "error": str}   - watcher broken
+
+    The ok:False branch is what keeps this channel honest: a suspended
+    or dead target fails at attach/Page.enable and is reported as a
+    broken watch - it can never read as 'page healthy, no dialog'.
 
     Accepts either a page webSocketDebuggerUrl or a url substring.
     When given a ws url the caller's Page.enable state is unknown -
@@ -90,13 +109,24 @@ def watch_for_dialog(ws_url_or_substr, seconds):
     """
     own = None
     if ws_url_or_substr.startswith("ws://"):
-        own = cdp_client.PageWs(ws_url_or_substr)
-        own.send_cmd("Page.enable")
+        try:
+            own = cdp_client.PageWs(ws_url_or_substr)
+        except Exception as e:  # noqa: BLE001 - dead endpoint = broken watch
+            return {"ok": False, "observation": None, "error": f"connect: {str(e)[:160]}"}
+        r = own.send_cmd("Page.enable")
+        if r.get("error"):
+            own.close()
+            return {
+                "ok": False,
+                "observation": None,
+                "error": f"Page.enable: {r['error']}",
+            }
         ws = own
     else:
-        ws = attach(url_substr=ws_url_or_substr)
+        ws, err = attach(url_substr=ws_url_or_substr)
         if ws is None:
-            return None
+            return {"ok": False, "observation": None, "error": err}
+        own = ws  # we opened it - the finally below must close it too
     try:
         deadline = time.time() + seconds
         while time.time() < deadline:
@@ -104,10 +134,10 @@ def watch_for_dialog(ws_url_or_substr, seconds):
             if ev is None:
                 break
             if ev.get("method") == "Page.javascriptDialogOpening":
-                return _observation(ev)
+                return {"ok": True, "observation": _observation(ev), "error": None}
             # javascriptDialogClosed and friends are drained but not
             # returned - the caller asked for the OPENING observation
-        return None
+        return {"ok": True, "observation": None, "error": None}
     finally:
         if own is not None:
             own.close()
@@ -138,10 +168,19 @@ def dismiss(url_substr=None, target_id=None, accept=True):
     """MUTATION - standalone dismiss helper for operator-approved
     flows: attaches its own Page-enabled session and answers the open
     dialog. Prefer dismiss_dialog(ws) when a watcher session already
-    exists (it is the session the event arrived on)."""
-    ws = attach(url_substr=url_substr, target_id=target_id)
+    exists (it is the session the event arrived on).
+
+    Hard-gated, not just docstring-gated: without EYES_ALLOW_DISMISS=1
+    in the environment this is a no-op returning {error}. The env flag
+    is the deliberate opt-in a probe/test sets; a future service that
+    wires this in must set it consciously."""
+    if os.environ.get("EYES_ALLOW_DISMISS") != "1":
+        return {
+            "error": "dismiss disabled - mutating CDP path requires EYES_ALLOW_DISMISS=1"
+        }
+    ws, err = attach(url_substr=url_substr, target_id=target_id)
     if ws is None:
-        return {"error": "no matching page target"}
+        return {"error": err or "no matching page target"}
     try:
         return dismiss_dialog(ws, accept=accept)
     finally:

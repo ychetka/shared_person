@@ -106,9 +106,10 @@ def _click_el(target_id, expr):
     if not t:
         return {"error": f"no page target {target_id}"}
     ws = t["webSocketDebuggerUrl"]
-    raw = cdp_client.eval_js(
-        ws,
-        """(() => {
+    try:
+        raw = cdp_client.eval_js(
+            ws,
+            """(() => {
           const el = __EL_EXPR__;
           if (!el) return 'null';
           const r = el.getBoundingClientRect();
@@ -119,8 +120,10 @@ def _click_el(target_id, expr):
             ox: window.outerWidth - window.innerWidth,
             dpr: window.devicePixelRatio
           });
-        })()""".replace("__EL_EXPR__", expr),
-    )
+            })()""".replace("__EL_EXPR__", expr),
+        )
+    except Exception as e:  # noqa: BLE001 - eval_js raises on transport failure too
+        return {"error": f"eval: {e}"}
     if not raw or raw == "null":
         return {"error": "element not found"}
     p = json.loads(raw)
@@ -132,12 +135,50 @@ def _click_el(target_id, expr):
     return {"ok": True}
 
 
+def _clipboard_text():
+    """Best-effort read of the current X CLIPBOARD text so the probe
+    can restore what it clobbers. Bounded wait - a stuck selection
+    owner must not wedge the probe. Returns None when empty/unreadable
+    or on any Gtk failure (the clobber caveat stays documented)."""
+    try:
+        import gi
+
+        gi.require_version("Gdk", "3.0")
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gdk, GLib, Gtk
+
+        import hands
+
+        os.environ.setdefault("DISPLAY", hands.ENV["DISPLAY"])
+        os.environ.setdefault("XAUTHORITY", hands.ENV["XAUTHORITY"])
+        Gtk.init([])
+        cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        got = {"text": None}
+        loop = GLib.MainLoop()
+
+        def _on_text(_cb, text, _ud):
+            got["text"] = text
+            loop.quit()
+
+        cb.request_text(_on_text, None)
+        GLib.timeout_add(1500, loop.quit)
+        loop.run()
+        return got["text"]
+    except Exception:  # noqa: BLE001 - save is best-effort, never a gate
+        return None
+
+
 def _make_dirty(target_id):
     """Dirtify the composer via real OS input (trusted path - a
     synthetic el.value= assignment is invisible to React/tiptap dirty
     tracking and grants no user activation for beforeunload). The
     title field is a tiptap div[data-placeholder=Заголовок], not an
-    input - click it, then paste a word via the OS clipboard."""
+    input - click it, then paste a word via the OS clipboard.
+
+    The paste overwrites the operator's real clipboard: the previous
+    TEXT content is saved before the write and restored afterwards
+    (best-effort - non-text content like images cannot round-trip via
+    wait_for_text and is lost)."""
     # Gdk must be pinned BEFORE hands.set_clipboard's first `from
     # gi.repository import Gdk`: an unpinned import grabs Gdk 4 on this
     # box and Gtk 3.0 then fails with 'Gdk 4.0 is already loaded'.
@@ -151,9 +192,14 @@ def _make_dirty(target_id):
     if not r.get("ok"):
         return {"ok": False, "step": "click title", "detail": r}
     time.sleep(0.5)
-    hands.set_clipboard(PASTE_WORD)
-    time.sleep(0.2)
-    hands.key("ctrl", "v")
+    saved_clip = _clipboard_text()
+    try:
+        hands.set_clipboard(PASTE_WORD)
+        time.sleep(0.2)
+        hands.key("ctrl", "v")
+    finally:
+        if saved_clip is not None:
+            hands.set_clipboard(saved_clip)
     time.sleep(2.0)  # let tiptap register + autosave kick
     # read-back: the title field should now hold the pasted word
     try:
@@ -176,16 +222,20 @@ def _make_dirty(target_id):
 
 
 def _try_habr_variant(settle_s):
-    """Real-composer leg. Returns (verdict_dict, target_id|None)."""
+    """Real-composer leg. Returns (verdict_dict, target_id|None).
+
+    Any exception mid-leg still force-closes the test tab - a thrown
+    _make_dirty/eval failure must not strand a possibly-dirty,
+    beforeunload-armed tab in the operator's browser."""
     opened = cdp_client.open_tab(HABL_COMPOSER, settle_s=settle_s, activate=True)
     if not opened.get("ok"):
         return {"variant_error": opened}, None
     tid = opened["target_id"]
 
-    ws = dialog_watch.attach(target_id=tid)
+    ws, aerr = dialog_watch.attach(target_id=tid)
     if ws is None:
         cdp_client.close_tab(tid)
-        return {"variant_error": "attach failed"}, tid
+        return {"variant_error": f"attach failed: {aerr}"}, tid
     try:
         dirty = _make_dirty(tid)
         _reload(ws)
@@ -205,6 +255,9 @@ def _try_habr_variant(settle_s):
             verdict["dismiss"] = d
             time.sleep(2)
         return verdict, tid
+    except Exception as e:  # noqa: BLE001 - close the dirty tab, then report
+        _force_close(tid)
+        return {"variant_error": f"{type(e).__name__}: {e}"}, tid
     finally:
         ws.close()
 
@@ -220,10 +273,10 @@ def _try_injected_variant():
         return {"variant_error": opened}, None
     tid = opened["target_id"]
 
-    ws = dialog_watch.attach(target_id=tid)
+    ws, aerr = dialog_watch.attach(target_id=tid)
     if ws is None:
         cdp_client.close_tab(tid)
-        return {"variant_error": "attach failed"}, tid
+        return {"variant_error": f"attach failed: {aerr}"}, tid
     try:
         t = cdp_client.find_page("about:blank")
         cdp_client.eval_js(
@@ -241,6 +294,9 @@ def _try_injected_variant():
             verdict["dismiss"] = dialog_watch.dismiss_dialog(ws, accept=True)
             time.sleep(2)
         return verdict, tid
+    except Exception as e:  # noqa: BLE001 - never strand the armed test tab
+        _force_close(tid)
+        return {"variant_error": f"{type(e).__name__}: {e}"}, tid
     finally:
         ws.close()
 
@@ -255,7 +311,7 @@ def _force_close(tid):
     time.sleep(1.5)
     if not any(t["id"] == tid for t in cdp_client.targets()):
         return
-    ws = dialog_watch.attach(target_id=tid)
+    ws, _aerr = dialog_watch.attach(target_id=tid)
     if ws is not None:
         obs = _wait_dialog(ws, 5)
         if obs is not None:
@@ -294,7 +350,9 @@ def main():
         # NOT a hang. A non-responsive page + no event would be a real
         # 'hang without explanation' - report it either way.
         responsive = habr.get("page_responsive_after_trigger")
-        result["hang_without_event"] = responsive is False
+        # None = the variant errored before responsiveness was probed;
+        # that is 'unknown', not a False verdict
+        result["hang_without_event"] = (responsive is False) if responsive is not None else None
         if habr_tid:
             print(">> habr variant produced no dialog - closing test tab", file=sys.stderr)
             _force_close(habr_tid)

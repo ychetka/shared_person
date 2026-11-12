@@ -36,6 +36,37 @@ def load_manifest(template_dir=DEFAULT_TEMPLATE_DIR):
     return [e for e in entries if e.get("detect") == "template" and e.get("file")]
 
 
+# manifest + exemplar PNGs parsed once per template_dir, then reused:
+# match() runs a 5-scale resize+matchTemplate sweep per call, and the
+# pull-model loop's ~200ms budget cannot afford re-reading the library
+# from disk every iteration.
+_LIB_CACHE = {}
+
+
+def _load_library(template_dir):
+    """Parsed manifest entries with their decoded exemplar pixels,
+    cached per template_dir. Exemplars whose PNG is unreadable are
+    dropped here once instead of being skipped on every match() call."""
+    lib = _LIB_CACHE.get(template_dir)
+    if lib is not None:
+        return lib
+    lib = []
+    for ex in load_manifest(template_dir):
+        tpl0 = cv2.imread(os.path.join(template_dir, ex["file"]), 0)
+        if tpl0 is None:
+            continue
+        lib.append(
+            {
+                "class": ex.get("class"),
+                "id": ex.get("id"),
+                "threshold": float(ex.get("match_threshold", 0.85)),
+                "tpl0": tpl0,
+            }
+        )
+    _LIB_CACHE[template_dir] = lib
+    return lib
+
+
 def match(image_path, template_dir=DEFAULT_TEMPLATE_DIR, classes=None):
     """Run cv2.matchTemplate for every template exemplar in the library.
 
@@ -52,14 +83,11 @@ def match(image_path, template_dir=DEFAULT_TEMPLATE_DIR, classes=None):
     if img is None:
         return None
     best = None
-    for ex in load_manifest(template_dir):
+    for ex in _load_library(template_dir):
         if classes and ex.get("class") not in classes:
             continue
-        tpl_path = os.path.join(template_dir, ex["file"])
-        tpl0 = cv2.imread(tpl_path, 0)
-        if tpl0 is None:
-            continue
-        threshold = float(ex.get("match_threshold", 0.85))
+        tpl0 = ex["tpl0"]
+        threshold = ex["threshold"]
         for s in _SCALES:
             tpl = cv2.resize(tpl0, None, fx=s, fy=s)
             if tpl.shape[0] > img.shape[0] or tpl.shape[1] > img.shape[1]:
