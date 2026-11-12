@@ -17,7 +17,8 @@ import time
 ENV = dict(os.environ)
 ENV["DISPLAY"] = os.environ.get("HANDS_DISPLAY", ":1")
 ENV["XAUTHORITY"] = os.environ.get("HANDS_XAUTHORITY", os.path.expanduser("~/.Xauthority"))
-# GDK prefers wayland when available; the holder must own the X11 CLIPBOARD that Xwayland-served Chrome pastes.
+# GDK prefers wayland when available; the holder must own the X11
+# CLIPBOARD that Xwayland-served Chrome pastes.
 ENV["GDK_BACKEND"] = "x11"
 
 
@@ -180,10 +181,7 @@ def set_clipboard(text):
         time.sleep(0.2)
         rc = _clip_holder.poll()
         if rc is not None:
-            raise RuntimeError(
-                f"clipboard holder exited at startup (rc={rc}), "
-                f"see {err_log.name}"
-            )
+            raise RuntimeError(f"clipboard holder exited at startup (rc={rc}), see {err_log.name}")
 
 
 def wait_for_image(template_path, timeout=10, confidence=0.85):

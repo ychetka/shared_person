@@ -384,7 +384,7 @@ const runTick = async (sc) => {
   seed(fakeFs, sc.fname || "h1.json", { ...ARTICLE, ...(sc.payload || {}) }, sc.media);
   if (sc.ledgerSeed) {
     for (const rec of sc.ledgerSeed) {
-      fakeFs.appendFileSync(`${STATE}/published.jsonl`, JSON.stringify(rec) + "\n");
+      fakeFs.appendFileSync(`${STATE}/published.jsonl`, `${JSON.stringify(rec)}\n`);
     }
   }
   // fsTweak: last-mile fs sabotage a seed can't express (e.g. a
@@ -729,7 +729,7 @@ const main = async () => {
     const failedBody = JSON.parse(read(fakeFs, `${Q}/failed/h1.json`));
     check(
       "H8 timeout: done payload records maybe_live + orphan",
-      (failedBody.last_error && /timed out|maybe/.test(failedBody.last_error + "") === true) ||
+      (failedBody.last_error && /timed out|maybe/.test(`${failedBody.last_error}`) === true) ||
         true,
     );
   }
@@ -758,7 +758,7 @@ const main = async () => {
       !!body &&
         JSON.stringify(body.params.media) === JSON.stringify(["/host/materials/photos/fig1.png"]) &&
         body.params.image_path === "/host/materials/photos/fig2.png",
-      JSON.stringify(body && body.params),
+      JSON.stringify(body?.params),
     );
     const pub9 = ledger.find((r) => r && r.status === "published");
     check(
@@ -789,7 +789,7 @@ const main = async () => {
             Array.isArray(r.media_failed) &&
             r.media_failed.length === 1,
         ),
-      JSON.stringify({ body: body && body.params, ledger }),
+      JSON.stringify({ body: body?.params, ledger }),
     );
   }
 

@@ -137,7 +137,8 @@ def _chrome_offset(ws_url):
 # no .placeholder property - so the selector and cand() both need
 # the data-placeholder path.
 _SEL_CLICK = (
-    "button,a,[role=button],input,textarea,[contenteditable=true],[role=textbox],div[tabindex],[data-placeholder]"
+    "button,a,[role=button],input,textarea,[contenteditable=true],"
+    "[role=textbox],div[tabindex],[data-placeholder]"
 )
 # wider text-bearing set for read probes - 'words scanned'/'Overview'
 # style markers live in plain divs/spans, not interactive elements
