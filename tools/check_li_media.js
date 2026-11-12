@@ -408,7 +408,7 @@ const main = async () => {
       media: MEDIA,
     });
     const kinds = calls.map(
-      (c) => c.method + " " + (c.url.startsWith("https://uploads.li.test") ? "<uploadUrl>" : c.url),
+      (c) => `${c.method} ${c.url.startsWith("https://uploads.li.test") ? "<uploadUrl>" : c.url}`,
     );
     check(
       "S2 call order: register,PUT,assetGET x2 -> ugcPosts -> verify GET",
