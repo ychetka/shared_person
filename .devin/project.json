@@ -5,6 +5,7 @@
     "docs/patches/",
     "controller-manager/",
     "fixtures/humanizer/",
+    "hands-agent/recipes/",
     "n8n/workflows/",
     "prompts/"
   ]

@@ -42,20 +42,25 @@ name: habr_post
 # pre-click failure. Do not move or rename the mark.
 #
 # BLOCKED SURFACES: the optional dom_text probes right after the
-# composer load look for CAPTCHA/verification, login-wall and
-# sandbox-tier markers. A hit emits abort_reason and the gated `fail`
-# step aborts the run immediately - emits survive into the failed
-# result, which is how the driver's operator_escalation classification
-# gets its evidence instead of regexing a generic 'element not found'.
+# composer load look for CAPTCHA/verification, login-wall, 404
+# dead-url and (post-kind only) sandbox-tier markers. A hit emits
+# abort_reason and the gated `fail` step aborts the run immediately -
+# emits survive into the failed result, which is how the driver's
+# operator_escalation classification gets its evidence instead of
+# regexing a generic 'element not found'. The sandbox-location probe
+# is gated on {post_kind}: for articles /ru/sandbox/new/ is the legit
+# composer destination, while a post-path bounce to /ru/sandbox means
+# a ReadOnly-tier block.
 #
 # HONEST STATUS: navigation + blocked-surface probes live-verified
 # 2026-11-12 against the real site (the logged-out blk_login probe
 # caught the login wall on /ru/articles/new/ as designed); the
 # sandbox-composer URL /ru/sandbox/new/ verified 2026-11-12 on the
-# logged-in audit profile (200, SPA shell - field probes verified
-# pending the fill leg). The composer fill itself is verified
-# pending a full run. Without publish_go the recipe is a dry-run
-# proof: filled composer, proof shots, never publishes.
+# logged-in audit profile (200, SPA shell - the post-kind gate now
+# keeps it from false-positiving the blk_sandbox probe; field probes
+# verified pending the fill leg). The composer fill itself is
+# verified pending a full run. Without publish_go the recipe is a
+# dry-run proof: filled composer, proof shots, never publishes.
 # See docs/habr-driver-spec.md and docs/habr-account-state.md.
 steps:
   # ---------- open the composer ----------
@@ -123,19 +128,35 @@ steps:
     key: abort_reason
     value: "logged-out/login wall visible: {blk_login}"
     if: "{blk_login}"
-  # the sandbox redirect is a LOCATION fact, not a text marker: an
-  # empty target on the sandbox tab reads its url back
+  # POST-KIND ONLY: the sandbox redirect is a LOCATION fact, not a
+  # text marker - an empty target on the sandbox tab reads its url
+  # back. Gated on {post_kind} because for articles /ru/sandbox/new/
+  # IS the legit sandbox-tier composer entry (live dry-run 2026-11-12
+  # false-positived on it); a post has no sandbox path, so landing
+  # under /ru/sandbox means a ReadOnly-tier bounce - a real block.
   - action: dom_text
     url: "habr.com/ru/sandbox"
     into: blk_sandbox
     optional: true
+    if: "{post_kind}"
   - action: emit
     key: abort_reason
     value: "sandbox-tier surface (ReadOnly account): {blk_sandbox}"
     if: "{blk_sandbox}"
+  # the dead-URL surface: /ru/articles/new/ on a sandbox-tier account
+  # and a tier-denied composer bounce both land on Habr's 404 page.
+  - action: dom_text
+    url: habr.com
+    target: "Страница не найдена"
+    into: blk_404
+    optional: true
+  - action: emit
+    key: abort_reason
+    value: "dead-url/404 surface: {blk_404}"
+    if: "{blk_404}"
   - action: fail
     reason: "blocked publish surface - operator needed (see abort_reason)"
-    if: "{blk_captcha}{blk_login}{blk_sandbox}"
+    if: "{blk_captcha}{blk_login}{blk_sandbox}{blk_404}"
   # ---------- title (article only) ----------
   - action: click_dom
     url: habr.com
