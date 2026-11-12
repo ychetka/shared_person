@@ -85,8 +85,12 @@ def _chrome_offset(ws_url):
 # inject _ONSCREEN (they need a VISIBLE element to click) while
 # dom_text leaves it empty - off-screen text is a legitimate read
 # (the habr orphan probe recovers article URLs below the fold).
+# tiptap-style composers (Habr sandbox) mark fields with a
+# data-placeholder attribute on a plain div - no [contenteditable],
+# no .placeholder property - so the selector and cand() both need
+# the data-placeholder path.
 _SEL_CLICK = (
-    "button,a,[role=button],input,textarea,[contenteditable=true],[role=textbox],div[tabindex]"
+    "button,a,[role=button],input,textarea,[contenteditable=true],[role=textbox],div[tabindex],[data-placeholder]"
 )
 # wider text-bearing set for read probes - 'words scanned'/'Overview'
 # style markers live in plain divs/spans, not interactive elements
@@ -100,7 +104,7 @@ _CAND_SCAN = """(() => {
   const cand = (e) => {
     const it = (e.innerText||'').trim().toLowerCase();
     const al = (e.getAttribute('aria-label')||'').trim().toLowerCase();
-    const ph = (e.placeholder||'').trim().toLowerCase();
+    const ph = (e.placeholder||e.getAttribute('data-placeholder')||'').trim().toLowerCase();
     const exact = (it === q || al === q || ph === q);
     const sub = !exact && ((it + ' ' + al + ' ' + ph).includes(q));
     if (!exact && !sub) return null;

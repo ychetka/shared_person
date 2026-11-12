@@ -57,10 +57,15 @@ name: habr_post
 # caught the login wall on /ru/articles/new/ as designed); the
 # sandbox-composer URL /ru/sandbox/new/ verified 2026-11-12 on the
 # logged-in audit profile (200, SPA shell - the post-kind gate now
-# keeps it from false-positiving the blk_sandbox probe; field probes
-# verified pending the fill leg). The composer fill itself is
-# verified pending a full run. Without publish_go the recipe is a
-# dry-run proof: filled composer, proof shots, never publishes.
+# keeps it from false-positiving the blk_sandbox probe). The
+# composer is a TWO-SCREEN tiptap SPA (verified 2026-11-12): screen
+# 1 title/body fields are data-placeholder divs inside .ProseMirror
+# (title click verified live via the data-placeholder scan); screen
+# 2 carries hubs/tags/publish behind "Далее к настройкам" - its
+# field labels (incl. the "Хабы" target) are pending live
+# verification. The full fill+publish leg is verified pending a
+# complete run. Without publish_go the recipe is a dry-run proof:
+# filled composer, proof shots, never publishes.
 # See docs/habr-driver-spec.md and docs/habr-account-state.md.
 steps:
   # ---------- open the composer ----------
@@ -168,10 +173,42 @@ steps:
   - action: key
     keys: "ctrl+v"
     if: "{title}"
+  # ---------- body ----------
+  # the body field is div.node_paragraph with
+  # data-placeholder="Введите текст" inside .ProseMirror (verified
+  # 2026-11-12); the click lands via the data-placeholder scan.
+  # Long bodies go through the clipboard, never type_text
+  # (human-speed typing a 10k article blows the result window).
+  - action: click_dom
+    url: habr.com
+    target: "Введите текст"
+  - action: set_clipboard
+    text: "{text_md}"
+  - action: key
+    keys: "ctrl+v"
+  - action: wait
+    seconds: 2
+  - action: shot
+    name: habr_2_filled.png
+  # ---------- settings screen ----------
+  # The composer is TWO screens (verified 2026-11-12): screen 1 is
+  # title+body, "Далее к настройкам" leads to screen 2 where hubs,
+  # tags and the publish button live. This click is BEFORE the
+  # publish boundary - it navigates to the next fill screen, it does
+  # not publish - so it stays ungated and runs in dry-runs too.
+  - action: click_dom
+    url: habr.com
+    target: "Далее к настройкам"
+  - action: wait
+    seconds: 4
+  - action: shot
+    name: habr_2_settings.png
   # ---------- hubs ----------
   # the hub selector is a tag input; add each hub by text + Return.
   # {hubs} arrives as a JSON list - expand per-hub in a verified run;
   # for now paste the joined list into the selector (TODO: loop).
+  # Target "Хабы" is the first guess on the settings screen - adjust
+  # only after live DOM verification shows a different label.
   - action: click_dom
     url: habr.com
     target: "Хабы"
@@ -183,22 +220,6 @@ steps:
     keys: "Return"
   - action: wait
     seconds: 1
-  # ---------- body ----------
-  # markdown mode: Habr's editor accepts markdown when the 'Markdown'
-  # mode toggle is on - long bodies go through the clipboard, never
-  # type_text (human-speed typing a 10k article blows the result
-  # window)
-  - action: click_dom
-    url: habr.com
-    target: "Текст публикации"
-  - action: set_clipboard
-    text: "{text_md}"
-  - action: key
-    keys: "ctrl+v"
-  - action: wait
-    seconds: 2
-  - action: shot
-    name: habr_2_filled.png
   # ---------- КДПВ / media (optional, TODO: verified attach) ----------
   # image_path attaches through the composer's file-chooser dialog:
   # click the upload control, ctrl+l, paste the HOST path, Return.
