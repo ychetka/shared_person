@@ -73,6 +73,14 @@
 //       the shape gate BEFORE the credit is charged - no enqueue, no
 //       est_spent, a 'ai-check-recheck-failed' note carrying the
 //       quarantine hint, and a second poll still spends nothing.
+//   G30 api key unset (config error): the config gate fires BEFORE
+//       the credit charge - zero HTTP calls, zero api-ledger entries,
+//       the 'config' fallback note logged, and the browser fallback
+//       still enqueues the real task (charged exactly once, not the
+//       phantom call's spend);
+//   G31 provider error echoing PANGRAM_API_KEY reaches the
+//       moderation.jsonl fallback note scrubbed to '***' - the same
+//       SECRET_VALUES masking the poller applies to recipe errors.
 //
 // Run:  node tools/check_pangram.js    (exit 0 = all pass)
 
@@ -1447,6 +1455,67 @@ const main = async () => {
     check(
       "G29 unknown mode: rejected value logged",
       logLines(sc.fakeFs).some((l) => l.action === "ai-check-mode-unknown" && l.value === "grpc"),
+    );
+  }
+
+  // --- G30 api key unset: no phantom charge, browser fallback -------
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    // PANGRAM_API_KEY unset and no env file: pangramApiCheck would
+    // short-circuit error_class 'config' with zero HTTP calls, so the
+    // charge + ledger entry must NOT happen for it; the browser
+    // fallback below still enqueues the real hands-queue task.
+    sc.env = { PANGRAM_ENV_FILE: "/nonexistent/ENV" };
+    sc.apiHandler = apiOkHandler();
+    sc.items = [draftItem({ draft_id: "g30", platform: "vk", text: words(160) })];
+    await runPrepare(sc);
+    check(
+      "G30 key unset: zero api calls, no api-ledger entries",
+      sc.apiCalls.length === 0 && !sc.fakeFs.existsSync(`${STATE}/pangram_api_ledger.jsonl`),
+      JSON.stringify({ calls: sc.apiCalls.length }),
+    );
+    check(
+      "G30 key unset: config error_class logged",
+      logLines(sc.fakeFs).some(
+        (l) => l.action === "ai-check-api-fallback" && l.error_class === "config",
+      ),
+    );
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g30.json`);
+    const c = readJson(sc.fakeFs, CREDITS);
+    check(
+      "G30 key unset: browser fallback enqueued, charged exactly once",
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).includes("pangram-g30.json") &&
+        d?.ai_check_pending?.task === "pangram-g30" &&
+        d.ai_check_pending.mode === "browser" &&
+        c?.est_spent === 2,
+      JSON.stringify({ inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`), c }),
+    );
+  }
+
+  // --- G31 provider error echoes the key -> scrubbed in the note ---
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    const key = API_ENV.PANGRAM_API_KEY;
+    sc.env = { ...API_ENV, PANGRAM_API_MAX_ATTEMPTS: "1" };
+    sc.apiHandler = () => {
+      throw httpErr(401, `provider rejected api key ${key} verbatim`);
+    };
+    sc.items = [draftItem({ draft_id: "g31", platform: "vk", text: words(160) })];
+    await runPrepare(sc);
+    const note = logLines(sc.fakeFs).find((l) => l.action === "ai-check-api-fallback");
+    check(
+      "G31 key echo: provider error masked in moderation note",
+      !!note && !String(note.error).includes(key) && String(note.error).includes("***"),
+      JSON.stringify(note),
+    );
+    const d = readJson(sc.fakeFs, `${DRAFTS}/g31.json`);
+    check(
+      "G31 key echo: browser fallback still enqueued",
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).includes("pangram-g31.json") &&
+        d?.ai_check_pending?.task === "pangram-g31",
+      JSON.stringify(d?.ai_check_pending),
     );
   }
 

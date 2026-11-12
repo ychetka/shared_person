@@ -18,8 +18,11 @@
 //            "AI Assisted", "Human Written")
 //   short  - prediction_short ("AI" | "Human" | "Mixed")
 //   score  - fraction_ai 0..1 (null when absent)
-//   error_class - config | http_4xx | http_5xx | transient_exhausted
+//   error_class - config | http_<status> | transient_exhausted
 //            | timeout | task_failed | protocol
+//   Note: 'timeout' covers ONLY the async-task polling budget; a hung
+//   socket / per-request timeout that survives the retry budget lands
+//   in 'transient_exhausted' like every other exhausted transient.
 //
 // Key resolution order: opts.apiKey -> PANGRAM_API_KEY env ->
 // ENV_FILE / PANGRAM_ENV_FILE path (default ../ENV next to this
@@ -69,10 +72,24 @@ const statusOf = (e) => {
   return Number.isFinite(s) && s > 0 ? s : null;
 };
 
+// Retry-After header (429 responses): seconds or an HTTP date, capped
+// so a hostile/buggy value cannot park the caller.
+const RETRY_AFTER_CAP_MS = 30000;
+const retryAfterMs = (e) => {
+  const raw = e?.retryAfter;
+  if (raw == null) return null;
+  const secs = Number(raw);
+  if (Number.isFinite(secs) && secs >= 0) return secs * 1000;
+  const t = Date.parse(String(raw));
+  if (Number.isFinite(t)) return Math.max(0, t - Date.now());
+  return null;
+};
 // one HTTP request with bounded retry: transient faults (network
-// errors, timeouts, 5xx, 429) back off exponentially; every other
-// failure (4xx, protocol) fails fast. The API key only ever travels
-// in the x-api-key header.
+// errors, timeouts, 5xx, 429) back off exponentially with jitter
+// (half-to-full of the base delay, decorrelating concurrent callers);
+// a 429 carrying Retry-After waits that long instead (capped). Every
+// other failure (4xx, protocol) fails fast. The API key only ever
+// travels in the x-api-key header.
 const request = async (key, opts) => {
   let lastErr = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -91,6 +108,7 @@ const request = async (key, opts) => {
       if (res.status === 429 || res.status >= 500) {
         const e = new Error(`HTTP ${res.status}`);
         e.statusCode = res.status;
+        if (res.status === 429) e.retryAfter = res.headers.get("retry-after");
         throw e;
       }
       if (res.status >= 400) {
@@ -104,7 +122,10 @@ const request = async (key, opts) => {
       lastErr = e;
       if (e?.pangramFatal) throw e;
       if (attempt < MAX_ATTEMPTS) {
-        await sleep(500 * 2 ** (attempt - 1));
+        let delay = 500 * 2 ** (attempt - 1);
+        const ra = retryAfterMs(e);
+        if (ra !== null) delay = Math.min(ra, RETRY_AFTER_CAP_MS);
+        await sleep(delay * (0.5 + Math.random()));
       }
     } finally {
       clearTimeout(timer);
@@ -151,6 +172,19 @@ const pangramCheck = async (text, opts = {}) => {
   }
   const deadline = Date.now() + TASK_BUDGET_MS;
   for (;;) {
+    // check the budget BEFORE each poll, not only between bursts: a
+    // slow retry chain inside request() can overshoot the deadline,
+    // so re-checking here aborts on expiry instead of firing one
+    // more GET past the budget
+    if (Date.now() > deadline) {
+      return {
+        ok: false,
+        error_class: "timeout",
+        error: "task polling budget exceeded",
+        words: w,
+        task_id: taskId,
+      };
+    }
     let r;
     try {
       r = await request(key, {
