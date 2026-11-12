@@ -426,10 +426,7 @@ for (const [group, cfg] of Object.entries(GROUPS)) {
 // token, so a platform added on either side fails here instead of
 // drifting silently
 {
-  const tok = (b) =>
-    [
-      ...new Set(b.lines.join("\n").match(PLATFORM_TOKEN_RE) || []),
-    ].sort();
+  const tok = (b) => [...new Set(b.lines.join("\n").match(PLATFORM_TOKEN_RE) || [])].sort();
   const ep = blocks.find((b) => b.group === "enabled-platforms");
   const want = ep ? tok(ep).filter((t) => t !== "all") : [];
   let drift = 0;

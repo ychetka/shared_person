@@ -798,7 +798,7 @@ const main = async () => {
     check(
       "V1 malformed draft: status unchanged (write refused pre-rename)",
       !!d && d.status === "pending",
-      d && d.status,
+      d?.status,
     );
     check(
       "V1 malformed draft: no tmp debris in drafts/",
@@ -812,7 +812,7 @@ const main = async () => {
     check(
       "V1 malformed draft: operator told the save failed",
       !!ans && /state save failed/i.test(String(ans.body.text)),
-      ans && ans.body.text,
+      ans?.body.text,
     );
     check(
       "V1 malformed draft: 'approve-save-failed' logged",
@@ -878,7 +878,7 @@ const main = async () => {
     check(
       "V3 well-formed draft: file persisted 'delivering'",
       !!d && d.status === "delivering",
-      d && d.status,
+      d?.status,
     );
   }
   {

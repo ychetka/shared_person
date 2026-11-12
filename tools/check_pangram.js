@@ -1182,20 +1182,16 @@ const main = async () => {
     await runPoll(sc);
     check(
       "G22 refused write: no enqueue, no credit charged",
-      dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0 &&
-        !sc.fakeFs.existsSync(CREDITS),
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0 && !sc.fakeFs.existsSync(CREDITS),
       JSON.stringify({
         inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`),
         credits: readJson(sc.fakeFs, CREDITS),
       }),
     );
-    const refused = logLines(sc.fakeFs).filter(
-      (l) => l.action === "ai-check-recheck-failed",
-    );
+    const refused = logLines(sc.fakeFs).filter((l) => l.action === "ai-check-recheck-failed");
     check(
       "G22 refused write: recheck-failed note + quarantine hint",
-      refused.length === 1 &&
-        refused[0].quarantine === `${DRAFTS}/g22.json`,
+      refused.length === 1 && refused[0].quarantine === `${DRAFTS}/g22.json`,
       JSON.stringify(refused),
     );
     // second poll: still no spend - the loop is broken
@@ -1204,8 +1200,7 @@ const main = async () => {
       "G22 refused write: repoll still spends nothing",
       dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0 &&
         !sc.fakeFs.existsSync(CREDITS) &&
-        logLines(sc.fakeFs).filter((l) => l.action === "ai-check-recheck-failed")
-          .length === 2,
+        logLines(sc.fakeFs).filter((l) => l.action === "ai-check-recheck-failed").length === 2,
     );
   }
 
