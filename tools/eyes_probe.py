@@ -145,9 +145,9 @@ def _clipboard_text():
 
         gi.require_version("Gdk", "3.0")
         gi.require_version("Gtk", "3.0")
-        from gi.repository import Gdk, GLib, Gtk
 
         import hands
+        from gi.repository import Gdk, GLib, Gtk
 
         os.environ.setdefault("DISPLAY", hands.ENV["DISPLAY"])
         os.environ.setdefault("XAUTHORITY", hands.ENV["XAUTHORITY"])
