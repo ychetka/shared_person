@@ -225,6 +225,50 @@ def _xdg_portal_shot(path):
         bus.signal_unsubscribe(sub)
 
 
+def _activate_chrome_window():
+    """OS-level window activation - the read-only replacement for the
+    removed cdp_client.activate_tab (Target.activateTarget is a banned
+    write call per the issue #127 directive).
+
+    There is no CDP-target -> X-window mapping left (the listing gives
+    no window id), so we activate the newest visible Chrome window via
+    `xdotool search --onlyvisible --class chrome | tail -1` - the same
+    mechanism tab_ctl/eyes_probe use to reach the browser with OS
+    input. Best-effort: returns (ok, reason) and never raises - the
+    caller still attempts the capture when activation fails (the tab
+    may already be foreground)."""
+    try:
+        r = subprocess.run(
+            ["xdotool", "search", "--onlyvisible", "--class", "chrome"],
+            env=ENV,
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        return False, "xdotool not found"
+    except subprocess.TimeoutExpired:
+        return False, "xdotool search timeout"
+    except subprocess.CalledProcessError as e:
+        return False, f"xdotool search exit {e.returncode}"
+    wins = [w for w in r.stdout.decode(errors="replace").split() if w]
+    if not wins:
+        return False, "no visible chrome window"
+    try:
+        subprocess.run(
+            ["xdotool", "windowactivate", wins[-1]],
+            env=ENV,
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "windowactivate timeout"
+    except subprocess.CalledProcessError as e:
+        return False, f"windowactivate exit {e.returncode}"
+    return True, None
+
+
 def _cdp_shot(path, url_substr=None):
     """Page.captureScreenshot on the tab matching url_substr (or the
     first page target). Page-viewport pixels only - never browser or
@@ -232,9 +276,10 @@ def _cdp_shot(path, url_substr=None):
 
     Background/occluded tabs produce no compositor frames, so the shot
     can hang on a hidden tab (verified live 2026-11-13: same tab timed
-    out backgrounded, answered instantly once activated). The matched
-    target is therefore activated first - a mild, reversible
-    orchestration act (tab focus), not a site mutation."""
+    out backgrounded, answered instantly once activated). The browser
+    window is therefore raised first via OS-level xdotool
+    windowactivate (the removed CDP activate_tab is banned) - a mild,
+    reversible orchestration act (window focus), not a site mutation."""
     try:
         import cdp_client
 
@@ -244,12 +289,16 @@ def _cdp_shot(path, url_substr=None):
             t = pages[0] if pages else None
         if t is None:
             return False, "no page target"
-        cdp_client.activate_tab(t["id"])
-        time.sleep(1.0)  # let the foregrounded surface produce a frame
+        act_ok, act_err = _activate_chrome_window()
+        if act_ok:
+            time.sleep(1.0)  # let the foregrounded surface produce a frame
         r = cdp_client._call(t["webSocketDebuggerUrl"], "Page.captureScreenshot", {"format": "png"})
         data = r.get("result", {}).get("data")
         if not data:
-            return False, f"no data in reply: {str(r.get('error'))[:120]}"
+            why = f"no data in reply: {str(r.get('error'))[:120]}"
+            if act_err:
+                why += f" (window not raised: {act_err})"
+            return False, why
         with open(path, "wb") as f:
             f.write(base64.b64decode(data))
     except Exception as e:  # noqa: BLE001 - any CDP/network failure just advances the chain

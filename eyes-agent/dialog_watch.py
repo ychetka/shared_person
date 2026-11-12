@@ -157,7 +157,13 @@ def dismiss_dialog(ws, accept=True):
     (xdotool) so the user sees a human-like act; this CDP path is for
     tests/demos and the emergency un-wedge case where the renderer is
     already suspended and OS input is the slower route.
-    """
+
+    Hard-gated on the SAME env flag as dismiss(): without
+    EYES_ALLOW_DISMISS=1 this is a no-op returning {error} - a session
+    that already holds a watcher socket must not get a free pass
+    around the gate."""
+    if os.environ.get("EYES_ALLOW_DISMISS") != "1":
+        return {"error": "dismiss disabled - mutating CDP path requires EYES_ALLOW_DISMISS=1"}
     r = ws.send_cmd("Page.handleJavaScriptDialog", {"accept": accept}, timeout=10)
     if r.get("error"):
         return {"error": f"handleJavaScriptDialog: {r['error']}"}

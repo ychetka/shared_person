@@ -184,7 +184,7 @@ def _make_dirty():
     try:
         hands.set_clipboard(PASTE_WORD)
         time.sleep(0.2)
-        hands.key("ctrl", "v")
+        hands.key("ctrl+v")
     finally:
         if saved_clip is not None:
             hands.set_clipboard(saved_clip)
@@ -250,7 +250,7 @@ def _try_injected_variant():
         _force_close(tab_sel)
         return {"variant_error": f"attach failed: {aerr}"}, tab_sel
     try:
-        hands.key("ctrl", "l")
+        hands.key("ctrl+l")
         time.sleep(0.3)
         hands.type_text("javascript:window.onbeforeunload=()=>'eyes-probe-dirty';void 0")
         hands.key("Return")
@@ -282,7 +282,7 @@ def _force_close(tab_sel):
         return
     hands.key("ctrl+9")
     time.sleep(0.5)
-    hands.key("ctrl", "w")
+    hands.key("ctrl+w")
     time.sleep(1.5)
     if cdp_client.find_page(tab_sel) is None:
         return
@@ -296,7 +296,7 @@ def _force_close(tab_sel):
     if cdp_client.find_page(tab_sel) is not None:
         hands.key("ctrl+9")
         time.sleep(0.5)
-        hands.key("ctrl", "w")
+        hands.key("ctrl+w")
 
 
 def main():

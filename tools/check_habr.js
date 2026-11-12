@@ -84,7 +84,7 @@ const factory = new Function(
 // REAL result dialect the worker+recipe produce, so the values are
 // read out of hands-agent/recipes/habr_post.yaml instead of restated:
 //   PUBLISH_STEP  - steps[] index of the `marks: publish` step (the
-//                   'Опубликовать' click_dom); the worker reports it as
+//                   RU 'Publish' click); the worker reports it as
 //                   result.publish_step
 //   FAIL_STEP     - steps[] index of the gated `fail` step (blocked-
 //                   surface abort)
@@ -101,12 +101,15 @@ const RECIPE = fs.readFileSync(
 );
 let PUBLISH_STEP = -1;
 let FAIL_STEP = -1;
-// indices of the blocked-surface dom_text probes and the first
-// composer click - needed to build result.log lines the way the
-// REAL worker writes them (`step<i> <action> '<target>' -> ...`),
-// because the probe targets ('captcha', 'Войти', the sandbox
-// read-back) are exactly the strings the driver's escalation
-// regexes look for
+// indices of the blocked-surface probes and the first composer
+// click - needed to build result.log lines the way the REAL worker
+// writes them (`step<i> <action> ok` plus the per-action detail
+// lines). Post-#127 the probes are `locate`/`tab_url` steps (the
+// dom_* actions are fail-closed stubs that abort the recipe on a
+// named reason, so they never produce log lines anymore); the probe
+// targets (the CAPTCHA description, the login-wall description, the
+// sandbox tab listing) are still exactly the kind of text the
+// driver's escalation regexes would hit on if they scanned the log.
 let CAPTCHA_PROBE = -1;
 let LOGIN_PROBE = -1;
 let SANDBOX_PROBE = -1;
@@ -120,15 +123,15 @@ let TITLE_STEP = -1;
       stepIdx++;
       action = m[1];
       if (m[1] === "fail" && FAIL_STEP < 0) FAIL_STEP = stepIdx;
+      if (m[1] === "click" && TITLE_STEP < 0) TITLE_STEP = stepIdx;
     }
     if (/^\s*marks:\s*publish\s*$/.test(line)) PUBLISH_STEP = stepIdx;
-    if (action === "dom_text") {
-      if (/target:\s*"?captcha"?\s*$/.test(line)) CAPTCHA_PROBE = stepIdx;
-      if (/target:\s*"?Войти"?\s*$/.test(line)) LOGIN_PROBE = stepIdx;
-      if (/url:\s*"?habr\.com\/ru\/sandbox/.test(line)) SANDBOX_PROBE = stepIdx;
+    if (action === "locate") {
+      if (/into:\s*"?blk_captcha"?\s*$/.test(line)) CAPTCHA_PROBE = stepIdx;
+      if (/into:\s*"?blk_login"?\s*$/.test(line)) LOGIN_PROBE = stepIdx;
     }
-    if (action === "click_dom" && /target:\s*"?Заголовок"?\s*$/.test(line)) {
-      TITLE_STEP = stepIdx;
+    if (action === "tab_url" && /url:\s*"?habr\.com\/ru\/sandbox/.test(line)) {
+      SANDBOX_PROBE = stepIdx;
     }
   }
 }
@@ -900,7 +903,7 @@ const main = async () => {
       // the article may be live -> maybe_live
       failResult: {
         error: `step${PUBLISH_STEP + 1} wait: browser window gone`,
-        log: [`step${PUBLISH_STEP} click_dom 'Опубликовать' -> Опубликовать`],
+        log: [`step${PUBLISH_STEP} click ok`],
         last_step: PUBLISH_STEP,
         publish_step: PUBLISH_STEP,
       },
@@ -927,14 +930,16 @@ const main = async () => {
   {
     // the log array the REAL worker writes for a pre-click habr_post
     // failure - the case the hand-written stubs above could not
-    // express: every optional dom_text probe ran and MISSED (a
-    // negative probe answer lands '' in ctx, a legitimate result,
-    // not a step error), so the probe targets sit verbatim inside
-    // result.log. An escalation haystack that scans the log
-    // self-triggers the captcha/войти/sandbox regexes on a plain
-    // composer-fill miss - a false operator_escalation with a
-    // misleading CAPTCHA telegram. abort_reason is the verdict; the
-    // log only feeds the post-click 'Опубликовать' heuristic.
+    // express: every optional probe ran and MISSED (a negative probe
+    // answer is a legitimate result, not a step error), so the probe
+    // target descriptions sit verbatim inside result.log. An
+    // escalation haystack that scans the log self-triggers the
+    // captcha/login/sandbox regexes on a plain composer-fill miss -
+    // a false operator_escalation with a misleading CAPTCHA telegram.
+    // abort_reason is the verdict; the log only feeds the post-click
+    // heuristic. last_step is the title LOCATE step (it completed -
+    // skipped steps never advance last_done but a completed locate
+    // does), immediately before the click that died.
     const { fakeFs, ledger } = await runTick({
       env: { HABR_PROFILE_URL: "" },
       failResult: {
@@ -942,17 +947,15 @@ const main = async () => {
         log: [
           "step0 shot -> /opt/hands/queue/done/habr_0_start.png",
           "step0 shot ok",
-          `step${CAPTCHA_PROBE} dom_text 'captcha' -> `,
-          `step${CAPTCHA_PROBE} dom_text ok`,
-          `step${LOGIN_PROBE} dom_text 'Войти' -> `,
-          `step${LOGIN_PROBE} dom_text ok`,
-          `step${SANDBOX_PROBE} dom_text 'location' -> `,
-          `step${SANDBOX_PROBE} dom_text ok`,
+          `step${CAPTCHA_PROBE} locate miss (optional): a CAPTCHA or human-verification wall covering the page`,
+          `step${CAPTCHA_PROBE} locate ok`,
+          `step${LOGIN_PROBE} locate miss (optional): a login wall or sign-in prompt blocking the composer (RU 'Log in' label)`,
+          `step${LOGIN_PROBE} locate ok`,
+          `step${SANDBOX_PROBE} tab_url 'habr.com/ru/sandbox' -> `,
+          `step${SANDBOX_PROBE} tab_url ok`,
           `step${FAIL_STEP} skipped (if -> '')`,
         ],
-        // skipped steps never advance last_done - the sandbox probe
-        // is the last step that completed before the title click died
-        last_step: SANDBOX_PROBE,
+        last_step: TITLE_STEP - 1,
         publish_step: PUBLISH_STEP,
       },
     });

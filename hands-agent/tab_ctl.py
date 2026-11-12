@@ -65,7 +65,10 @@ def _occlude(new_tab_title):
         # live - the chord was silently ignored)
         hands.key("ctrl+shift+Tab")
         time.sleep(0.8)
-        if _window_name() != new_tab_title:
+        # case-insensitive compare: a title CASE-FLIP on the same tab
+        # (Chrome re-cases on navigation commit) must not read as a
+        # successful switch - equality is the failure signal
+        if _window_name().strip().lower() != new_tab_title.strip().lower():
             return True
     return False
 

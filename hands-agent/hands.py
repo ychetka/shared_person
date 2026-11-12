@@ -89,7 +89,12 @@ def type_text(text, wpm_range=(30, 60)):
 
 
 def key(*keys):
-    _xd("key", *keys)
+    """Send ONE key combo to xdotool. A chord must arrive as a single
+    `key` argument - `xdotool key ctrl v` presses ctrl, releases it,
+    then presses v (two separate keys, NOT ctrl+v), which is why every
+    caller passes chord syntax ('ctrl+v', 'ctrl+shift+Tab') or
+    separate args that get joined back into one chord string here."""
+    _xd("key", "+".join(str(k) for k in keys))
     time.sleep(random.uniform(0.05, 0.15))
 
 
@@ -131,9 +136,17 @@ def set_clipboard(text):
     # clipboard text instead of the URL). Pump pending events and give
     # the transfer a short real window before returning.
     deadline = time.time() + 1.0
+    quiet = 0
     while time.time() < deadline:
-        while Gtk.events_pending():
+        if Gtk.events_pending():
             Gtk.main_iteration()
+            quiet = 0
+            continue
+        # ~0.2s with no pending events = the selection handover has
+        # settled; no reason to burn the rest of the 1s window
+        quiet += 1
+        if quiet >= 4:
+            break
         time.sleep(0.05)
 
 

@@ -86,6 +86,7 @@ Kept: `targets`, `find_page`, `tab_info`, `_call` (read-only uses only).
 |---|---|---|
 | `ws_eval`/`_ws_eval` (`Runtime.evaluate` -> localStorage token read, consent DOM scan) | write (evaluate) | **DOCUMENTED GAP - requires developer decision.** The call is a pure READ in intent but travels on a banned transport. There is no OS-level equivalent for localStorage extraction; candidate replacements are (a) operator copies the token manually, (b) a Network-domain response sniff (also needs a ruling), or (c) a narrowly-scoped directive exception for this separate service. Not silently left as-is in spirit - flagged for a dedicated issue. |
 | `Page.bringToFront` (vk_token_issue) | write | `xdotool windowactivate` / `ctrl+9` on the target tab |
+| `GET /json/close/{id}` (vk_token_issue `_close_tab`, vk_token_service tab recycle) | write (tab close) | OS `ctrl+9` + `ctrl+w` on the target tab; same documented-gap bucket as the evaluate calls above - flagged for the dedicated vk_token_* issue |
 
 ### eyes-agent — legitimately read-only, STAYS
 

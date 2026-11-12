@@ -208,7 +208,10 @@ def run_recipe(name, params):
                     if not st.get("optional"):
                         return _result(f"step{i}: locate failed: {r}")
                     log_line.append(f"step{i} locate miss (optional): {st['target']}")
-                ctx[into] = (r["x"], r["y"])
+                # error dicts from the locator may carry no x/y at all
+                # ({"error": ...}) - .get keeps a miss a (-1,-1) miss
+                # instead of a KeyError crashing the step loop
+                ctx[into] = (r.get("x", -1), r.get("y", -1))
                 # hit flag for `if:`-gated follow-ups (e.g. click the
                 # located suggestion only when it was actually found):
                 # ctx['<into>_hit'] is "1" on hit, "" on miss
@@ -223,7 +226,10 @@ def run_recipe(name, params):
             elif act == "type":
                 hands.type_text(st["text"])
             elif act == "key":
-                hands.key(*st["keys"].split("+"))
+                # the chord string goes through UNSPLIT: splitting on
+                # '+' would hand xdotool 'key ctrl v' (two separate
+                # presses) instead of 'key ctrl+v' (the chord)
+                hands.key(st["keys"])
             elif act == "scroll":
                 hands.scroll(st.get("amount", 3), st.get("direction", "down"))
             elif act == "wait":
@@ -486,7 +492,7 @@ def call_tool(name, args):
         hands.type_text(args["text"])
         return {"ok": True}
     if name == "key":
-        hands.key(*args["keys"].split("+"))
+        hands.key(args["keys"])  # unsplit - see the recipe 'key' step
         return {"ok": True}
     if name == "scroll":
         hands.scroll(args.get("amount", 3), args.get("direction", "down"))
