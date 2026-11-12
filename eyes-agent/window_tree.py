@@ -17,9 +17,7 @@ import subprocess
 
 ENV = dict(os.environ)
 ENV["DISPLAY"] = os.environ.get("HANDS_DISPLAY", ":0")
-ENV["XAUTHORITY"] = os.environ.get(
-    "HANDS_XAUTHORITY", os.path.expanduser("~/.Xauthority")
-)
+ENV["XAUTHORITY"] = os.environ.get("HANDS_XAUTHORITY", os.path.expanduser("~/.Xauthority"))
 
 
 def list_windows():
@@ -51,8 +49,7 @@ def list_windows():
             h, rest = rest.split("+", 1)
             x, y = rest.split("+")[:2]
             wins.append(
-                {"id": wid, "x": int(x), "y": int(y),
-                 "w": int(w), "h": int(h), "title": title}
+                {"id": wid, "x": int(x), "y": int(y), "w": int(w), "h": int(h), "title": title}
             )
         except (IndexError, ValueError):
             continue  # malformed line - skip, don't fail the listing
@@ -64,8 +61,4 @@ def suspect_dialogs(min_w=100, min_h=60, max_w=1400, max_h=900):
     native dialogs. On this box it only ever sees X-wayland windows
     (Chrome's own dialogs render in-window and never appear here) -
     kept for envs where OS dialogs surface as real X windows."""
-    return [
-        w
-        for w in list_windows()
-        if min_w <= w["w"] <= max_w and min_h <= w["h"] <= max_h
-    ]
+    return [w for w in list_windows() if min_w <= w["w"] <= max_w and min_h <= w["h"] <= max_h]

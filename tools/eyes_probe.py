@@ -158,8 +158,11 @@ def _make_dirty(target_id):
     # read-back: the title field should now hold the pasted word
     try:
         t = next(
-            (x for x in cdp_client.targets()
-             if x.get("type") == "page" and x.get("id") == target_id),
+            (
+                x
+                for x in cdp_client.targets()
+                if x.get("type") == "page" and x.get("id") == target_id
+            ),
             None,
         )
         val = cdp_client.eval_js(

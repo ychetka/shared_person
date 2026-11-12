@@ -46,9 +46,7 @@ import cv2
 
 ENV = dict(os.environ)
 ENV["DISPLAY"] = os.environ.get("HANDS_DISPLAY", ":0")
-ENV["XAUTHORITY"] = os.environ.get(
-    "HANDS_XAUTHORITY", os.path.expanduser("~/.Xauthority")
-)
+ENV["XAUTHORITY"] = os.environ.get("HANDS_XAUTHORITY", os.path.expanduser("~/.Xauthority"))
 
 # mean gray level below which a capture counts as "black" - X clients
 # under Wayland can return exit 0 with an all-black frame (scrot does
@@ -190,8 +188,13 @@ def _xdg_portal_shot(path):
             "Screenshot",
             GLib.Variant(
                 "(sa{sv})",
-                ("", {"handle_token": GLib.Variant("s", token),
-                      "interactive": GLib.Variant("b", False)}),
+                (
+                    "",
+                    {
+                        "handle_token": GLib.Variant("s", token),
+                        "interactive": GLib.Variant("b", False),
+                    },
+                ),
             ),
             GLib.VariantType("(o)"),
             0,
@@ -243,9 +246,7 @@ def _cdp_shot(path, url_substr=None):
             return False, "no page target"
         cdp_client.activate_tab(t["id"])
         time.sleep(1.0)  # let the foregrounded surface produce a frame
-        r = cdp_client._call(
-            t["webSocketDebuggerUrl"], "Page.captureScreenshot", {"format": "png"}
-        )
+        r = cdp_client._call(t["webSocketDebuggerUrl"], "Page.captureScreenshot", {"format": "png"})
         data = r.get("result", {}).get("data")
         if not data:
             return False, f"no data in reply: {str(r.get('error'))[:120]}"
