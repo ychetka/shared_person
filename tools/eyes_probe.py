@@ -5,8 +5,8 @@ OS-actuated per the CDP read-only directive (issue #127).
 
 Flow (no Runtime.evaluate, no Target.*, no Page.reload anywhere):
   1. tab_ctl.open_tab_bg('https://habr.com/ru/sandbox/new/') - OS key
-     chords only: ctrl+t -> paste URL -> Enter -> ctrl+shift+tab back
-     so the SPA initializes occluded -> settle -> ctrl+9 to activate.
+     chords only: ctrl+t -> type URL -> Enter -> ctrl+shift+tab back
+     so the SPA initializes occluded -> settle -> verified activate.
      (Foreground INIT of this SPA can wedge the renderer - verified
      live 2026-11-12.)
   2. attach a second page ws, Page.enable, watch for dialog events
@@ -200,20 +200,23 @@ def _reload_os():
 
 
 def _try_habr_variant(settle_s):
-    """Real-composer leg. Returns (verdict_dict, url_substr|None).
+    """Real-composer leg. Returns (verdict_dict, url_substr|None,
+    target_id|None) - the id binds later _force_close calls to the
+    exact tab this leg created.
 
     Any exception mid-leg still force-closes the test tab - a thrown
     _make_dirty failure must not strand a possibly-dirty,
     beforeunload-armed tab in the operator's browser."""
     opened = tab_ctl.open_tab_bg(HABL_COMPOSER, settle_s=settle_s, activate=True)
     if not opened.get("ok"):
-        return {"variant_error": opened}, None
+        return {"variant_error": opened}, None, None
     tab_sel = "habr.com/ru/sandbox"
+    tid = opened.get("target_id")
 
     ws, aerr = dialog_watch.attach(url_substr=tab_sel)
     if ws is None:
-        _force_close(tab_sel)
-        return {"variant_error": f"attach failed: {aerr}"}, tab_sel
+        _force_close(tab_sel, tid)
+        return {"variant_error": f"attach failed: {aerr}"}, tab_sel, tid
     try:
         dirty = _make_dirty()
         _reload_os()
@@ -227,10 +230,10 @@ def _try_habr_variant(settle_s):
         if obs is not None:
             verdict["dismiss"] = _dismiss_dialog_os()
             time.sleep(2)
-        return verdict, tab_sel
+        return verdict, tab_sel, tid
     except Exception as e:  # noqa: BLE001 - close the dirty tab, then report
-        _force_close(tab_sel)
-        return {"variant_error": f"{type(e).__name__}: {e}"}, tab_sel
+        _force_close(tab_sel, tid)
+        return {"variant_error": f"{type(e).__name__}: {e}"}, tab_sel, tid
     finally:
         ws.close()
 
@@ -242,13 +245,14 @@ def _try_injected_variant():
     F5. Same event path, no Habr dependency."""
     opened = tab_ctl.open_tab_bg("about:blank", settle_s=2, activate=True)
     if not opened.get("ok"):
-        return {"variant_error": opened}, None
+        return {"variant_error": opened}, None, None
     tab_sel = "about:blank"
+    tid = opened.get("target_id")
 
     ws, aerr = dialog_watch.attach(url_substr=tab_sel)
     if ws is None:
-        _force_close(tab_sel)
-        return {"variant_error": f"attach failed: {aerr}"}, tab_sel
+        _force_close(tab_sel, tid)
+        return {"variant_error": f"attach failed: {aerr}"}, tab_sel, tid
     try:
         hands.key("ctrl+l")
         time.sleep(0.3)
@@ -265,26 +269,45 @@ def _try_injected_variant():
         if obs is not None:
             verdict["dismiss"] = _dismiss_dialog_os()
             time.sleep(2)
-        return verdict, tab_sel
+        return verdict, tab_sel, tid
     except Exception as e:  # noqa: BLE001 - never strand the armed test tab
-        _force_close(tab_sel)
-        return {"variant_error": f"{type(e).__name__}: {e}"}, tab_sel
+        _force_close(tab_sel, tid)
+        return {"variant_error": f"{type(e).__name__}: {e}"}, tab_sel, tid
     finally:
         ws.close()
 
 
-def _force_close(tab_sel):
-    """Close a possibly-dirty test tab (the LAST tab - open_tab_bg
-    always leaves the probe tab at strip end). ctrl+9 activates it,
-    ctrl+w closes; an armed beforeunload prompt is answered with the
-    OS Return keypress, then the close is retried once."""
-    if cdp_client.find_page(tab_sel) is None:
+def _find_target(tab_sel, target_id=None):
+    """Resolve OUR test tab in /json/list: by target id when the
+    open_tab_bg handshake supplied one (exact - a second Habr tab can
+    share the url substring), else by url substring."""
+    if target_id:
+        for t in cdp_client.targets():
+            if t.get("type") == "page" and t.get("id") == target_id:
+                return t
+        return None
+    return cdp_client.find_page(tab_sel)
+
+
+def _force_close(tab_sel, target_id=None):
+    """Close OUR possibly-dirty test tab - verified, never blind.
+
+    The old version assumed ctrl+9 'last tab' == our tab: any tab
+    appended in the meantime made ctrl+w close an innocent. Now
+    activate_tab (tab_ctl) only returns True once the ACTIVE window
+    title contains our tab's title marker; without that proof the
+    close is refused rather than fired at a wrong tab. An armed
+    beforeunload prompt is answered with the OS Return keypress, then
+    the verified activate+close is retried once."""
+    t = _find_target(tab_sel, target_id)
+    if t is None:
         return
-    hands.key("ctrl+9")
-    time.sleep(0.5)
+    marker = t.get("title") or ""
+    if not tab_ctl.activate_tab(marker):
+        return  # unverified - do NOT ctrl+w a tab we cannot prove is ours
     hands.key("ctrl+w")
     time.sleep(1.5)
-    if cdp_client.find_page(tab_sel) is None:
+    if _find_target(tab_sel, target_id) is None:
         return
     ws, _aerr = dialog_watch.attach(url_substr=tab_sel)
     if ws is not None:
@@ -293,9 +316,8 @@ def _force_close(tab_sel):
             _dismiss_dialog_os()
         ws.close()
     time.sleep(1)
-    if cdp_client.find_page(tab_sel) is not None:
-        hands.key("ctrl+9")
-        time.sleep(0.5)
+    t = _find_target(tab_sel, target_id)
+    if t is not None and tab_ctl.activate_tab(t.get("title") or marker):
         hands.key("ctrl+w")
 
 
@@ -311,7 +333,7 @@ def main():
     }
 
     print(f">> habr variant: open_tab_bg settle {settle}s...", file=sys.stderr)
-    habr, habr_sel = _try_habr_variant(settle)
+    habr, habr_sel, habr_tid = _try_habr_variant(settle)
     result["habr"] = habr
 
     if habr.get("dialog_seen"):
@@ -329,13 +351,13 @@ def main():
         result["hang_without_event"] = (pixels is False) if pixels is not None else None
         if habr_sel:
             print(">> habr variant produced no dialog - closing test tab", file=sys.stderr)
-            _force_close(habr_sel)
+            _force_close(habr_sel, habr_tid)
 
         print(">> injected variant: about:blank + typed onbeforeunload...", file=sys.stderr)
-        inj, inj_sel = _try_injected_variant()
+        inj, inj_sel, inj_tid = _try_injected_variant()
         result["injected"] = inj
         if inj_sel:
-            _force_close(inj_sel)
+            _force_close(inj_sel, inj_tid)
         if inj.get("dialog_seen"):
             result.update(
                 dialog_seen=True,
@@ -347,7 +369,7 @@ def main():
     # the habr test tab is dirty-but-dismissed or clean - close it last
     # so a lingering prompt can never wedge the profile
     if habr.get("dialog_seen") and habr_sel:
-        _force_close(habr_sel)
+        _force_close(habr_sel, habr_tid)
 
     print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
     return 0 if result["dialog_seen"] else 1

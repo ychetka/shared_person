@@ -4,6 +4,14 @@
 Fallback chain (mirrors hands-agent/vision.py's shape, honest about
 this box):
 
+  0. ImageMagick `import -window <XID>` on the newest visible Chrome
+     window - the PRIMARY method for this contour: real window
+     pixels including browser chrome AND native dialogs (verified
+     live: the beforeunload prompt is captured), which is exactly
+     what the blocker observer needs. Under Xwayland the XID grab
+     can return stale/black pixels for an occluded window, so the
+     window is raised first (best-effort xdotool windowactivate) and
+     the black-frame detector still guards the result.
   1. ImageMagick `import -window root` on HANDS_DISPLAY - X11/Xwayland
      root capture. On GNOME Wayland the Xwayland root either denies the
      grab (exit != 0) or returns an all-black frame with exit 0; the
@@ -79,6 +87,42 @@ def _run_x11(tool_args, path, timeout=20):
     if _is_black(path):
         return False, "black frame (X client sees no real pixels under Wayland)"
     return True, None
+
+
+def _chrome_window_id():
+    """XID of the newest visible Chrome window, or None. Shared by
+    _x_window_shot and _activate_chrome_window."""
+    try:
+        r = subprocess.run(
+            ["xdotool", "search", "--onlyvisible", "--class", "chrome"],
+            env=ENV,
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        return None
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        return None
+    wins = [w for w in r.stdout.decode(errors="replace").split() if w]
+    return wins[-1] if wins else None
+
+
+def _x_window_shot(path):
+    """`import -window <XID>` on the newest visible Chrome window.
+
+    The one method in the chain that sees the REAL browser window:
+    page content AND native UI (tab strip, beforeunload/auth/prompt
+    dialogs) - verified live on this box. The window is raised first
+    because an occluded Xwayland window can hand back stale/black
+    pixels; the black-frame check in _run_x11 still gates the
+    result."""
+    wid = _chrome_window_id()
+    if wid is None:
+        return False, "no visible chrome window (xdotool search)"
+    _activate_chrome_window()  # best-effort raise - capture is attempted either way
+    time.sleep(0.5)
+    return _run_x11(["import", "-window", wid], path)
 
 
 def _import_shot(path):
@@ -237,26 +281,12 @@ def _activate_chrome_window():
     input. Best-effort: returns (ok, reason) and never raises - the
     caller still attempts the capture when activation fails (the tab
     may already be foreground)."""
-    try:
-        r = subprocess.run(
-            ["xdotool", "search", "--onlyvisible", "--class", "chrome"],
-            env=ENV,
-            check=True,
-            capture_output=True,
-            timeout=10,
-        )
-    except FileNotFoundError:
-        return False, "xdotool not found"
-    except subprocess.TimeoutExpired:
-        return False, "xdotool search timeout"
-    except subprocess.CalledProcessError as e:
-        return False, f"xdotool search exit {e.returncode}"
-    wins = [w for w in r.stdout.decode(errors="replace").split() if w]
-    if not wins:
-        return False, "no visible chrome window"
+    wid = _chrome_window_id()
+    if wid is None:
+        return False, "no visible chrome window (xdotool search)"
     try:
         subprocess.run(
-            ["xdotool", "windowactivate", wins[-1]],
+            ["xdotool", "windowactivate", wid],
             env=ENV,
             check=True,
             capture_output=True,
@@ -308,9 +338,12 @@ def _cdp_shot(path, url_substr=None):
     return True, None
 
 
-# chain order: cheap X11 tools first (they fail fast on Wayland), then
-# the portable session paths, CDP as the reliable page-level last resort
+# chain order: the Chrome-window grab first - it is the only method
+# that sees native dialogs and is verified working on this box; then
+# cheap X11 tools (they fail fast on Wayland), the portable session
+# paths, and CDP as the reliable page-level last resort
 _CHAIN = [
+    ("x_window", _x_window_shot),
     ("import_root", _import_shot),
     ("scrot", _scrot_shot),
     ("gnome-screenshot", _gnome_screenshot),

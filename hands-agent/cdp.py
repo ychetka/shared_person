@@ -43,17 +43,36 @@ def find_page(substr):
     return None
 
 
-def tab_info(url_substr):
-    """Read-only page location read-back for the tab whose URL contains
-    url_substr -> {url, title} straight from the /json/list endpoint
-    (no websocket, no evaluate). This is the post-publish URL read-back
-    the habr result channel needs; it replaces the old
-    Runtime.evaluate location probe. Returns None when no tab matches.
-    """
-    t = find_page(url_substr)
-    if t is None:
+def tab_info(url_substr=None, title_substr=None, target_id=None):
+    """Read-only page location read-back straight from /json/list (no
+    websocket, no evaluate) -> {url, title, id} of the tab matching
+    ALL supplied criteria. Replaces the removed Runtime.evaluate
+    location probe.
+
+    Every supplied criterion must match; an EMPTY criterion can never
+    match - an unformatted '{tab_id}' resolving to "" must degrade to
+    a miss, never widen into 'first Habr tab' (the false published-
+    URL bug from review round 2: a bare url-substring match could
+    return a DIFFERENT Habr tab's URL). Recipes should bind the
+    read-back to the tab the run created via `id: "{tab_id}"` (ctx is
+    populated by the open_tab_bg step); url/title criteria stay
+    available as additional filters. Returns None when nothing
+    matches or no criterion was supplied."""
+    if url_substr is None and title_substr is None and target_id is None:
         return None
-    return {"url": t.get("url"), "title": t.get("title")}
+    for t in targets():
+        if t.get("type") != "page":
+            continue
+        if target_id is not None and (not target_id or t.get("id") != target_id):
+            continue
+        if url_substr is not None and (not url_substr or url_substr not in (t.get("url") or "")):
+            continue
+        if title_substr is not None and (
+            not title_substr or title_substr.lower() not in (t.get("title") or "").lower()
+        ):
+            continue
+        return {"url": t.get("url"), "title": t.get("title"), "id": t.get("id")}
+    return None
 
 
 def _call(ws_url, method, params=None, mid=1):

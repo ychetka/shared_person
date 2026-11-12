@@ -7,8 +7,9 @@ name: habr_post
 #
 # CDP READ-ONLY DIRECTIVE (issue #127): no Runtime.evaluate, no
 # Target.*, no DOM-driven steps anywhere in this recipe. Tab control
-# is OS-level (open_tab_bg: ctrl+t -> paste -> Enter -> ctrl+shift+tab
-# back so the SPA initializes occluded -> settle -> ctrl+9 activate -
+# is OS-level (open_tab_bg: ctrl+t -> type URL -> Enter ->
+# ctrl+shift+tab back so the SPA initializes occluded -> settle ->
+# title-verified activate -
 # the live-verified workaround for the Habr renderer wedging on a
 # FOREGROUND init). Element targeting is screenshot-driven: `locate`
 # (vision model over the current screen) answers coords, `click` hits
@@ -100,6 +101,7 @@ steps:
   # the /json tab listing answers it without touching the page
   - action: tab_url
     url: "habr.com/ru/sandbox"
+    id: "{tab_id}"
     into: blk_sandbox
     optional: true
   - action: emit
@@ -126,35 +128,39 @@ steps:
   # The hub selector is a tag input with an autocomplete popup. Per the
   # directive the suggestion is CLICKED by coordinates - never
   # paste+Enter, which accepted the raw text instead of the resolved
-  # hub (the hubs autocomplete gap). {hubs} arrives as a JSON list -
-  # expand per-hub in a verified run; for now the joined list is pasted
-  # (TODO: loop), then the first suggestion item is clicked when the
-  # popup locator finds it, else the run fails closed.
+  # hub (the hubs autocomplete gap). {hubs} arrives as a JSON list and
+  # is entered ONE HUB PER ITERATION (for_each): typing a Python-repr
+  # list ('['a', 'b']') resolved garbage, so each element is typed into
+  # the field, the autocomplete popup is located, and its first
+  # suggestion clicked - fail closed when no suggestion resolves.
   - action: locate
     target: "the hubs input field (RU label 'Hubs')"
     hint: "tag-style input below the title"
   - action: click
-  - action: set_clipboard
-    text: "{hubs}"
-  - action: key
-    keys: "ctrl+v"
-  - action: wait
-    seconds: 2
-  - action: locate
-    target: "the first item in the autocomplete suggestion popup under the hubs input"
-    hint: "dropdown list item matching the typed hub name"
-    into: sug
-    optional: true
-  - action: click
-    pos: sug
-    if: "{sug_hit}"
-  # no suggestion resolved -> fail closed (negated if: runs when
-  # sug_hit is empty); the banned Enter-fallback would submit raw text
-  - action: fail
-    reason: "hubs autocomplete produced no clickable suggestion - refusing Enter fallback"
-    if: "!{sug_hit}"
-  - action: wait
-    seconds: 1
+  - action: for_each
+    items: hubs
+    as: hub
+    steps:
+      - action: type
+        text: "{hub}"
+      - action: wait
+        seconds: 2
+      - action: locate
+        target: "the first item in the autocomplete suggestion popup under the hubs input"
+        hint: "dropdown list item matching the typed hub name '{hub}'"
+        into: sug
+        optional: true
+      - action: click
+        pos: sug
+        if: "{sug_hit}"
+      # no suggestion resolved -> fail closed (negated if: runs when
+      # sug_hit is empty); the banned Enter-fallback would submit raw
+      # text
+      - action: fail
+        reason: "hubs autocomplete produced no clickable suggestion for '{hub}' - refusing Enter fallback"
+        if: "!{sug_hit}"
+      - action: wait
+        seconds: 1
   # ---------- body ----------
   # markdown mode: long bodies go through the clipboard, never
   # type_text (human-speed typing a 10k article blows the result
@@ -218,8 +224,12 @@ steps:
   - action: shot
     name: habr_3_published.png
   # ---------- URL read-back (the verification) ----------
-  # /json tab listing -> the tab's url/title. No page is touched.
+  # /json tab listing -> OUR tab's url/title, bound by the target id
+  # the open_tab_bg step recorded - a bare 'habr.com' substring could
+  # read back a DIFFERENT Habr tab and publish a false external_id.
+  # No page is touched.
   - action: tab_url
+    id: "{tab_id}"
     url: "habr.com"
     into: page
   - action: emit
