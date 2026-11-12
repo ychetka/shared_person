@@ -469,7 +469,7 @@ const main = async () => {
     check(
       "S7 claim lines bounded at 640 chars incl. head (issue #56)",
       Array.isArray(vlines) && vlines.every((v) => v.length <= 640),
-      JSON.stringify(vlines && vlines.map((v) => v.length)),
+      JSON.stringify(vlines?.map((v) => v.length)),
     );
     check(
       "S7 dataset-less image task keeps its caption claim",

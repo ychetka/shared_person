@@ -805,13 +805,13 @@ const main = async () => {
       !!pub &&
         Array.isArray(pub.media_failed) &&
         pub.media_failed.some((m) => m.includes("fig2.png") && m.includes("***")),
-      JSON.stringify(pub && pub.media_failed),
+      JSON.stringify(pub?.media_failed),
     );
     check(
       "S12 scrub: raw bearer token leaks nowhere observable",
       !JSON.stringify(ledger).includes(BASE_ENV.LINKEDIN_ACCESS_TOKEN) &&
         !JSON.stringify(results).includes(BASE_ENV.LINKEDIN_ACCESS_TOKEN),
-      JSON.stringify(pub && pub.media_failed),
+      JSON.stringify(pub?.media_failed),
     );
   }
 
