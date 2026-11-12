@@ -51,12 +51,15 @@ name: habr_post
 # HONEST STATUS: navigation + blocked-surface probes live-verified
 # 2026-11-12 against the real site (the logged-out blk_login probe
 # caught the login wall on /ru/articles/new/ as designed); the
-# composer fill is verified pending a logged-in account. Without
-# publish_go the recipe is a dry-run proof: filled composer, proof
-# shots, never publishes. See docs/habr-driver-spec.md.
+# sandbox-composer URL /ru/sandbox/new/ verified 2026-11-12 on the
+# logged-in audit profile (200, SPA shell - field probes verified
+# pending the fill leg). The composer fill itself is verified
+# pending a full run. Without publish_go the recipe is a dry-run
+# proof: filled composer, proof shots, never publishes.
+# See docs/habr-driver-spec.md and docs/habr-account-state.md.
 steps:
   # ---------- open the composer ----------
-  # article: /ru/articles/new/ gated on {title} (present only for
+  # article: /ru/sandbox/new/ gated on {title} (present only for
   # kind=article); post short form: /ru/posts/new/ gated on
   # {post_kind} (the driver sends it true - 'kind' alone cannot
   # express 'not article' in the if-semantics). Adjust the post URL
@@ -67,7 +70,10 @@ steps:
     keys: "ctrl+l"
     if: "{title}"
   - action: set_clipboard
-    text: "https://habr.com/ru/articles/new/"
+    # sandbox-tier account: /ru/articles/new/ is a 404 for it; the
+    # sandbox composer lives at /ru/sandbox/new/. Verify per-account
+    # before enabling: full accounts may keep /ru/articles/new/.
+    text: "https://habr.com/ru/sandbox/new/"
     if: "{title}"
   - action: key
     keys: "ctrl+v"
