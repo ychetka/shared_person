@@ -89,7 +89,12 @@ def type_text(text, wpm_range=(30, 60)):
 
 
 def key(*keys):
-    _xd("key", *keys)
+    """Send ONE key combo to xdotool. A chord must arrive as a single
+    `key` argument - `xdotool key ctrl v` presses ctrl, releases it,
+    then presses v (two separate keys, NOT ctrl+v), which is why every
+    caller passes chord syntax ('ctrl+v', 'ctrl+shift+Tab') or
+    separate args that get joined back into one chord string here."""
+    _xd("key", "+".join(str(k) for k in keys))
     time.sleep(random.uniform(0.05, 0.15))
 
 
@@ -111,6 +116,10 @@ def set_clipboard(text):
     """
     import gi
 
+    # Gdk MUST be pinned before Gtk: an unpinned `from gi.repository
+    # import Gdk` loads Gdk 4.0 (newest) and Gtk 3.0 then fails with
+    # 'Gdk 4.0 is already loaded' (hit live in tab_ctl's first caller).
+    gi.require_version("Gdk", "3.0")
     gi.require_version("Gtk", "3.0")
     from gi.repository import Gdk, Gtk
 
@@ -120,6 +129,25 @@ def set_clipboard(text):
     cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
     cb.set_text(str(text), -1)
     cb.store()
+    # The X selection handover is async: ownership is only claimed and
+    # content only served while THIS process pumps its main context.
+    # Without a pump, a ctrl+v issued right after can read the PREVIOUS
+    # owner's content (verified live: a stale paste searched the old
+    # clipboard text instead of the URL). Pump pending events and give
+    # the transfer a short real window before returning.
+    deadline = time.time() + 1.0
+    quiet = 0
+    while time.time() < deadline:
+        if Gtk.events_pending():
+            Gtk.main_iteration()
+            quiet = 0
+            continue
+        # ~0.2s with no pending events = the selection handover has
+        # settled; no reason to burn the rest of the 1s window
+        quiet += 1
+        if quiet >= 4:
+            break
+        time.sleep(0.05)
 
 
 def wait_for_image(template_path, timeout=10, confidence=0.85):

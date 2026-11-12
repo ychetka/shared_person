@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""Self-contained CDP plumbing for eyes-agent.
+"""Self-contained CDP plumbing for eyes-agent - READ-OBSERVE ONLY.
 
-Mirrors the hands-agent/cdp.py API shape (targets / find_page / _call /
-eval_js) plus the open_tab pattern proven on issue #74 (background
-Target.createTarget -> settle -> activateTarget), kept as a private
-copy per the boundary rule: all screenshot/CDP kitchen lives INSIDE
-eyes-agent so the service carries no import-time dependency on the
-hands-agent directory.
+The CDP read-only directive (issue #127) leaves eyes-agent exactly this
+allowed set:
+  - /json/list + /json/version HTTP enumeration (targets, find_page)
+  - Page.enable + Page.javascriptDialogOpening/Closed event
+    subscription on a persistent page socket (PageWs) - the
+    corroborating js_dialog channel in dialog_watch
+  - Page.captureScreenshot (capture.py page-viewport fallback)
+  - Page.handleJavaScriptDialog ONLY through dialog_watch.dismiss,
+    hard-gated on EYES_ALLOW_DISMISS=1 (emergency un-wedge path)
+
+REMOVED per the directive (not gated - removed): eval_js /
+Runtime.evaluate entirely, and the browser-domain Target.* writers
+open_tab/close_tab/activateTab. Tab actuation now lives in
+hands-agent/tab_ctl.py as real OS input (ctrl+t / ctrl+shift+tab /
+ctrl+9 / ctrl+w). See docs/cdp-write-audit.md.
 
 Requires: websocket-client (python3-websocket).
 """
@@ -57,94 +66,14 @@ def _call(ws_url, method, params=None, mid=1, timeout=30):
         ws.close()
 
 
-def eval_js(ws_url, expr):
-    """Evaluate expr on a page target; returns the JS value (None for
-    a legit undefined/null). Raises RuntimeError on a JS exception AND
-    on transport failure (timeout / dead socket) - a suspended
-    renderer must never read as a clean 'undefined' result."""
-    r = _call(
-        ws_url,
-        "Runtime.evaluate",
-        {"expression": expr, "returnByValue": True, "awaitPromise": True},
-    )
-    res = r.get("result", {})
-    if r.get("error"):
-        # transport failure (e.g. a renderer suspended behind a native
-        # dialog timed the call out) - surfaced as an exception so a
-        # caller can never mistake it for a legit JS undefined/None
-        raise RuntimeError(f"cdp transport: {r['error']}")
-    if res.get("exceptionDetails"):
-        raise RuntimeError(
-            str(res["exceptionDetails"].get("exception", {}).get("description", "js error"))[:200]
-        )
-    return res.get("result", {}).get("value")
-
-
-def _browser_ws_url():
-    """Browser-level websocket (NOT a page ws) - the endpoint for
-    browser-domain commands like Target.createTarget/activateTarget/
-    closeTarget. These answer instantly regardless of renderer health."""
-    v = json.loads(urllib.request.urlopen(f"{DEBUG}/json/version", timeout=10).read())
-    return v["webSocketDebuggerUrl"]
-
-
-def open_tab(url, settle_s=45, activate=True):
-    """Open a URL in a NEW BACKGROUND tab via CDP, let it settle, then
-    bring it to the foreground.
-
-    Why background: a heavy SPA (Habr composer) that INITIALIZES in a
-    foreground tab can wedge the renderer on this box (GNOME Wayland +
-    Xwayland Chrome, software rendering) - verified live 2026-11-12:
-    3/3 background loads reached readyState=complete and stayed
-    responsive, 2/2 foreground loads hung permanently. Browser-domain
-    commands answer on the browser socket instantly even when no
-    renderer is healthy, so the ws timeout is never in play.
-
-    Returns {"ok": True, "target_id": ...} or {"error": ...}."""
-    try:
-        ws_url = _browser_ws_url()
-    except Exception as e:  # noqa: BLE001 - transport/HTTP failure surfaces as a plain error
-        return {"error": f"browser ws: {e}"}
-    r = _call(ws_url, "Target.createTarget", {"url": url, "newWindow": False, "background": True})
-    if r.get("error"):
-        return {"error": f"Target.createTarget: {r['error']}"}
-    target_id = r.get("result", {}).get("targetId")
-    if not target_id:
-        return {"error": f"Target.createTarget: no targetId in {r}"}
-    # the tab loads while backgrounded - renderer-safe settle window
-    time.sleep(settle_s)
-    if activate:
-        r = _call(ws_url, "Target.activateTarget", {"targetId": target_id})
-        if r.get("error"):
-            return {"error": f"Target.activateTarget: {r['error']}"}
-        # let the now-foregrounded page run its deferred init while healthy
-        time.sleep(5)
-    return {"ok": True, "target_id": target_id}
-
-
-def close_tab(target_id):
-    """Close a tab by target id (browser-domain command). A dirty page's
-    beforeunload prompt can appear here too - callers needing a clean
-    close on a possibly-armed page should dismiss first."""
-    try:
-        ws_url = _browser_ws_url()
-    except Exception as e:  # noqa: BLE001 - CDP outage must still honour the {error} contract
-        return {"error": f"browser ws: {e}"}
-    r = _call(ws_url, "Target.closeTarget", {"targetId": target_id})
-    if r.get("error"):
-        return {"error": f"Target.closeTarget: {r['error']}"}
-    return {"ok": True}
-
-
-def activate_tab(target_id):
-    try:
-        ws_url = _browser_ws_url()
-    except Exception as e:  # noqa: BLE001 - same {error} contract as close_tab/open_tab
-        return {"error": f"browser ws: {e}"}
-    r = _call(ws_url, "Target.activateTarget", {"targetId": target_id})
-    if r.get("error"):
-        return {"error": f"Target.activateTarget: {r['error']}"}
-    return {"ok": True}
+def tab_info(url_substr):
+    """Read-only location/title read-back straight from /json/list -
+    no websocket, no evaluate. Replaces the removed Runtime.evaluate
+    state probe for callers that only need 'where did this tab land'."""
+    t = find_page(url_substr)
+    if t is None:
+        return None
+    return {"url": t.get("url"), "title": t.get("title"), "id": t.get("id")}
 
 
 class PageWs:

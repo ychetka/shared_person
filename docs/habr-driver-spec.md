@@ -164,9 +164,14 @@ is a blind `maybe_live` - the channel is a hard precondition, not a
 nice-to-have.
 
 Recipe mechanics are spec'd in habr-integration-spec 2.2 (composer
-steps, locate/verify hub multi-select, `set_clipboard`/CDP
-`insert_text` for the body, file-chooser media attach, preview shot,
-exact-match "Опубликовать", post-publish shot). The driver adds:
+steps, locate/verify hub multi-select, `set_clipboard` for the body,
+file-chooser media attach, preview shot, exact-match the publish button,
+post-publish shot). **CDP read-only invariant (issue #127):** the
+recipe contains zero CDP writes - no Runtime.evaluate, no Target.\*,
+no DOM-driven steps. Tabs open via `open_tab_bg` (OS key chords -
+the background-load trick for the foreground-init renderer wedge);
+element targeting is `locate` (screenshot -> coords) + OS `click`;
+the URL read-back is the `/json` tab listing (`tab_url`). The driver adds:
 
 - 1 publication per recipe run (spec 2.3 pacing).
 - Scheduling constraint, enforced at the sp-publish level BEFORE
@@ -209,8 +214,10 @@ four actions map to the spec vocabulary:
 A recipe failure after the "Опубликовать" click is the transport-loss
 analog: the article may be live while the result file never arrived.
 Probe (habr-integration-spec 2.4): open the profile publications page
-(`HABR_PROFILE_URL` or the recipe's own profile read) and `dom_text`
--match the publication title: exact title match bounded by a recency
+(`HABR_PROFILE_URL`) via `open_tab_bg`, `locate` the publication title
+on the screenshot, click it with real OS input, and read the landed
+article URL back from the `/json` tab listing (`tab_url`). Exact title
+match bounded by a recency
 window (recent entries on the publications page only). "Habr titles
 are unique per account" is an assumption to verify at probe-build
 time, not a documented platform guarantee - the recency bound is
@@ -282,10 +289,13 @@ writer's `text` maps mechanically:
 Tracked in the driver issue - none of this exists today
 (habr-integration-spec 4):
 
-1. `set_clipboard` (xclip/xsel) or a CDP `insert_text` action on
-   `cdp.py` - article bodies are far beyond jittered-type size.
-2. `dom_text`/location read action - for the URL read-back, the
-   probe's title check and the future `habr_metrics` counters.
+1. `set_clipboard` (PyGObject Gtk clipboard holder) - article bodies
+   are far beyond jittered-type size. A CDP `insert_text` action is
+   NOT an option: Input.\*/Runtime.evaluate are banned by the read-only
+   directive.
+2. `tab_url` location read-back (read-only `/json` listing) - for the
+   URL read-back and the future `habr_metrics` counters. The probe's
+   title check is `locate` + OS click + `tab_url` on the landed tab.
 3. Worker result channel `queue/done/<task_id>.result.json` - without
    it `external_ids` cannot be recorded and every publish is blind.
 
