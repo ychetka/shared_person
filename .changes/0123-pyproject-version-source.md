@@ -17,6 +17,4 @@ refs: issue #123
 ---
 
 ## Spec impact
-- New file pyproject.toml at the git toplevel with a minimal
-  [project] table (name, version, requires-python). No build or
-  packaging behavior is introduced.
+-
