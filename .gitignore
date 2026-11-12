@@ -37,3 +37,5 @@ rubric-lint/python/
 # hands-agent queue is runtime state (n8n inbox, worker done/failed)
 hands-agent/queue/inbox/
 hands-agent/queue/failed/
+# consumed-result bookkeeping files are runtime artifacts, not VCS content
+hands-agent/queue/done/*.consumed
