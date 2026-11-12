@@ -58,6 +58,10 @@ captcha-in-page) are detected by **templates** (`detector.py` +
   reports `{available:false}` — pytesseract absent, not hard-required.
 - `observation.py` — schema + `observe(url_substr, max_age_ms, last)`
   convenience.
+- `window_tree.py` — thin aux: X11 top-level window listing via
+  `xwininfo`. Sees only X windows (Chrome's dialogs render in-window;
+  GNOME dialogs are Wayland surfaces) — geometry evidence and an aux
+  for pure-X11 envs, not a dialog detector here.
 - `templates/` — exemplar library + `manifest.json`
   (`{id, class, detect, file, source_desc, captured_via, crop_region,
   match_threshold, added}`).
