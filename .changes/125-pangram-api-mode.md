@@ -19,6 +19,4 @@ refs: issue #125
 ---
 
 ## Spec impact
-- adds: -
-- modifies: -
-- removes: -
+-
