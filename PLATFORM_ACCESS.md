@@ -142,7 +142,7 @@ and how they were obtained. All secrets are in `../ENV` (never committed).
 
 ## Go-live checklist
 
-Before flipping `PUBLISH_SIMULATE=0`:
+Rules and post-flip verification steps around `PUBLISH_SIMULATE=0`:
 
 - **No test posts (hard rule, issue #58 directive).** Verification of
   the media upload path happens on the FIRST REAL post, never via
@@ -150,10 +150,11 @@ Before flipping `PUBLISH_SIMULATE=0`:
   structure is fixed at generation time, so media presence must be
   confirmed on real output.
 - **First LI media publish verification (issue #58 item 2).** On the
-  first real LinkedIn post carrying media: confirm the metrics/result
-  channel reports a real `external_id` (not `sim-*`), and verify
-  server-side media presence on the published post (asset URNs on the
-  post body / media visible via the API read-back).
+  first real LinkedIn post carrying media: confirm `published.jsonl`
+  and the `publish/*` registry events carry a real `external_id` (not
+  `sim-*`) and the Telegram summary shows non-simulated status, then
+  verify server-side media presence on the published post (asset URNs
+  on the post body / media visible via the API read-back).
 - **Requeue-orphans policy (issue #58 item 4, accepted).** Re-upload
   of already-uploaded assets is idempotent by design — carrying over
   URNs risks stale/expired `digitalmediaAsset` references, so orphan

@@ -1,3 +1,4 @@
+---
 type: docs
 scope: docs
 user_visible: false

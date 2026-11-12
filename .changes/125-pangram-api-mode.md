@@ -1,3 +1,4 @@
+---
 # 125-pangram-api-mode.md - one file per PR, public-safe content only.
 # type: fix | feat | refactor | chore | docs
 type: feat
