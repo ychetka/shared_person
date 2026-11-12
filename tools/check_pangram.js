@@ -126,7 +126,7 @@ const mkFs = () => {
     readdirSync(p) {
       const d = norm(p);
       const n = nodes.get(d);
-      if (!n || !n.dir) throw err("ENOENT");
+      if (!n?.dir) throw err("ENOENT");
       const out = [];
       for (const k of nodes.keys()) {
         if (k !== d && norm(path.posix.dirname(k)) === d && !k.slice(d.length + 1).includes("/")) {
@@ -366,13 +366,13 @@ const main = async () => {
     check(
       "G1 gate off: no ai_check stamp",
       !!d && !d.ai_check && !d.ai_check_pending && d.status === "delivering",
-      JSON.stringify({ ai: d && d.ai_check, st: d && d.status }),
+      JSON.stringify({ ai: d?.ai_check, st: d?.status }),
     );
     const out = await runPoll(sc);
     check(
       "G1 gate off: poller answers 'gate off', sends nothing",
       out?.[0]?.json?.pangram_gate === "off" && sc.tgCalls.length === 0,
-      JSON.stringify(out && out[0] && out[0].json),
+      JSON.stringify(out?.[0]?.json),
     );
   }
 
@@ -389,7 +389,7 @@ const main = async () => {
         d.ai_check.reason === "short_text" &&
         d.ai_check.words === 50 &&
         !d.ai_check_pending,
-      JSON.stringify(d && d.ai_check),
+      JSON.stringify(d?.ai_check),
     );
     check("G2 short text: zero enqueue", dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0);
   }
@@ -426,7 +426,7 @@ const main = async () => {
       d?.ai_check_pending?.task === "pangram-g3" &&
         d.ai_check_pending.words === 160 &&
         d.ai_check_pending.text_fnv === fnv(text),
-      JSON.stringify(d && d.ai_check_pending),
+      JSON.stringify(d?.ai_check_pending),
     );
     const c = readJson(sc.fakeFs, CREDITS);
     check(
@@ -452,7 +452,7 @@ const main = async () => {
       d?.ai_check?.status === "skipped" &&
         d.ai_check.reason === "credit_cap" &&
         dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0,
-      JSON.stringify({ ai: d && d.ai_check, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
+      JSON.stringify({ ai: d?.ai_check, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
     );
     check(
       "G4 credit cap: ledger note",
@@ -502,7 +502,7 @@ const main = async () => {
         d.ai_check.confidence === 92 &&
         d.ai_check.text_fnv === fnv(text) &&
         !d.ai_check_pending,
-      JSON.stringify(d && d.ai_check),
+      JSON.stringify(d?.ai_check),
     );
     check(
       "G5 done: result file consumed",
@@ -554,7 +554,7 @@ const main = async () => {
     check(
       "G6 failed: ai_check 'failed', draft status untouched",
       d?.ai_check?.status === "failed" && d.status === "pending" && !d.ai_check_pending,
-      JSON.stringify({ ai: d && d.ai_check, st: d && d.status }),
+      JSON.stringify({ ai: d?.ai_check, st: d?.status }),
     );
   }
 
@@ -585,7 +585,7 @@ const main = async () => {
       sent.length === 1 &&
         /check failed.*WARN/.test(String(sent[0].body.text)) &&
         d?.ai_check?.status === "failed",
-      JSON.stringify({ sent: sent.map((c) => c.body.text), ai: d && d.ai_check }),
+      JSON.stringify({ sent: sent.map((c) => c.body.text), ai: d?.ai_check }),
     );
   }
 
@@ -615,7 +615,7 @@ const main = async () => {
     check(
       "G8 re-check: pending armed + budget spent",
       d?.ai_check_pending?.task === "pangram-g8" && d.ai_check.rechecks === 1,
-      JSON.stringify({ ai: d && d.ai_check, pend: d && d.ai_check_pending }),
+      JSON.stringify({ ai: d?.ai_check, pend: d?.ai_check_pending }),
     );
     // budget spent: a second text change re-enqueues nothing
     const sc2 = mkSc();
@@ -689,7 +689,7 @@ const main = async () => {
     check(
       "G10 inconclusive: notified stamped once",
       d?.ai_check?.notified === true,
-      JSON.stringify(d && d.ai_check),
+      JSON.stringify(d?.ai_check),
     );
     await runPoll(sc);
     check(
@@ -730,14 +730,14 @@ const main = async () => {
     check(
       "G12 queue missing: draft still written, skipped stamp",
       d?.status === "delivering" && d.ai_check?.reason === "queue_unavailable",
-      JSON.stringify({ st: d && d.status, ai: d && d.ai_check }),
+      JSON.stringify({ st: d?.status, ai: d?.ai_check }),
     );
     // poller with no dirs at all must exit quietly
     const out = await runPoll(sc);
     check(
       "G12 queue missing: poll exits quietly",
       out?.[0]?.json?.ok === true && sc.tgCalls.length === 0,
-      JSON.stringify(out && out[0] && out[0].json),
+      JSON.stringify(out?.[0]?.json),
     );
   }
 
@@ -780,7 +780,7 @@ const main = async () => {
     check(
       "G13 double-poll: settled stamp, pending consumed",
       d?.ai_check?.status === "done" && d.ai_check.reply_sent === true && !d.ai_check_pending,
-      JSON.stringify(d && d.ai_check),
+      JSON.stringify(d?.ai_check),
     );
     check(
       "G13 double-poll: loser's stale-consume note in ledger",
@@ -856,7 +856,7 @@ const main = async () => {
       d?.ai_check_pending?.task === "pangram-g15" &&
         Number(d.ai_check.rechecks || 0) === 0 &&
         d.ai_check.rearmed_on === today(),
-      JSON.stringify({ ai: d && d.ai_check, pend: d && d.ai_check_pending }),
+      JSON.stringify({ ai: d?.ai_check, pend: d?.ai_check_pending }),
     );
     // still-capped same day: ONE bound attempt, then quiet
     const sc2 = mkSc();
@@ -885,7 +885,7 @@ const main = async () => {
         logLines(sc2.fakeFs).filter((l) => l.action === "ai-check-rearm-credit-cap").length === 1,
       JSON.stringify({
         inbox: dirOf(sc2.fakeFs, `${HANDS}/inbox`),
-        ai: d2 && d2.ai_check,
+        ai: d2?.ai_check,
       }),
     );
     await runPoll(sc2);
@@ -937,7 +937,7 @@ const main = async () => {
     check(
       "G16 re-arm: mount still absent -> quiet, un-stamped",
       out?.[0]?.json?.ok === true && !d2?.ai_check?.rearmed_on && sc2.tgCalls.length === 0,
-      JSON.stringify({ out: out && out[0] && out[0].json, ai: d2 && d2.ai_check }),
+      JSON.stringify({ out: out?.[0]?.json, ai: d2?.ai_check }),
     );
   }
 
@@ -952,13 +952,13 @@ const main = async () => {
     check(
       "G17 gate typo: no enqueue, no stamp",
       dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0 && !!d && !d.ai_check && !d.ai_check_pending,
-      JSON.stringify({ ai: d && d.ai_check, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
+      JSON.stringify({ ai: d?.ai_check, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
     );
     const out = await runPoll(sc);
     check(
       "G17 gate typo: poll answers 'disabled', sends nothing",
       out?.[0]?.json?.pangram_gate === "disabled" && sc.tgCalls.length === 0,
-      JSON.stringify(out && out[0] && out[0].json),
+      JSON.stringify(out?.[0]?.json),
     );
     check(
       "G17 gate typo: disabled note in ledger",
@@ -972,7 +972,7 @@ const main = async () => {
     check(
       "G17 gate 'block': reserved value also disabled",
       out2?.[0]?.json?.pangram_gate === "disabled",
-      JSON.stringify(out2 && out2[0] && out2[0].json),
+      JSON.stringify(out2?.[0]?.json),
     );
   }
 
@@ -989,7 +989,7 @@ const main = async () => {
       d?.ai_check?.status === "skipped" &&
         d.ai_check.reason === "credit_cap" &&
         dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0,
-      JSON.stringify({ ai: d && d.ai_check, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
+      JSON.stringify({ ai: d?.ai_check, inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`) }),
     );
   }
 
@@ -1030,7 +1030,7 @@ const main = async () => {
       "G19 abort_reason: ai_check.error carries it too",
       d?.ai_check?.status === "failed" &&
         String(d.ai_check.error || "").includes("wrong_scan_panel"),
-      JSON.stringify(d && d.ai_check),
+      JSON.stringify(d?.ai_check),
     );
   }
 
@@ -1060,7 +1060,7 @@ const main = async () => {
     check(
       "G20 re-arm: pending armed, rearmed_on stamped",
       d?.ai_check_pending?.task === "pangram-g20" && d.ai_check.rearmed_on === today(),
-      JSON.stringify({ ai: d && d.ai_check, pend: d && d.ai_check_pending }),
+      JSON.stringify({ ai: d?.ai_check, pend: d?.ai_check_pending }),
     );
     // dead-branch guard: a settled 'failed' stamp carries 'error',
     // not 'reason' - TRANSIENT_SKIP has nothing to match, so the
@@ -1087,7 +1087,7 @@ const main = async () => {
         d2?.ai_check?.status === "failed",
       JSON.stringify({
         inbox: dirOf(sc2.fakeFs, `${HANDS}/inbox`),
-        ai: d2 && d2.ai_check,
+        ai: d2?.ai_check,
       }),
     );
   }
@@ -1138,7 +1138,7 @@ const main = async () => {
         d.ai_check.label === "AI Generated" &&
         d.ai_check.confidence === 100 &&
         !d.ai_check_pending,
-      JSON.stringify(d && d.ai_check),
+      JSON.stringify(d?.ai_check),
     );
     check(
       "G21 shadow: both files consumed",
@@ -1164,7 +1164,7 @@ const main = async () => {
         marker.json.draft_id === "g13" &&
         marker.json.chat_id === "4242" &&
         marker.json.ok !== false,
-      JSON.stringify(marker && marker.json),
+      JSON.stringify(marker?.json),
     );
   }
 

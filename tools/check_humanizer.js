@@ -1635,8 +1635,8 @@ const main = async () => {
           (c0) =>
             c0.url === "http://127.0.0.1:8790/score" &&
             String(c0.method || "").toUpperCase() === "POST" &&
-            typeof (c0.body || {}).text === "string" &&
-            ["en", "ru"].includes((c0.body || {}).lang),
+            typeof c0.body?.text === "string" &&
+            ["en", "ru"].includes(c0.body?.lang),
         ),
       JSON.stringify(
         sc.calls.map((c0) => ({ u: c0.url, m: c0.method, b: c0.body && Object.keys(c0.body) })),

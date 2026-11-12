@@ -120,7 +120,7 @@ const mkFs = () => {
     readdirSync(p) {
       const d = norm(p);
       const n = nodes.get(d);
-      if (!n || !n.dir) throw err("ENOENT");
+      if (!n?.dir) throw err("ENOENT");
       const out = [];
       for (const k of nodes.keys()) {
         if (k !== d && norm(path.posix.dirname(k)) === d && !k.slice(d.length + 1).includes("/")) {
@@ -417,7 +417,7 @@ const main = async () => {
     sc.items = [cbItem("ap:d1:v1", 9001)];
     await execNode(htuFactory, sc);
     const d = readJson(sc.fakeFs, `${DRAFTS}/d1.json`);
-    check("L1 approve: draft flipped to 'approved'", d && d.status === "approved", d && d.status);
+    check("L1 approve: draft flipped to 'approved'", d && d.status === "approved", d?.status);
     check(
       "L1 approve: queue file landed in publish root",
       sc.fakeFs.existsSync(`${PUBLISH}/d1.json`),
@@ -427,7 +427,7 @@ const main = async () => {
     check(
       "L1 approve: operator toast sent",
       !!ans && /queued/i.test(String(ans.body.text)),
-      ans && ans.body.text,
+      ans?.body.text,
     );
   }
 
@@ -462,7 +462,7 @@ const main = async () => {
         d2 &&
         d2.status === "pending" &&
         !s2.fakeFs.existsSync(`${PUBLISH}/d1.json`),
-      JSON.stringify({ ans: ans2 && ans2.body, st: d2 && d2.status }),
+      JSON.stringify({ ans: ans2?.body, st: d2?.status }),
     );
     check(
       "L2 interleave: 'approve-lock-busy' logged",
@@ -486,7 +486,7 @@ const main = async () => {
     check(
       "L3 steal: expired lock stolen, approve completed",
       d && d.status === "approved" && sc.fakeFs.existsSync(`${PUBLISH}/d1.json`),
-      d && d.status,
+      d?.status,
     );
     check(
       "L3 steal: stolen lock released after use",
@@ -616,13 +616,13 @@ const main = async () => {
     check(
       "D2 post-N request carries CONTENT_GEN_DISPATCH_MS",
       !!cg && cg.timeout === 15000,
-      cg && cg.timeout,
+      cg?.timeout,
     );
     const ok = sc.tgCalls.find((c) => c.method === "sendMessage");
     check(
       "D2 accepted dispatch still says 'sent to content-gen'",
       !!ok && /sent to content-gen/.test(String(ok.body.text)),
-      ok && ok.body.text,
+      ok?.body.text,
     );
   }
 
@@ -638,7 +638,7 @@ const main = async () => {
     check(
       "D3 unset env: dispatch timeout falls back to 15000",
       !!cg && cg.timeout === 15000,
-      cg && cg.timeout,
+      cg?.timeout,
     );
   }
   {
@@ -647,7 +647,7 @@ const main = async () => {
     check(
       "D3 env knob: a configured value reaches the request",
       !!cg && cg.timeout === 45000,
-      cg && cg.timeout,
+      cg?.timeout,
     );
   }
   {
@@ -656,7 +656,7 @@ const main = async () => {
     check(
       "D3 env floor: a sub-floor value clamps to 1000",
       !!cg && cg.timeout === 1000,
-      cg && cg.timeout,
+      cg?.timeout,
     );
   }
 
@@ -724,7 +724,7 @@ const main = async () => {
     check(
       "E1 replace-resend: text landed verbatim in the draft",
       !!d && d.text === "the resent corrected text",
-      d && d.text,
+      d?.text,
     );
     check(
       "E1 replace-resend: marker consumed by the landed edit",
@@ -766,11 +766,7 @@ const main = async () => {
     sc.items = [feedbackItem("please shorten the intro", 9312)];
     await execNode(htuFactory, sc);
     const d = readJson(sc.fakeFs, `${DRAFTS}/d7.json`);
-    check(
-      "E2 comment-resend: draft armed to 'rewrite'",
-      !!d && d.status === "rewrite",
-      d && d.status,
-    );
+    check("E2 comment-resend: draft armed to 'rewrite'", !!d && d.status === "rewrite", d?.status);
     check(
       "E2 comment-resend: feedback dispatched as mode:'rewrite'",
       sc.cgCalls.some(

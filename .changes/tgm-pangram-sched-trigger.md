@@ -19,6 +19,4 @@ refs: deployer audit of workflow_publication_trigger_status
 ---
 
 ## Spec impact
-- adds: -
-- modifies: -
-- removes: -
+-
