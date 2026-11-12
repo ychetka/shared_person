@@ -5,6 +5,17 @@ name: habr_post
 # figures - and completes it INCLUDING the final publish click. No
 # write API exists; this recipe IS the whole external layer.
 #
+# CDP READ-ONLY DIRECTIVE (issue #127): no Runtime.evaluate, no
+# Target.*, no DOM-driven steps anywhere in this recipe. Tab control
+# is OS-level (open_tab_bg: ctrl+t -> paste -> Enter -> ctrl+shift+tab
+# back so the SPA initializes occluded -> settle -> ctrl+9 activate -
+# the live-verified workaround for the Habr renderer wedging on a
+# FOREGROUND init). Element targeting is screenshot-driven: `locate`
+# (vision model over the current screen) answers coords, `click` hits
+# them with real OS input. locate REQUIRES GEMINI_API_KEY on the
+# worker - without it every locate step fails closed and the run
+# aborts before touching the page.
+#
 # Params (from the sp-publish driver's queue payload):
 #   kind        - 'article' (default) or 'post'
 #   post_kind   - true for kind=post (gates the short-form URL block)
@@ -14,101 +25,80 @@ name: habr_post
 #   tags        - optional tag list
 #   image_path  - optional КДПВ (host path - already translated)
 #   media       - optional inline figures (host paths)
-#   test        - when true, after the URL read-back the recipe
-#                 retracts the publication back to drafts and reports
-#                 {retracted:true} (a real boolean - emit passes
-#                 non-string YAML literals through typed)
+#   test        - retract-after-publish flag. NOTE: per the issue #58
+#                 directive update, live test:true/test posts are
+#                 banned - media verification happens via metrics on
+#                 REAL posts. The retract block stays for operator
+#                 drill runs only.
 #
 # Result: {ok, url, retracted?, media_attached?, abort_reason?,
-# last_step, publish_step} - url comes from the post-publish location
-# read-back (emit page url), which IS the verification the driver
-# records.
+# last_step, publish_step} - url comes from the post-publish /json
+# tab-listing read-back (tab_url -> emit page url), which IS the
+# verification the driver records.
 #
-# CLICK BOUNDARY: the 'Опубликовать' click_dom carries `marks:
-# publish` - the worker records its index as publish_step next to
-# last_step (index of the last completed step) in EVERY result. The
-# driver classifies last_step >= publish_step as a post-click crash
+# CLICK BOUNDARY: the publish click carries `marks: publish` -
+# the worker records its index as publish_step next to last_step
+# (index of the last completed step) in EVERY result. The driver
+# classifies last_step >= publish_step as a post-click crash
 # (maybe_live + orphan probe) and anything earlier as a definite
 # pre-click failure. Do not move or rename the mark.
 #
-# BLOCKED SURFACES: the optional dom_text probes right after the
-# composer load look for CAPTCHA/verification, login-wall and
-# sandbox-tier markers. A hit emits abort_reason and the gated `fail`
-# step aborts the run immediately - emits survive into the failed
-# result, which is how the driver's operator_escalation classification
-# gets its evidence instead of regexing a generic 'element not found'.
+# BLOCKED SURFACES: the optional locate probes right after the
+# composer load look for CAPTCHA/verification and login-wall surfaces
+# on the screenshot; the sandbox-tier redirect is a LOCATION fact read
+# from the tab listing (tab_url). A hit emits abort_reason and the
+# gated `fail` step aborts the run - emits survive into the failed
+# result for operator_escalation evidence.
 #
-# HONEST STATUS: this is a scaffold - the composer DOM targets below
-# follow Habr's current RU UI labels but the recipe has NOT been run
-# against a live profile end-to-end. Verify on the desktop browser
-# (DISPLAY :1) before enabling PUBLISH_PLATFORMS+=habr; tune targets
-# with shot evidence the way linkedin_post.yaml was verified.
+# HONEST STATUS: rewritten for the OS-only actuation split; the locate
+# descriptions follow Habr's current RU UI but the recipe has NOT been
+# run against a live profile end-to-end. Known gaps are marked GAP
+# inline: anything the screenshot path cannot express today aborts
+# loudly instead of falling back to a banned call.
 steps:
-  # ---------- open the composer ----------
-  # article: /ru/articles/new/ gated on {title} (present only for
-  # kind=article); post short form: /ru/posts/new/ gated on
-  # {post_kind} (the driver sends it true - 'kind' alone cannot
-  # express 'not article' in the if-semantics). Adjust the post URL
-  # after a verified run if Habr routes posts elsewhere.
+  # ---------- open the composer (background-load, OS-only) ----------
+  # article: /ru/articles/new/ gated on {title}; post short form:
+  # /ru/posts/new/ gated on {post_kind}. settle 60s: the composer SPA
+  # must initialize while the tab is occluded.
   - action: shot
     name: habr_0_start.png
-  - action: key
-    keys: "ctrl+l"
+  - action: open_tab_bg
+    url: "https://habr.com/ru/articles/new/"
+    settle: 60
     if: "{title}"
-  - action: set_clipboard
-    text: "https://habr.com/ru/articles/new/"
-    if: "{title}"
-  - action: key
-    keys: "ctrl+v"
-    if: "{title}"
-  - action: key
-    keys: "Return"
-    if: "{title}"
-  - action: key
-    keys: "ctrl+l"
-    if: "{post_kind}"
-  - action: set_clipboard
-    text: "https://habr.com/ru/posts/new/"
-    if: "{post_kind}"
-  - action: key
-    keys: "ctrl+v"
-    if: "{post_kind}"
-  - action: key
-    keys: "Return"
+  - action: open_tab_bg
+    url: "https://habr.com/ru/posts/new/"
+    settle: 60
     if: "{post_kind}"
   - action: wait
     seconds: 6
   - action: shot
     name: habr_1_composer.png
   # ---------- blocked-surface probes ----------
-  # A CAPTCHA/verification wall, a logged-out composer, or the
-  # ReadOnly sandbox-tier redirect all surface right after navigation.
-  # Each optional probe lands its hit (or '') in ctx; a hit emits
-  # abort_reason and the single gated `fail` step then aborts the run
-  # on a named reason - the failed result carries both, so the driver
-  # escalates to the operator (spec 2.3/2.8) instead of retrying a
-  # composer fill that can never succeed. All probes are read-only.
-  - action: dom_text
-    url: habr.com
-    target: "captcha"
+  # CAPTCHA/verification and login walls are screenshot facts now:
+  # optional locate probes describe the surface; a hit sets
+  # <into>_hit and the emit+fail pair aborts on a named reason.
+  - action: locate
+    target: "a CAPTCHA or human-verification wall covering the page"
+    hint: "checkbox/iframe blocking the composer"
     into: blk_captcha
     optional: true
   - action: emit
     key: abort_reason
-    value: "CAPTCHA/verification surface visible: {blk_captcha}"
-    if: "{blk_captcha}"
-  - action: dom_text
-    url: habr.com
-    target: "Войти"
+    value: "CAPTCHA/verification surface visible"
+    if: "{blk_captcha_hit}"
+  - action: locate
+    target: "a login wall or sign-in prompt blocking the composer (RU 'Log in' label)"
+    hint: "auth modal instead of the editor"
     into: blk_login
     optional: true
   - action: emit
     key: abort_reason
-    value: "logged-out/login wall visible: {blk_login}"
-    if: "{blk_login}"
-  # the sandbox redirect is a LOCATION fact, not a text marker: an
-  # empty target on the sandbox tab reads its url back
-  - action: dom_text
+    value: "logged-out/login wall visible"
+    if: "{blk_login_hit}"
+  # the sandbox redirect is a LOCATION fact, not a text marker:
+  # the /json tab listing answers it without touching the page
+  - action: tab_url
     url: "habr.com/ru/sandbox"
     into: blk_sandbox
     optional: true
@@ -118,11 +108,13 @@ steps:
     if: "{blk_sandbox}"
   - action: fail
     reason: "blocked publish surface - operator needed (see abort_reason)"
-    if: "{blk_captcha}{blk_login}{blk_sandbox}"
+    if: "{blk_captcha_hit}{blk_login_hit}{blk_sandbox}"
   # ---------- title (article only) ----------
-  - action: click_dom
-    url: habr.com
-    target: "Заголовок"
+  - action: locate
+    target: "the title input field (RU placeholder 'Title')"
+    hint: "wide field at the top of the composer"
+    if: "{title}"
+  - action: click
     if: "{title}"
   - action: set_clipboard
     text: "{title}"
@@ -131,28 +123,46 @@ steps:
     keys: "ctrl+v"
     if: "{title}"
   # ---------- hubs ----------
-  # the hub selector is a tag input; add each hub by text + Return.
-  # {hubs} arrives as a JSON list - expand per-hub in a verified run;
-  # for now paste the joined list into the selector (TODO: loop).
-  - action: click_dom
-    url: habr.com
-    target: "Хабы"
+  # The hub selector is a tag input with an autocomplete popup. Per the
+  # directive the suggestion is CLICKED by coordinates - never
+  # paste+Enter, which accepted the raw text instead of the resolved
+  # hub (the hubs autocomplete gap). {hubs} arrives as a JSON list -
+  # expand per-hub in a verified run; for now the joined list is pasted
+  # (TODO: loop), then the first suggestion item is clicked when the
+  # popup locator finds it, else the run fails closed.
+  - action: locate
+    target: "the hubs input field (RU label 'Hubs')"
+    hint: "tag-style input below the title"
+  - action: click
   - action: set_clipboard
     text: "{hubs}"
   - action: key
     keys: "ctrl+v"
-  - action: key
-    keys: "Return"
+  - action: wait
+    seconds: 2
+  - action: locate
+    target: "the first item in the autocomplete suggestion popup under the hubs input"
+    hint: "dropdown list item matching the typed hub name"
+    into: sug
+    optional: true
+  - action: click
+    pos: sug
+    if: "{sug_hit}"
+  # no suggestion resolved -> fail closed (negated if: runs when
+  # sug_hit is empty); the banned Enter-fallback would submit raw text
+  - action: fail
+    reason: "hubs autocomplete produced no clickable suggestion - refusing Enter fallback"
+    if: "!{sug_hit}"
   - action: wait
     seconds: 1
   # ---------- body ----------
-  # markdown mode: Habr's editor accepts markdown when the 'Markdown'
-  # mode toggle is on - long bodies go through the clipboard, never
+  # markdown mode: long bodies go through the clipboard, never
   # type_text (human-speed typing a 10k article blows the result
   # window)
-  - action: click_dom
-    url: habr.com
-    target: "Текст публикации"
+  - action: locate
+    target: "the main body editor area (RU label 'Publication text')"
+    hint: "large editor surface below the hubs field"
+  - action: click
   - action: set_clipboard
     text: "{text_md}"
   - action: key
@@ -164,9 +174,11 @@ steps:
   # ---------- КДПВ / media (optional, TODO: verified attach) ----------
   # image_path attaches through the composer's file-chooser dialog:
   # click the upload control, ctrl+l, paste the HOST path, Return.
-  - action: click_dom
-    url: habr.com
-    target: "Загрузить"
+  - action: locate
+    target: "the image upload control (RU label 'Upload')"
+    hint: "upload button in the composer toolbar"
+    if: "{image_path}"
+  - action: click
     if: "{image_path}"
   - action: wait
     seconds: 2
@@ -196,29 +208,32 @@ steps:
     value: 1
     if: "{image_path}"
   # ---------- PUBLISH CLICK (the boundary) ----------
-  - action: click_dom
-    url: habr.com
-    target: "Опубликовать"
+  - action: locate
+    target: "the green publish button (RU label 'Publish')"
+    hint: "primary action button, usually bottom-right of the composer"
+  - action: click
     marks: publish
   - action: wait
     seconds: 8
   - action: shot
     name: habr_3_published.png
   # ---------- URL read-back (the verification) ----------
-  # empty target -> the tab's location.href/document.title
-  - action: dom_text
+  # /json tab listing -> the tab's url/title. No page is touched.
+  - action: tab_url
     url: "habr.com"
     into: page
   - action: emit
     key: url
     value: "{page}"
-  # ---------- test retract (optional) ----------
+  # ---------- test retract (optional, drill runs only) ----------
   # 'unpublish' on Habr = the article's edit menu 'В черновики'
   # (back to drafts). Emit retracted so the driver records
   # test-published-retracted vs test-retract-failed.
-  - action: click_dom
-    url: habr.com
-    target: "В черновики"
+  - action: locate
+    target: "the back-to-drafts menu item or button (RU label)"
+    hint: "article edit menu on the published page"
+    if: "{test}"
+  - action: click
     if: "{test}"
   - action: wait
     seconds: 5

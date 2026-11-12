@@ -51,9 +51,12 @@ _GENERATIONS = {}
 
 
 def _cdp_state(url_substr=None):
-    """Read-only page state probe via CDP - the cheap channel. A page
-    whose renderer is suspended (e.g. behind a native dialog) simply
-    never answers, which is itself the signal."""
+    """Read-only page state from the /json/list endpoint - the cheap
+    channel. Runtime.evaluate (the old readyState probe) is banned by
+    the CDP read-only directive, so readyState is no longer available:
+    `reachable` now means 'a live page target is listed', and the
+    suspended-renderer signal comes from the x_window capture +
+    dialog-watch channels instead of an evaluate timeout."""
     import cdp_client
 
     state = {"reachable": False, "readyState": None, "url": None, "title": None}
@@ -66,18 +69,7 @@ def _cdp_state(url_substr=None):
             return state
         state["url"] = t.get("url")
         state["title"] = t.get("title")
-        # a suspended renderer times out here - bounded to keep the
-        # pull loop responsive; _call default 30s is too long for state
-        r = cdp_client._call(
-            t["webSocketDebuggerUrl"],
-            "Runtime.evaluate",
-            {"expression": "document.readyState", "returnByValue": True},
-            timeout=8,
-        )
-        if r.get("error"):
-            return state
         state["reachable"] = True
-        state["readyState"] = r.get("result", {}).get("result", {}).get("value")
     except Exception:  # noqa: BLE001 - an unreachable CDP endpoint is a valid observation
         pass
     return state

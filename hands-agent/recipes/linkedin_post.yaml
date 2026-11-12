@@ -1,3 +1,11 @@
+# MIGRATION NOTICE (issue #127, CDP read-only directive): this recipe
+# still contains dom_find/click_dom/js_click/dom_text steps. Those
+# actions ran on Runtime.evaluate, which is now BANNED - the engine
+# fails them closed with a named error, so this recipe CANNOT run
+# until it is migrated to the OS-only split: locate (screenshot ->
+# coords) + click, open_tab_bg for tab control, tab_url for the
+# location read-back. See docs/cdp-write-audit.md.
+#
 # LinkedIn personal-profile post recipe.
 # Verified end-to-end 2025-10-23 (DISPLAY :1, 1400x1050): real published
 # post with text + image on a personal profile.

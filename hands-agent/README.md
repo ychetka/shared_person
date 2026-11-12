@@ -4,6 +4,16 @@ Real OS-level input + computer vision for platforms without personal-profile API
 (Facebook, Instagram, TikTok, LinkedIn fallback). No DOM selectors, no CDP, no
 browser extensions - events are trusted OS input, behaviorally human.
 
+**CDP READ-ONLY INVARIANT (issue #127):** CDP is read-observe only in
+this contour. Banned everywhere: `Runtime.evaluate`, `Target.*`,
+`Input.*`, `Page.reload`, `Page.handleJavaScriptDialog` (outside the
+EYES_ALLOW_DISMISS-gated emergency path), DOM-driven field filling.
+Allowed reads: `/json` target listing, `Page.captureScreenshot`,
+`Page.javascriptDialog*` event subscription. All actuation is OS-level:
+xdotool keyboard/mouse, clipboard holder, `tab_ctl.open_tab_bg` for
+tabs. See docs/cdp-write-audit.md for the full write-call inventory
+and replacement mapping.
+
 ## Architecture
 
 ```
@@ -14,6 +24,10 @@ Devin --(MCP tools)--> mcp_server.py -----+
 
 - `mcp_server.py` - MCP stdio server (tools + recipe runner + queue poller)
 - `hands.py` - xdotool primitives: Bezier mouse paths, jitter typing
+- `tab_ctl.py` - OS-level tab control (`open_tab_bg`: background-load via
+  ctrl+t + ctrl+shift+tab + ctrl+9; the heavy-SPA-safe open path)
+- `cdp.py` - READ-ONLY CDP: /json target listing + the
+  Page.captureScreenshot transport for vision.py's pixel fallback
 - `vision.py` - screenshots + OpenCV template matching (multi-scale)
 - `recipes/*.yaml` - per-platform step scripts (mini-DSL)
 - `queue/{inbox,done,failed}/` - file-based task queue for n8n
@@ -42,7 +56,11 @@ X11 session required (xdotool). Detected here: DISPLAY=:1, X11.
 | `run_recipe` | Execute recipes/<name>.yaml |
 | `task_status` | Queue status |
 | `set_clipboard` | Load X CLIPBOARD (PyGObject Gtk) for `key ctrl+v` long-body paste |
-| `dom_text` | CDP read: element innerText+href, or page location when `target` empty |
+| `open_tab_bg` | OS-level background-load tab open (heavy-SPA-safe) |
+| `tab_url` | Read-only /json tab url+title read-back |
+
+Removed tools (banned by the CDP read-only directive): `dom_find`,
+`click_dom`, `js_click`, `dom_text` - all ran on `Runtime.evaluate`.
 
 ## Recipe DSL (recipes/*.yaml)
 
@@ -89,17 +107,31 @@ returned fields (`{ok, url?, error?, log?}`) - this is how n8n records
 steps publish values into the result via `emit`:
 
 ```yaml
-  - action: dom_text           # CDP read-only text extraction
-    url: "habr.com"            # tab URL substring
-    target: "{match}"          # element text; empty -> page {url,title}
-    into: hit                  # ctx[hit]=text|url, ctx[hit_href]=href
-    optional: true             # a miss = empty values, not a failed step
+  - action: open_tab_bg        # OS-level background-load tab open
+    url: "{profile_url}"
+    settle: 45                 # SPA initializes while occluded
+  - action: locate             # vision-model find -> coords into ctx
+    target: "the first suggestion in the hubs autocomplete popup"
+    into: sug
+    optional: true             # a miss sets ctx[sug_hit]="" not a failure
+  - action: click
+    pos: sug
+    if: "{sug_hit}"            # locate sets <into>_hit = "1"|""
+  - action: fail               # negated if: run when the locate missed
+    reason: "no clickable suggestion"
+    if: "!{sug_hit}"
+  - action: tab_url            # read-only /json listing -> ctx[page]=url
+    url: "habr.com"
+    into: page
   - action: set_clipboard      # PyGObject Gtk clipboard for ctrl+v
     text: "{text_md}"
   - action: emit               # ctx value -> result field
     key: url
-    value: "{hit_href}"
+    value: "{page}"
 ```
+
+Fail-closed stub actions (abort the recipe with a named error, no page
+contact): `dom_find`, `click_dom`, `js_click`, `dom_text`.
 
 ## Safety
 
@@ -135,6 +167,6 @@ flaky.
 
 ## UX rules (mandatory in recipes)
 
-- **Ad/popup dismissal**: before acting, check for blocking overlays (ads, cookie banners, upsell modals) and close them first: click_dom on "Close/X/Not now/Не сейчас" or Escape. Insert a dismiss step at recipe start and after navigations.
-- **Verify before click**: dom_find > shot > click; after each mutating step take a shot.
-- **Moderation gate**: never publish without an explicit approve step (test posts = neutral AI-themed text + neutral image).
+- **Ad/popup dismissal**: before acting, check for blocking overlays (ads, cookie banners, upsell modals) and close them first: `locate` the close/dismiss control ("Close", "X", "Not now" or its RU equivalent) -> `click`, or Escape. Insert a dismiss step at recipe start and after navigations.
+- **Verify before click**: locate/find > shot > click; after each mutating step take a shot.
+- **Moderation gate**: never publish without an explicit approve step. No `test:true`/test posts to live services (issue #58 directive update) - media-upload verification happens via metrics on REAL posts; the required post structure is baked into content generation, never ad-hoc test payloads.

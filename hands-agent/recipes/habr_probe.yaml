@@ -2,8 +2,9 @@ name: habr_probe
 # Orphan probe (docs/habr-driver-spec.md 2.6): after a post-click
 # recipe failure or a result-file loss, the sp-publish driver enqueues
 # this to recover the article URL. It opens the account's publications
-# page (HABR_PROFILE_URL) in the logged-in desktop browser, matches the
-# publication title via dom_text and emits the matched link's href.
+# page (HABR_PROFILE_URL) in the logged-in desktop browser, finds the
+# publication title ON THE SCREENSHOT, clicks it with real OS input,
+# and reads the landed URL back from the /json tab listing.
 #
 # Params:
 #   profile_url - the account publications page (e.g.
@@ -15,33 +16,46 @@ name: habr_probe
 #                 relies on - titles are NOT guaranteed unique.
 #
 # Result: {ok, url, found} - url empty on a negative probe (the miss is
-# a legitimate answer, dom_text is optional), the run only lands in
-# failed/ on real mechanics failures (navigation, browser gone).
+# a legitimate answer), the run only lands in failed/ on real mechanics
+# failures (navigation, browser gone).
+#
+# CDP READ-ONLY DIRECTIVE (issue #127): the old version recovered the
+# article href via dom_text (Runtime.evaluate DOM scan) - banned.
+# The OS-native replacement resolves the link by DOING what a human
+# does: locate the title on the screenshot, click it, read the tab's
+# landed URL from /json/list. GAP: `locate` needs GEMINI_API_KEY on the
+# worker; without it the probe fails closed with a named error instead
+# of returning a false negative.
 steps:
-  - action: key
-    keys: "ctrl+l"
-  - action: wait
-    seconds: 0.5
-  - action: set_clipboard
-    text: "{profile_url}"
-  - action: key
-    keys: "ctrl+v"
-  - action: key
-    keys: "Return"
+  - action: open_tab_bg
+    url: "{profile_url}"
+    settle: 45
   - action: wait
     seconds: 5
   - action: shot
     name: "habr_probe_page.png"
-  - action: dom_text
-    url: "habr.com"
-    target: "{match}"
+  - action: locate
+    target: "the publication link whose text matches: {match}"
+    hint: "title link in the publications list, newest first"
     into: hit
     optional: true
+  - action: click
+    pos: hit
+    if: "{hit_hit}"
+  - action: wait
+    seconds: 6
+    if: "{hit_hit}"
+  - action: tab_url
+    url: "habr.com"
+    into: landed
+    optional: true
+    if: "{hit_hit}"
   - action: emit
     key: url
-    value: "{hit_href}"
+    value: "{landed}"
+    if: "{hit_hit}"
   - action: emit
     key: found
-    value: "{hit}"
+    value: "{hit_hit}"
   - action: shot
     name: "habr_probe_result.png"

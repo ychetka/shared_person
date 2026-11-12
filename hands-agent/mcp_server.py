@@ -13,8 +13,14 @@ Tools (all coordinates are SCREEN pixels):
   run_recipe(name, params_json)       -> run recipes/<name>.yaml steps
   task_status(task_id?)               -> queue status
   set_clipboard(text)                 -> load X CLIPBOARD for ctrl+v paste
-  dom_text(url, target?)              -> CDP read: page location | element text+href
-  js_click(url, target)               -> DOM-resolve + JS el.click() (no OS input)
+  open_tab_bg(url, settle_s?)         -> OS-level background-load tab open
+  tab_url(url_substr)                 -> read-only /json tab url+title
+
+CDP is READ-OBSERVE ONLY in this contour (issue #127): the former
+dom_find/click_dom/js_click/dom_text tools ran on Runtime.evaluate
+and are removed - every page actuation is real OS input. Element
+targeting is screenshot-driven: `find` (template) or `locate`
+(vision model) -> `click` at the returned coords.
 
 Queue: n8n drops JSON tasks into ./queue/inbox/*.json, a poller thread
 consumes them into ./queue/{done,failed}/. Task = {"recipe": str, "params": {...}}
@@ -38,6 +44,7 @@ import uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cdp
 import hands
+import tab_ctl
 import vision
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -104,7 +111,11 @@ def gemini_locate(description, hint=""):
 def run_recipe(name, params):
     """Execute recipes/<name>.yaml. Mini-DSL:
     steps: [{action: find|locate|click|type|key|scroll|wait|shot|move|
-             emit|fail|dom_find|click_dom|js_click|dom_text|set_clipboard, ...}]
+             emit|fail|set_clipboard|open_tab_bg|tab_url, ...}]
+    The former dom_find/click_dom/js_click/dom_text actions are
+    fail-closed stubs: they ran on Runtime.evaluate, which the CDP
+    read-only directive bans outright, so the step aborts the recipe
+    with a named error instead of touching the page.
     Template strings support {param} substitution. A step carrying
     `marks: publish` is the post-publish classification boundary: the
     result records its index as publish_step next to last_step (index
@@ -160,7 +171,14 @@ def run_recipe(name, params):
         # value is empty/false (missing params format to "")
         cond = st.get("if")
         if cond is not None:
-            cv = str(cond).format_map(_Safe(ctx)).strip().lower()
+            # leading '!' negates: `if: "!{sug_hit}"` runs the step
+            # when the formatted value is empty/false (e.g. a locate
+            # miss that must fail closed)
+            neg = str(cond).lstrip().startswith("!")
+            raw_cond = str(cond).lstrip()[1:] if neg else str(cond)
+            cv = str(raw_cond).format_map(_Safe(ctx)).strip().lower()
+            if neg:
+                cv = "" if cv not in ("", "0", "false", "no") else "1"
             if cv in ("", "0", "false", "no"):
                 log_line.append(f"step{i} skipped (if -> {cv!r})")
                 continue
@@ -179,10 +197,22 @@ def run_recipe(name, params):
                     return _result(f"step{i}: template {st['template']} not found")
                 ctx[st.get("into", "pos")] = hit
             elif act == "locate":
+                # screenshot-driven element resolution: the vision
+                # model answers coords for a described element on the
+                # current screen. `optional: true` turns a miss into
+                # (-1,-1) ctx coords instead of a failed step (negative
+                # probes are legitimate results).
                 r = gemini_locate(st["target"], st.get("hint", ""))
+                into = st.get("into", "pos")
                 if r.get("x", -1) < 0:
-                    return _result(f"step{i}: locate failed: {r}")
-                ctx[st.get("into", "pos")] = (r["x"], r["y"])
+                    if not st.get("optional"):
+                        return _result(f"step{i}: locate failed: {r}")
+                    log_line.append(f"step{i} locate miss (optional): {st['target']}")
+                ctx[into] = (r["x"], r["y"])
+                # hit flag for `if:`-gated follow-ups (e.g. click the
+                # located suggestion only when it was actually found):
+                # ctx['<into>_hit'] is "1" on hit, "" on miss
+                ctx[into + "_hit"] = "1" if r.get("x", -1) >= 0 else ""
             elif act in ("click", "move"):
                 fn = hands.click if act == "click" else hands.move
                 if "x" in st:
@@ -198,52 +228,47 @@ def run_recipe(name, params):
                 hands.scroll(st.get("amount", 3), st.get("direction", "down"))
             elif act == "wait":
                 time.sleep(st.get("seconds", 1))
-            elif act == "dom_find":
-                pos = cdp.dom_rect(st["url"], st["target"])
-                if not pos:
-                    return _result(f"step{i}: dom target not found: {st['target']}")
-                ctx[st.get("into", "pos")] = (pos["x"], pos["y"])
-                log_line.append(f"step{i} dom '{st['target']}' -> {pos['found']}")
-            elif act == "click_dom":
-                r = cdp.click_dom(st["url"], st["target"])
+            elif act in ("dom_find", "click_dom", "js_click", "dom_text"):
+                # FAIL-CLOSED STUBS (issue #127): these actions ran on
+                # Runtime.evaluate, banned by the CDP read-only
+                # directive. The recipe stops on a named reason rather
+                # than silently touching the page; migrate to
+                # locate+click (actuation) or tab_url (location
+                # read-back).
+                return _result(
+                    f"step{i}: action '{act}' removed - CDP evaluate is banned "
+                    "by the read-only directive; use locate+click or tab_url"
+                )
+            elif act == "open_tab_bg":
+                # OS-level background-load tab open (tab_ctl.py): the
+                # heavy-SPA-safe path - load occluded, settle, activate
+                r = tab_ctl.open_tab_bg(
+                    st["url"], settle_s=st.get("settle", 45), activate=st.get("activate", True)
+                )
                 if r.get("error"):
                     return _result(f"step{i}: {r['error']}")
-                log_line.append(f"step{i} click_dom '{st['target']}' -> {r['clicked']['found']}")
-            elif act == "js_click":
-                # same DOM resolution as click_dom but el.click() via
-                # Runtime.evaluate - for React surfaces that ignore
-                # OS/synthetic clicks (issue #86 pangram submit)
-                r = cdp.js_click(st["url"], st["target"])
-                if r.get("error"):
-                    return _result(f"step{i}: {r['error']}")
-                log_line.append(f"step{i} js_click '{st['target']}' -> {r['clicked']['found']}")
+            elif act == "tab_url":
+                # read-only /json/list location read-back (no evaluate):
+                # lands {url} of the tab matching st['url'] in ctx.
+                # `optional: true` turns a miss into empty ctx instead
+                # of a failed step.
+                r = cdp.tab_info(st["url"])
+                if r is None:
+                    if not st.get("optional"):
+                        return _result(f"step{i}: tab_url no match: {st['url']}")
+                    r = {}
+                into = st.get("into", "page")
+                ctx[into] = r.get("url") or ""
+                ctx[into + "_title"] = r.get("title") or ""
+                log_line.append(f"step{i} tab_url '{st['url']}' -> {ctx[into][:80]}")
             elif act == "set_clipboard":
                 # long-body insert path: loads the X clipboard via
                 # PyGObject; the recipe then `key ctrl+v`s a real paste
                 hands.set_clipboard(st["text"])
-            elif act == "dom_text":
-                # CDP read (no input): target set -> innerText + href of
-                # the best-matching element; target empty -> the tab's
-                # location/title read-back. `optional: true` turns a
-                # miss into empty ctx values instead of a failed step
-                # (negative probe answers are legitimate results).
-                r = cdp.dom_text(st["url"], st.get("target", ""))
-                if r is None:
-                    if not st.get("optional"):
-                        return _result(
-                            f"step{i}: dom_text no match: {st.get('target') or st['url']}"
-                        )
-                    r = {}
-                into = st.get("into", "dom_text")
-                ctx[into] = r.get("text") or r.get("url") or ""
-                ctx[into + "_href"] = r.get("href") or ""
-                log_line.append(
-                    f"step{i} dom_text '{st.get('target', 'location')}' -> {str(ctx[into])[:80]}"
-                )
             elif act == "emit":
                 # publish a ctx value (or a literal) into the task
                 # result, e.g. `{action: emit, key: url, value:
-                # "{page}"}` after a location-read dom_text - this is
+                # "{page}"}` after a location-read tab_url - this is
                 # what lands in done/<task_id>.result.json. Non-string
                 # YAML literals (true, 1, 2.5, [..]) pass through
                 # typed - only strings get {param} formatting
@@ -399,37 +424,34 @@ TOOLS = [
         },
     },
     {
-        "name": "dom_find",
-        "description": "DOM-read element center -> screen {x,y} (read-only DOM, click via OS)",
+        "name": "open_tab_bg",
+        "description": (
+            "Open a URL in a new tab via OS input, return focus to the "
+            "previous tab while it loads (heavy-SPA-safe background "
+            "init), settle, then activate it. No CDP."
+        ),
         "inputSchema": {
             "type": "object",
-            "required": ["url", "target"],
+            "required": ["url"],
             "properties": {
-                "url": {"type": "string", "description": "substring of tab URL"},
-                "target": {"type": "string", "description": "visible text/aria-label substring"},
+                "url": {"type": "string"},
+                "settle_s": {"type": "integer", "default": 45},
             },
         },
     },
     {
-        "name": "click_dom",
-        "description": "Find element by text via DOM-read, then real OS click",
-        "inputSchema": {
-            "type": "object",
-            "required": ["url", "target"],
-            "properties": {"url": {"type": "string"}, "target": {"type": "string"}},
-        },
-    },
-    {
-        "name": "js_click",
+        "name": "tab_url",
         "description": (
-            "Find element by text via DOM-read, then JS el.click() via "
-            "Runtime.evaluate (no OS input) - for React surfaces that "
-            "ignore synthetic clicks"
+            "Read-only tab location read-back from the CDP /json "
+            "listing (no evaluate): -> {url,title} of the tab whose "
+            "URL contains url_substr"
         ),
         "inputSchema": {
             "type": "object",
-            "required": ["url", "target"],
-            "properties": {"url": {"type": "string"}, "target": {"type": "string"}},
+            "required": ["url"],
+            "properties": {
+                "url": {"type": "string", "description": "substring of tab URL"},
+            },
         },
     },
     {
@@ -441,25 +463,6 @@ TOOLS = [
             "type": "object",
             "required": ["text"],
             "properties": {"text": {"type": "string"}},
-        },
-    },
-    {
-        "name": "dom_text",
-        "description": (
-            "CDP read-only text extraction: target set -> {text,href,tag} "
-            "of the best-matching element; target empty -> {url,title} "
-            "page location read"
-        ),
-        "inputSchema": {
-            "type": "object",
-            "required": ["url"],
-            "properties": {
-                "url": {"type": "string", "description": "substring of tab URL"},
-                "target": {
-                    "type": "string",
-                    "description": "visible text/aria-label substring (empty = location read)",
-                },
-            },
         },
     },
     {
@@ -493,17 +496,13 @@ def call_tool(name, args):
         return {"x": hit[0], "y": hit[1]} if hit else {"x": -1, "y": -1}
     if name == "locate":
         return gemini_locate(args["description"], args.get("hint", ""))
-    if name == "dom_find":
-        return cdp.dom_rect(args["url"], args["target"]) or {"x": -1, "y": -1}
-    if name == "click_dom":
-        return cdp.click_dom(args["url"], args["target"])
-    if name == "js_click":
-        return cdp.js_click(args["url"], args["target"])
+    if name == "open_tab_bg":
+        return tab_ctl.open_tab_bg(args["url"], settle_s=args.get("settle_s", 45))
+    if name == "tab_url":
+        return cdp.tab_info(args["url"]) or {"error": "no match"}
     if name == "set_clipboard":
         hands.set_clipboard(args["text"])
         return {"ok": True}
-    if name == "dom_text":
-        return cdp.dom_text(args["url"], args.get("target", "")) or {"error": "no match"}
     if name == "run_recipe":
         tid = str(uuid.uuid4())[:8]
         res = run_recipe(args["name"], args.get("params", {}))
