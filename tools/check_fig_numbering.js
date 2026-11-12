@@ -30,6 +30,12 @@
 // fails OPEN with a logged skip and a byte-identical legacy brief
 // (S9-S11).
 //
+// Issue #56 item (c) adds the rewrite-path contract (S12): when the
+// critic rejects a draft, Generate Drafts rewrites it and re-verifies.
+// A stateful critic stub (reject then pass) plus a rewritten writer
+// output assert the SECOND critic /run call carries the rewritten
+// draft's datasets/captions, not the rejected one's.
+//
 // Sandbox contract: the Code node sees require('fs'), $input.all(),
 // $env.NAME and this.helpers.httpRequest - all stubbed here. The fs
 // stub serves sc.files and captures the log appends, so nothing
@@ -125,6 +131,7 @@ const hero = (block) => ({
 const runScenario = async (sc) => {
   const dispatched = [];
   const calls = [];
+  const callsPerRole = {}; // role -> /run call count (stateful stubs)
   const runs = []; // {role, input} of every llm-gateway /run call
   const roles = {
     "extract-facts": { json: { stack: ["React"], metrics: ["n8n"] } },
@@ -147,6 +154,16 @@ const runScenario = async (sc) => {
       if (opts.url === "http://127.0.0.1:8787/run") {
         const role = opts.body?.role;
         runs.push({ role, input: String(opts.body?.input || "") });
+        const n = (callsPerRole[role] = (callsPerRole[role] || 0) + 1);
+        // stateful stubs (S12): criticSeq replays per-call verdicts,
+        // writerRewrite is what the role returns on its second call
+        // (the verifier-driven rewrite pass)
+        if (role === "critic" && Array.isArray(sc.criticSeq)) {
+          return sc.criticSeq[Math.min(n - 1, sc.criticSeq.length - 1)];
+        }
+        if (sc.writerRewrite && roles[role] && n > 1) {
+          return { json: sc.writerRewrite };
+        }
         return roles[role] || { json: {} };
       }
       if (opts.url === "http://127.0.0.1:5780/webhook/moderation-draft") {
@@ -652,6 +669,99 @@ const main = async () => {
           l.skipped.includes("unreadable"),
       ),
       JSON.stringify(logs.filter((l) => l && l.action === "perf-summary")),
+    );
+  }
+
+  // S12: verifier reject -> rewrite -> re-verify (issue #56 item c).
+  // The stateful critic rejects the first pass and passes the second;
+  // the rewrite swaps visuals[] wholesale. The SECOND critic /run must
+  // carry the rewritten draft's text, dataset claims and captions -
+  // visualClaims() reads `parsed` at call time, so nothing from the
+  // rejected draft may leak into the re-check.
+  {
+    const origVisual = {
+      block: "B2",
+      type: "matrix",
+      title: "opts",
+      caption: "orig cap B2",
+      dataset: {
+        kind: "matrix",
+        data: {
+          columns: ["speed", "cost"],
+          rows: [{ label: "opt-a", values: [42, "free"] }],
+        },
+      },
+    };
+    const fixedVisual = {
+      block: "B2",
+      type: "matrix",
+      title: "opts",
+      caption: "fixed cap B2",
+      dataset: {
+        kind: "matrix",
+        data: {
+          columns: ["speed", "cost"],
+          rows: [{ label: "opt-b", values: [7, "paid"] }],
+        },
+      },
+    };
+    const { runs } = await runScenario({
+      writer: {
+        platform: "vk",
+        lang: "ru",
+        text: "React n8n first draft [See Fig 1]",
+        hashtags: [],
+        visuals: [origVisual],
+      },
+      writerRewrite: {
+        platform: "vk",
+        lang: "ru",
+        text: "React n8n rewritten draft [See Fig 1]",
+        hashtags: [],
+        visuals: [fixedVisual],
+      },
+      criticSeq: [
+        { json: { verdict: "reject", issues: [{ type: "fact", detail: "invented option" }] } },
+        { json: { verdict: "pass", issues: [] } },
+      ],
+      viz: { ok: true, paths: ["materials/viz/rw.png"], skipped: [] },
+    });
+    const ci = runs.filter((r) => r.role === "critic").map((r) => JSON.parse(r.input));
+    check(
+      "S12 critic reject triggers a second critic /run call",
+      ci.length === 2,
+      String(ci.length),
+    );
+    check(
+      "S12 first critic call saw the rejected draft's claims",
+      ci[0]?.draft === "React n8n first draft [See Fig 1]" &&
+        Array.isArray(ci[0]?.visuals) &&
+        ci[0].visuals[0].includes("label=opt-a") &&
+        ci[0].visuals[0].includes("values=42|free") &&
+        ci[0].visuals[0].includes("caption=orig cap B2"),
+      JSON.stringify(ci[0]),
+    );
+    check(
+      "S12 second critic call carries the rewritten draft text",
+      ci[1]?.draft === "React n8n rewritten draft [See Fig 1]",
+      JSON.stringify(ci[1]?.draft),
+    );
+    check(
+      "S12 second critic call carries the rewritten dataset/caption claims",
+      Array.isArray(ci[1]?.visuals) &&
+        ci[1].visuals.length === 1 &&
+        ci[1].visuals[0].includes("label=opt-b") &&
+        ci[1].visuals[0].includes("values=7|paid") &&
+        ci[1].visuals[0].includes("caption=fixed cap B2"),
+      JSON.stringify(ci[1]?.visuals),
+    );
+    check(
+      "S12 no stale claims from the rejected draft reach the re-check",
+      Array.isArray(ci[1]?.visuals) &&
+        !ci[1].visuals[0].includes("opt-a") &&
+        !ci[1].visuals[0].includes("42|free") &&
+        !ci[1].visuals[0].includes("orig cap"),
+      JSON.stringify(ci[1]?.visuals),
     );
   }
 
