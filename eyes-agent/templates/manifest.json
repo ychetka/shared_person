@@ -1,0 +1,24 @@
+[
+  {
+    "id": "err_page_chrome_dark",
+    "class": "err_page",
+    "detect": "template",
+    "file": "err_page_chrome.png",
+    "source_desc": "Chrome network-error page (http://127.0.0.1:1/ -> ERR_CONNECTION_REFUSED), dark theme; crop covers icon + 'This site can't be reached' + error-code + reload button block",
+    "captured_via": "cdp Page.captureScreenshot, audit Chrome 157 on this box",
+    "crop_region": [620, 140, 680, 280],
+    "match_threshold": 0.85,
+    "added": "2026-11-13"
+  },
+  {
+    "id": "js_dialog_all",
+    "class": "js_dialog",
+    "detect": "cdp_event",
+    "file": null,
+    "source_desc": "Native JS dialogs (alert/confirm/prompt/beforeunload). NO image exemplar is possible on this host: OS-level capture is unavailable under GNOME Wayland and CDP shots see only page content - the dialog is browser chrome. Detection is Page.javascriptDialogOpening via eyes-agent/dialog_watch.py (verified live 2026-11-12: alert fires {type:'alert',hasBrowserHandler:true}; beforeunload fires on dirty-page navigation).",
+    "captured_via": "n/a - event-based detection",
+    "crop_region": null,
+    "match_threshold": null,
+    "added": "2026-11-13"
+  }
+]
