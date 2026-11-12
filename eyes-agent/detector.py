@@ -88,7 +88,7 @@ def ocr(image_path, region=None):
     [x, y, w, h] or the full frame.
     """
     try:
-        import pytesseract  # noqa: F401
+        import pytesseract
     except ImportError:
         return {
             "available": False,

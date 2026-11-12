@@ -68,7 +68,9 @@ def _is_black(path):
 def _run_x11(tool_args, path, timeout=20):
     """Run an X11 screenshot tool; returns (ok, reason)."""
     try:
-        subprocess.run(tool_args + [path], env=ENV, check=True, capture_output=True, timeout=timeout)
+        subprocess.run(
+            [*tool_args, path], env=ENV, check=True, capture_output=True, timeout=timeout
+        )
     except FileNotFoundError:
         return False, "binary not found"
     except subprocess.TimeoutExpired:

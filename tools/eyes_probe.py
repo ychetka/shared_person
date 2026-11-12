@@ -44,7 +44,7 @@ sys.path.insert(0, HANDS)
 os.environ.setdefault("HANDS_DISPLAY", ":0")
 if not os.environ.get("HANDS_XAUTHORITY"):
     cookies = sorted(
-        glob.glob("/run/user/%d/.mutter-Xwaylandauth.*" % os.getuid()),
+        glob.glob(f"/run/user/{os.getuid()}/.mutter-Xwaylandauth.*"),
         key=os.path.getmtime,
     )
     if cookies:
@@ -109,7 +109,7 @@ def _click_el(target_id, expr):
     raw = cdp_client.eval_js(
         ws,
         """(() => {
-          const el = %s;
+          const el = __EL_EXPR__;
           if (!el) return 'null';
           const r = el.getBoundingClientRect();
           return JSON.stringify({
@@ -119,7 +119,7 @@ def _click_el(target_id, expr):
             ox: window.outerWidth - window.innerWidth,
             dpr: window.devicePixelRatio
           });
-        })()""" % expr,
+        })()""".replace("__EL_EXPR__", expr),
     )
     if not raw or raw == "null":
         return {"error": "element not found"}
@@ -146,7 +146,8 @@ def _make_dirty(target_id):
     gi.require_version("Gdk", "3.0")
     import hands
 
-    r = _click_el(target_id, "document.querySelector('div[data-placeholder=\"Заголовок\"]')")
+    title_sel = "document.querySelector('div[data-placeholder=\"Заголовок\"]')"
+    r = _click_el(target_id, title_sel)
     if not r.get("ok"):
         return {"ok": False, "step": "click title", "detail": r}
     time.sleep(0.5)
@@ -163,7 +164,8 @@ def _make_dirty(target_id):
         )
         val = cdp_client.eval_js(
             t["webSocketDebuggerUrl"],
-            "(document.querySelector('div[data-placeholder=\"Заголовок\"]')||{}).innerText || '<empty>'",
+            "(document.querySelector('div[data-placeholder=\"Заголовок\"]')||{})"
+            ".innerText || '<empty>'",
         )
     except Exception as e:  # noqa: BLE001 - read-back is evidence, not a gate
         val = f"<read-back failed: {e}>"
@@ -272,7 +274,7 @@ def main():
         "hang_without_event": None,
     }
 
-    print(">> habr variant: open_tab settle %ss..." % settle, file=sys.stderr)
+    print(f">> habr variant: open_tab settle {settle}s...", file=sys.stderr)
     habr, habr_tid = _try_habr_variant(settle)
     result["habr"] = habr
 
