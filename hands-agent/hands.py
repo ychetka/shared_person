@@ -102,7 +102,10 @@ def key(*keys):
 
 
 def scroll(amount=3, direction="down"):
-    _xd("click", "5" if direction == "down" else "4", "--repeat", amount)
+    # xdotool parses anything after the button number as a NEW command, so
+    # `click 5 --repeat 3` fails with "Unknown command: --repeat". Options
+    # must precede the button: `click --repeat 3 5`.
+    _xd("click", "--repeat", amount, "5" if direction == "down" else "4")
 
 
 _clip_holder = None
