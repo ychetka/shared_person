@@ -213,7 +213,7 @@ def _try_habr_variant(settle_s):
     tab_sel = "habr.com/ru/sandbox"
     tid = opened.get("target_id")
 
-    ws, aerr = dialog_watch.attach(url_substr=tab_sel)
+    ws, aerr = _attach_watcher(tid, tab_sel)
     if ws is None:
         _force_close(tab_sel, tid)
         return {"variant_error": f"attach failed: {aerr}"}, tab_sel, tid
@@ -249,7 +249,7 @@ def _try_injected_variant():
     tab_sel = "about:blank"
     tid = opened.get("target_id")
 
-    ws, aerr = dialog_watch.attach(url_substr=tab_sel)
+    ws, aerr = _attach_watcher(tid, tab_sel)
     if ws is None:
         _force_close(tab_sel, tid)
         return {"variant_error": f"attach failed: {aerr}"}, tab_sel, tid
@@ -277,6 +277,17 @@ def _try_injected_variant():
         ws.close()
 
 
+def _attach_watcher(target_id, tab_sel):
+    """Attach the Page-enabled dialog watcher bound to our exact target
+    id (review round 3): url_substr binding could land on a second tab
+    sharing the url (another about:blank / another Habr page). The
+    substring is only a last resort when open_tab_bg could not resolve
+    a target id at all."""
+    if target_id:
+        return dialog_watch.attach(target_id=target_id)
+    return dialog_watch.attach(url_substr=tab_sel)
+
+
 def _find_target(tab_sel, target_id=None):
     """Resolve OUR test tab in /json/list: by target id when the
     open_tab_bg handshake supplied one (exact - a second Habr tab can
@@ -295,30 +306,55 @@ def _force_close(tab_sel, target_id=None):
     The old version assumed ctrl+9 'last tab' == our tab: any tab
     appended in the meantime made ctrl+w close an innocent. Now
     activate_tab (tab_ctl) only returns True once the ACTIVE window
-    title contains our tab's title marker; without that proof the
-    close is refused rather than fired at a wrong tab. An armed
-    beforeunload prompt is answered with the OS Return keypress, then
-    the verified activate+close is retried once."""
+    title contains our tab's title marker AND the resolved target id
+    still exists with the same url; without that proof the close is
+    refused rather than fired at a wrong tab.
+
+    The dialog watcher is attached BEFORE the ctrl+w that can raise
+    the beforeunload prompt (review round 3): javascriptDialogOpening
+    is never replayed to sessions that attach late, so a post-chord
+    watcher could never observe - let alone dismiss - a prompt our own
+    chord raised, stranding the armed dirty tab. If the watcher fails
+    to attach the chord is not sent at all (fail closed). When a
+    prompt does appear it is answered first via the gated CDP dismiss
+    (dismiss_dialog - a no-op {error} without EYES_ALLOW_DISMISS=1),
+    falling back to the OS Return keypress."""
     t = _find_target(tab_sel, target_id)
     if t is None:
         return
     marker = t.get("title") or ""
-    if not tab_ctl.activate_tab(marker):
+    if not tab_ctl.activate_tab(marker, target=t):
         return  # unverified - do NOT ctrl+w a tab we cannot prove is ours
-    hands.key("ctrl+w")
-    time.sleep(1.5)
-    if _find_target(tab_sel, target_id) is None:
+    ws, aerr = _attach_watcher(target_id, tab_sel)
+    if ws is None:
+        # fail closed: no watcher => the chord could arm a prompt we
+        # would be blind to; report and leave the tab for the operator
+        print(
+            f">> _force_close: watcher attach failed ({aerr}) - skipping ctrl+w",
+            file=sys.stderr,
+        )
         return
-    ws, _aerr = dialog_watch.attach(url_substr=tab_sel)
-    if ws is not None:
+    try:
+        hands.key("ctrl+w")
         obs = _wait_dialog(ws, 5)
         if obs is not None:
-            _dismiss_dialog_os()
+            r = dialog_watch.dismiss_dialog(ws)
+            if r.get("error"):
+                _dismiss_dialog_os()
+        time.sleep(1.5)
+        if _find_target(tab_sel, target_id) is None:
+            return
+        t = _find_target(tab_sel, target_id)
+        if t is not None and tab_ctl.activate_tab(t.get("title") or marker, target=t):
+            hands.key("ctrl+w")
+            obs = _wait_dialog(ws, 5)
+            if obs is not None:
+                r = dialog_watch.dismiss_dialog(ws)
+                if r.get("error"):
+                    _dismiss_dialog_os()
+            time.sleep(1)
+    finally:
         ws.close()
-    time.sleep(1)
-    t = _find_target(tab_sel, target_id)
-    if t is not None and tab_ctl.activate_tab(t.get("title") or marker):
-        hands.key("ctrl+w")
 
 
 def main():

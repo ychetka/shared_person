@@ -123,6 +123,25 @@ def _new_target(before_ids, url):
     return fresh[0] if len(fresh) == 1 else None
 
 
+def _target_current(target):
+    """Re-resolve OUR target in /json/list: the SAME id must still
+    exist AND still carry the url we recorded at creation (review
+    round 3). Title alone can never prove identity - two about:blank
+    tabs or two same-titled Habr pages both pass a marker check, so
+    any close/actuation path that got a target from _new_target must
+    re-verify id+url here, not just the window title. Returns the
+    fresh target dict, or None when identity is broken."""
+    if not target or not target.get("id"):
+        return None
+    recorded_url = (target.get("url") or "").rstrip("/")
+    for t in _page_targets():
+        if t.get("id") == target.get("id"):
+            if recorded_url and (t.get("url") or "").rstrip("/") != recorded_url:
+                return None
+            return t
+    return None
+
+
 def _title_matches(marker):
     """Active window title contains the marker (case-insensitive). The
     window name is '<page title> - Google Chrome', so a page title is
@@ -132,7 +151,7 @@ def _title_matches(marker):
     return marker.strip().lower() in _window_name().strip().lower()
 
 
-def activate_tab(marker):
+def activate_tab(marker, target=None):
     """Bring OUR tab to the foreground and PROVE it: after each jump the
     active window title must contain `marker` (the created tab's page
     title). ctrl+9 'last tab' is only the first guess - if another tab
@@ -140,15 +159,30 @@ def activate_tab(marker):
     strip is then scanned with ctrl+Tab (bounded by _TAB_SCAN_LIMIT)
     until the marker shows. Returns True only when the marker is the
     active window title; on False the caller must NOT actuate the
-    focused tab (it belongs to someone else)."""
+    focused tab (it belongs to someone else).
+
+    When `target` (the dict _new_target resolved for our tab) is
+    passed, a title match is necessary but NOT sufficient: the same
+    target id must still exist in /json/list with the same url
+    (_target_current). Two about:blank tabs or two same-titled Habr
+    pages would otherwise both satisfy the marker check and a later
+    close could land on an innocent tab - never close on title alone."""
+
+    def _verified():
+        if not _title_matches(marker):
+            return False
+        if target is not None and _target_current(target) is None:
+            return False
+        return True
+
     hands.key("ctrl+9")
     time.sleep(0.7)
-    if _title_matches(marker):
+    if _verified():
         return True
     for _ in range(_TAB_SCAN_LIMIT):
         hands.key("ctrl+Tab")
         time.sleep(0.7)
-        if _title_matches(marker):
+        if _verified():
             return True
     return False
 
@@ -216,16 +250,28 @@ def open_tab_bg(url, settle_s=45, activate=True):
         # returns focus to the adjacent - previously focused - tab.
         # Verify via the target list that ours is actually gone before
         # reporting; a stranded armed tab is worse than a slow one.
+        # Identity gate (review round 3): when _new_target resolved a
+        # target it must STILL resolve to the same id+url - a recycled
+        # or navigated target means the focused tab may no longer be
+        # ours, and a close on title alone is refused. 'verified' is
+        # reported only when identity was established AND the id is
+        # confirmed gone; an unidentified tab is always UNVERIFIED.
+        if target is not None and _target_current(target) is None:
+            return {
+                "error": "could not occlude the new tab - aborted; "
+                "close refused: the created target no longer resolves "
+                "to the same id+url (close UNVERIFIED)"
+            }
         hands.key("ctrl+w")
         time.sleep(1.0)
-        gone = target is None or all(t.get("id") != target.get("id") for t in _page_targets())
+        gone = target is not None and all(t.get("id") != target.get("id") for t in _page_targets())
         return {
             "error": "could not occlude the new tab - aborted and "
             f"closed it (close {'verified' if gone else 'UNVERIFIED'})"
         }
     time.sleep(settle_s)
     if activate:
-        if not activate_tab(marker):
+        if not activate_tab(marker, target=target):
             return {
                 "error": "created tab could not be re-activated - its "
                 "title never showed as the active window; refusing "
