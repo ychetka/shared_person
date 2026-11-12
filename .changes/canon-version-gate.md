@@ -11,6 +11,7 @@ why: >-
   Developer ruling 2026-11-12 (no_version_change incident): every
   merged PR must bump the version unless exempt (non-shipping diff or
   no-release label). Ref devin-session-bridge#162.
+refs: devin-session-bridge PR #162
 ---
 
 ## Spec impact
