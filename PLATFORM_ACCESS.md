@@ -139,3 +139,24 @@ and how they were obtained. All secrets are in `../ENV` (never committed).
 
 - Not configured yet. Will need a Google Cloud project + OAuth client
   with `youtube.upload` scope. hands-agent fallback meanwhile.
+
+## Go-live checklist
+
+Rules and post-flip verification steps around `PUBLISH_SIMULATE=0`:
+
+- **No test posts (hard rule, issue #58 directive).** Verification of
+  the media upload path happens on the FIRST REAL post, never via
+  `test:true`/synthetic posts on LinkedIn, VK or Facebook. The post
+  structure is fixed at generation time, so media presence must be
+  confirmed on real output.
+- **First LI media publish verification (issue #58 item 2).** On the
+  first real LinkedIn post carrying media: confirm `published.jsonl`
+  and the `publish/*` registry events carry a real `external_id` (not
+  `sim-*`) and the Telegram summary shows non-simulated status, then
+  verify server-side media presence on the published post (asset URNs
+  on the post body / media visible via the API read-back).
+- **Requeue-orphans policy (issue #58 item 4, accepted).** Re-upload
+  of already-uploaded assets is idempotent by design — carrying over
+  URNs risks stale/expired `digitalmediaAsset` references, so orphan
+  recovery re-registers uploads instead. No code change; accepted
+  deferred unless LinkedIn rate-limit pressure proves otherwise.

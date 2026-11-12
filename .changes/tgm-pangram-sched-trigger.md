@@ -1,3 +1,4 @@
+---
 # tgm-pangram-sched-trigger.md - one file per PR, public-safe content only.
 # type: fix | feat | refactor | chore | docs
 type: fix
