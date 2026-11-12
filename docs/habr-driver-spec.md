@@ -15,12 +15,20 @@ the blocked-surface probes - was live-verified 2026-11-12 against
 the real site on the audit browser (CDP :9223): the logged-out
 account hit the blk_login probe on `/ru/articles/new/` exactly as
 designed (the composer 404s anonymous users; the login redirect is
-`/kek/v1/auth/...?back=/ru/articles/new/`). Composer fill is
-verified pending a logged-in account - see the dry-run procedure
-in 2.4. Headline constraint: Habr rule #4 bans generated text, so
-the TG moderation card is the accountable human gate - the driver
-publishes only card-approved text, and the card decision travels
-with the draft as an explicit field, not an implied gate.
+`/kek/v1/auth/...?back=/ru/articles/new/`). Composer navigation
+runs through the CDP `open_tab` recipe action (background
+`Target.createTarget` -> settle -> `Target.activateTarget`), not
+OS-typed URL entry: live probing 2026-11-12 showed the composer
+SPA INITIALIZING in a foreground tab deterministically hangs the
+renderer on this box - 3/3 background loads reached
+readyState=complete and stayed responsive after activation, 2/2
+foreground loads burned 100% CPU and never answered CDP again.
+Composer fill is verified pending a logged-in account - see the
+dry-run procedure in 2.4. Headline constraint: Habr rule #4 bans
+generated text, so the TG moderation card is the accountable
+human gate - the driver publishes only card-approved text, and
+the card decision travels with the draft as an explicit field,
+not an implied gate.
 
 ## 1. Platform research (pointer, not a copy)
 
@@ -187,9 +195,11 @@ Manual dry-run procedure (live-verification milestone, issue #74):
    "hubs": [...], "text_md": ..., "kind": "article", ...}}` - NO
    `publish_go`, NO `test` - into `hands-agent/queue/inbox/`.
 2. The worker runs the front section: navigation shot
-   `habr_0_start.png`/`habr_1_composer.png`, blocked-surface probes
-   (a logged-out or CAPTCHA wall aborts here with `abort_reason`),
-   composer fill, `habr_2_filled.png`.
+   `habr_0_start.png`, CDP `open_tab` composer load (background tab,
+   settle, activate - see the verification-state note above for why
+   typed-URL navigation was replaced), `habr_1_composer.png`,
+   blocked-surface probes (a logged-out or CAPTCHA wall aborts here
+   with `abort_reason`), composer fill, `habr_2_filled.png`.
 3. Collect `queue/done/<task_id>.result.json` plus the shots from
    `queue/done/`: `publish_armed` empty confirms the run was dry;
    `last_step` < `publish_step` confirms it stopped before the

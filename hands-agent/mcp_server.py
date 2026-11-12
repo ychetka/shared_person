@@ -104,7 +104,8 @@ def gemini_locate(description, hint=""):
 def run_recipe(name, params):
     """Execute recipes/<name>.yaml. Mini-DSL:
     steps: [{action: find|locate|click|type|key|scroll|wait|shot|move|
-             emit|fail|dom_find|click_dom|js_click|dom_text|set_clipboard, ...}]
+             emit|fail|dom_find|click_dom|js_click|dom_text|set_clipboard|
+             open_tab, ...}]
     Template strings support {param} substitution. A step carrying
     `marks: publish` is the post-publish classification boundary: the
     result records its index as publish_step next to last_step (index
@@ -217,6 +218,20 @@ def run_recipe(name, params):
                 if r.get("error"):
                     return _result(f"step{i}: {r['error']}")
                 log_line.append(f"step{i} js_click '{st['target']}' -> {r['clicked']['found']}")
+            elif act == "open_tab":
+                # CDP tab orchestration (browser-domain, NOT a page
+                # round-trip): the tab is created backgrounded, loads
+                # while hidden, then activates once settled - a heavy
+                # SPA initializing in a FOREGROUND tab can wedge the
+                # renderer (verified live on the Habr composer
+                # 2026-11-12: 3/3 background loads healthy, 2/2
+                # foreground loads hung). Navigation is browser
+                # orchestration, not a site mutation, so the
+                # OS-input-only-for-mutations rule is untouched.
+                r = cdp.open_tab(st["url"], st.get("settle", 45), st.get("activate", True))
+                if r.get("error"):
+                    return _result(f"step{i}: {r['error']}")
+                log_line.append(f"step{i} open_tab '{st['url']}' -> {r['target_id']}")
             elif act == "set_clipboard":
                 # long-body insert path: loads the X clipboard via
                 # PyGObject; the recipe then `key ctrl+v`s a real paste

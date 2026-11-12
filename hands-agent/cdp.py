@@ -60,6 +60,53 @@ def eval_js(ws_url, expr):
     return res.get("result", {}).get("value")
 
 
+def _browser_ws_url():
+    """Browser-level websocket (NOT a page ws) - the endpoint for
+    browser-domain commands like Target.createTarget/activateTarget."""
+    v = json.loads(urllib.request.urlopen(f"{DEBUG}/json/version", timeout=10).read())
+    return v["webSocketDebuggerUrl"]
+
+
+def open_tab(url, settle_s=45, activate=True):
+    """Open a URL in a NEW BACKGROUND tab via CDP, let it settle, then
+    bring it to the foreground.
+
+    Why background: a heavy SPA (Habr composer) that INITIALIZES in a
+    foreground tab can wedge the renderer on this box (GNOME Wayland +
+    Xwayland Chrome, software rendering) - it burns 100% CPU and never
+    answers CDP again (verified live 2026-11-12: 3/3 background loads
+    reached readyState=complete and stayed responsive, 2/2 foreground
+    loads hung permanently; a settled tab survives activation).
+    Target.createTarget/activateTarget are browser-domain commands -
+    they answer on the browser socket instantly even when no renderer
+    is healthy, so the 30s ws timeout in _call is never in play.
+
+    Returns {"ok": True, "target_id": ...} or {"error": ...}."""
+    try:
+        ws_url = _browser_ws_url()
+    except Exception as e:  # noqa: BLE001 - any transport/HTTP failure is a recipe-step error
+        return {"error": f"browser ws: {e}"}
+    r = _call(
+        ws_url,
+        "Target.createTarget",
+        {"url": url, "newWindow": False, "background": True},
+    )
+    if r.get("error"):
+        return {"error": f"Target.createTarget: {r['error']}"}
+    target_id = r.get("result", {}).get("targetId")
+    if not target_id:
+        return {"error": f"Target.createTarget: no targetId in {r}"}
+    # the tab loads while backgrounded - renderer-safe settle window
+    time.sleep(settle_s)
+    if activate:
+        r = _call(ws_url, "Target.activateTarget", {"targetId": target_id})
+        if r.get("error"):
+            return {"error": f"Target.activateTarget: {r['error']}"}
+        # let the now-foregrounded page run its deferred init while healthy
+        time.sleep(5)
+    return {"ok": True, "target_id": target_id}
+
+
 def _chrome_offset(ws_url):
     """Browser chrome height: page-y -> screen-y offset."""
     return eval_js(

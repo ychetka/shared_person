@@ -52,6 +52,20 @@ name: habr_post
 # composer destination, while a post-path bounce to /ru/sandbox means
 # a ReadOnly-tier block.
 #
+# NAVIGATION: OS-typed navigation (ctrl+l + clipboard paste + Return)
+# was replaced by the CDP `open_tab` action because this composer SPA
+# INITIALIZING in a foreground tab deterministically hangs the Chrome
+# renderer on this box (GNOME Wayland + Xwayland, software rendering):
+# verified live 2026-11-12 - 3/3 background loads reached
+# readyState=complete and stayed responsive (75s+ post-activation),
+# 2/2 foreground loads burned 100% CPU and never answered CDP again.
+# open_tab does Target.createTarget(background:true) on the browser
+# websocket, sleeps `settle`, then Target.activateTarget - the page
+# loads while hidden where the hang cannot trigger, then comes
+# forward healthy. Navigation is browser orchestration, not a site
+# mutation, so the OS-input-only-for-mutations rule still holds for
+# all composer interactions below.
+#
 # HONEST STATUS: navigation + blocked-surface probes live-verified
 # 2026-11-12 against the real site (the logged-out blk_login probe
 # caught the login wall on /ru/articles/new/ as designed); the
@@ -76,44 +90,20 @@ steps:
   # after a verified run if Habr routes posts elsewhere.
   - action: shot
     name: habr_0_start.png
-  - action: key
-    keys: "ctrl+l"
-    if: "{title}"
-  - action: set_clipboard
+  - action: open_tab
     # sandbox-tier account: /ru/articles/new/ is a 404 for it; the
     # sandbox composer lives at /ru/sandbox/new/. Verify per-account
     # before enabling: full accounts may keep /ru/articles/new/.
-    text: "https://habr.com/ru/sandbox/new/"
+    # open_tab creates the tab BACKGROUNDED via CDP, lets it settle
+    # for `settle` seconds, then activates it - see NAVIGATION in the
+    # header for why OS-typed nav was replaced.
+    url: "https://habr.com/ru/sandbox/new/"
+    settle: 60
     if: "{title}"
-  - action: key
-    keys: "ctrl+v"
-    if: "{title}"
-  - action: key
-    keys: "Return"
-    if: "{title}"
-  - action: key
-    keys: "ctrl+l"
+  - action: open_tab
+    url: "https://habr.com/ru/posts/new/"
+    settle: 60
     if: "{post_kind}"
-  - action: set_clipboard
-    text: "https://habr.com/ru/posts/new/"
-    if: "{post_kind}"
-  - action: key
-    keys: "ctrl+v"
-    if: "{post_kind}"
-  - action: key
-    keys: "Return"
-    if: "{post_kind}"
-  - action: wait
-    # The tiptap composer burns a full CPU core for tens of seconds
-    # on software rendering after navigation; the 30s floor covers the
-    # observed init window. Longer hangs are environmental, not recipe.
-    seconds: 30
-  - action: key
-    # reload path yields a responsive renderer where the cold
-    # navigation left it CPU-bound
-    keys: "ctrl+r"
-  - action: wait
-    seconds: 15
   - action: shot
     name: habr_1_composer.png
   # ---------- blocked-surface probes ----------
