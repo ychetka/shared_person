@@ -23,8 +23,20 @@ SPA INITIALIZING in a foreground tab deterministically hangs the
 renderer on this box - 3/3 background loads reached
 readyState=complete and stayed responsive after activation, 2/2
 foreground loads burned 100% CPU and never answered CDP again.
-Composer fill is verified pending a logged-in account - see the
-dry-run procedure in 2.4. Headline constraint: Habr rule #4 bans
+Composer fill is now live-verified end-to-end through the
+settings screen: the 2026-11-12 dry-run on the logged-in audit
+profile completed `ok:true` with `last_step=38 < publish_step=39`
+and `publish_armed:""` - open_tab background load -> all
+blocked-surface probes clean -> click_dom 'Заголовок' + paste
+title -> click_dom 'Введите текст' + paste body -> scroll ->
+click_dom 'Далее к настройкам' -> `habr_2_settings.png` ->
+click_dom 'Хабы' + paste hub (procedure in 2.4). One known gap
+before any armed run: the 'Хабы' click+paste resolved and
+executed, but the hub did NOT stick in the field - the settings
+shot shows an empty 'Выберите хабы', because Habr's hub picker is
+an autocomplete requiring the suggestion entry to be
+clicked/selected, not just text pasted. This MUST be fixed before
+any `publish_go`-armed run. Headline constraint: Habr rule #4 bans
 generated text, so the TG moderation card is the accountable
 human gate - the driver publishes only card-approved text, and
 the card decision travels with the draft as an explicit field,

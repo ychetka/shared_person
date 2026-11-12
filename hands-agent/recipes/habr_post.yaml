@@ -75,11 +75,21 @@ name: habr_post
 # composer is a TWO-SCREEN tiptap SPA (verified 2026-11-12): screen
 # 1 title/body fields are data-placeholder divs inside .ProseMirror
 # (title click verified live via the data-placeholder scan); screen
-# 2 carries hubs/tags/publish behind "Далее к настройкам" - its
-# field labels (incl. the "Хабы" target) are pending live
-# verification. The full fill+publish leg is verified pending a
-# complete run. Without publish_go the recipe is a dry-run proof:
-# filled composer, proof shots, never publishes.
+# 2 carries hubs/tags/publish behind "Далее к настройкам".
+# The full 2026-11-12 dry-run on the logged-in profile verified the
+# complete fill leg through the settings screen - result ok:true,
+# last_step=38 < publish_step=39, publish_armed:"": open_tab
+# background load -> all blocked-surface probes clean -> click_dom
+# 'Заголовок' + paste title -> click_dom 'Введите текст' + paste
+# body -> scroll -> click_dom 'Далее к настройкам' ->
+# habr_2_settings.png -> click_dom 'Хабы' + paste hub. KNOWN GAP:
+# the 'Хабы' click+paste resolved and executed, but the hub did NOT
+# stick in the field (the settings shot shows an empty 'Выберите
+# хабы') - the picker is an autocomplete requiring the suggestion
+# entry to be clicked/selected, not just text pasted. This MUST be
+# fixed before any publish_go-armed run. Without publish_go the
+# recipe is a dry-run proof: filled composer, proof shots, never
+# publishes.
 # See docs/habr-driver-spec.md and docs/habr-account-state.md.
 steps:
   # ---------- open the composer ----------
