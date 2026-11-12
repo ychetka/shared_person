@@ -104,7 +104,10 @@ steps:
     keys: "Return"
     if: "{post_kind}"
   - action: wait
-    seconds: 6
+    # The tiptap composer burns a full CPU core for tens of seconds
+    # on software rendering after navigation; the 30s floor covers the
+    # observed init window. Longer hangs are environmental, not recipe.
+    seconds: 30
   - action: shot
     name: habr_1_composer.png
   # ---------- blocked-surface probes ----------
