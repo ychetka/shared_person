@@ -1,0 +1,10 @@
+# Minimal project metadata - the canonical version source.
+# repo_release.sh derives the release tag from [project].version
+# on the base head (fail-closed when absent). This repository has
+# no packaging dependencies; the file is a version contract, not a
+# build configuration.
+[project]
+name = "shared-person"
+version = "0.6.1"
+description = "Make me a public person"
+requires-python = ">=3.11"
