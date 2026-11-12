@@ -36,7 +36,7 @@ transport (`tools/pangram_api.js`, `pangram-4` model, `version: 4.1`):
 | VOICE-MIMIC | vm_v1 register imitation (275w) | AI Generated | 100% (1.0) |
 | VOICE-MIMIC | vm_v2 deeper humanization (303w) | AI Generated | 100% (1.0) |
 | MANUAL-POLISH | mp_draft machine baseline (234w) | AI Generated | 100% (1.0) |
-| MANUAL-POLISH | mp_v1 developer-polished | *pending input* | — |
+| MANUAL-POLISH | mp_v1 developer-polished (323w) | AI Detected / Mixed | 45.4% |
 
 Earlier-stage evidence consistent with this result:
 
@@ -60,9 +60,11 @@ Earlier-stage evidence consistent with this result:
    telegraphic rhythm) does not transfer human-ness — both iterations
    saturated at 100% AI. Mimicking the author's voice is not a path
    around the detector.
-3. **MANUAL-POLISH pending.** Machine draft confirmed 100% AI; the
-   developer's polished version will be scanned on arrival — this is
-   the decisive datapoint for "machine draft + human polish".
+3. **MANUAL-POLISH: real movement, no pass.** The developer's manual
+   polish dropped the machine draft from 100% to 45% AI (Mixed) —
+   the first non-zero movement of any edit path, and far more than
+   any LLM-driven iteration achieved. It still misses the Human bar,
+   so manual polish alone does not rescue a fully-machine draft.
 
 ## Recommended pipeline pattern
 
@@ -75,9 +77,8 @@ Earlier-stage evidence consistent with this result:
 
 ## Open items
 
-- `mp_v1` developer-polished score (bridge ask pending).
-- If mp_v1 lands Human, the manual-polish path becomes a documented
-  escape hatch for fully-machine drafts; if AI, the human-core pattern
-  is the only viable production path.
+- `mp_v1` scored Mixed 45% — manual polish moves the needle but does
+  not clear the gate; the human-core pattern remains the only path
+  that lands Human.
 - Second-detector transfer check still outstanding per the original
   stage-3 plan.
