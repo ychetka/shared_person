@@ -12,3 +12,6 @@ why: >-
   merged PR must bump the version unless exempt (non-shipping diff or
   no-release label). Ref devin-session-bridge#162.
 ---
+
+## Spec impact
+-
