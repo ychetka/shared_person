@@ -67,7 +67,12 @@
 //       then moves the task - alphabetical scan meets the task file
 //       first) -> the task file is consumed WITHOUT classifying and
 //       the sibling result delivers the real label WARN, not an
-//       'inconclusive' first answer.
+//       'inconclusive' first answer;
+//   G22 refused-write re-spend guard: a malformed draft (platform
+//       outside the enum) with a text-hash re-check due must fail
+//       the shape gate BEFORE the credit is charged - no enqueue, no
+//       est_spent, a 'ai-check-recheck-failed' note carrying the
+//       quarantine hint, and a second poll still spends nothing.
 //
 // Run:  node tools/check_pangram.js    (exit 0 = all pass)
 
@@ -1146,6 +1151,56 @@ const main = async () => {
         sc.fakeFs.existsSync(`${HANDS}/done/pangram-g21.result.json.consumed`) &&
         dirOf(sc.fakeFs, `${HANDS}/done`).every((f) => f.endsWith(".consumed")),
       dirOf(sc.fakeFs, `${HANDS}/done`).join(","),
+    );
+  }
+
+  // --- G22 refused-write re-spend guard: shape gate precedes charge -
+  // a malformed draft whose text hash changed would pass every
+  // re-check eligibility probe; the stamp write can never persist for
+  // it, so the shape gate must throw BEFORE the credit is charged and
+  // the task enqueued - or every poll re-spends the same credit until
+  // PANGRAM_DAILY. Two polls in a row: zero inbox files, zero
+  // est_spent, one recheck-failed note per poll.
+  {
+    const sc = mkSc();
+    seed(sc.fakeFs);
+    const text = words(160);
+    // platform outside the enum: validateDraftShape refuses; the
+    // stale text_fnv still arms the re-check path
+    seedDraft(sc.fakeFs, "g22", {
+      platform: "bogus-platform",
+      text,
+      ai_check: {
+        status: "done",
+        label: "Possibly human",
+        text_fnv: "oldtextfnv",
+        words: 160,
+        rechecks: 0,
+        at: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    await runPoll(sc);
+    check(
+      "G22 refused write: no enqueue, no credit charged",
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0 && !sc.fakeFs.existsSync(CREDITS),
+      JSON.stringify({
+        inbox: dirOf(sc.fakeFs, `${HANDS}/inbox`),
+        credits: readJson(sc.fakeFs, CREDITS),
+      }),
+    );
+    const refused = logLines(sc.fakeFs).filter((l) => l.action === "ai-check-recheck-failed");
+    check(
+      "G22 refused write: recheck-failed note + quarantine hint",
+      refused.length === 1 && refused[0].quarantine === `${DRAFTS}/g22.json`,
+      JSON.stringify(refused),
+    );
+    // second poll: still no spend - the loop is broken
+    await runPoll(sc);
+    check(
+      "G22 refused write: repoll still spends nothing",
+      dirOf(sc.fakeFs, `${HANDS}/inbox`).length === 0 &&
+        !sc.fakeFs.existsSync(CREDITS) &&
+        logLines(sc.fakeFs).filter((l) => l.action === "ai-check-recheck-failed").length === 2,
     );
   }
 

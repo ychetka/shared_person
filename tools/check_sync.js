@@ -140,6 +140,11 @@ const GROUPS = {
       [/writeJsonAtomic\(DRAFTS \+ '\/' \+ id \+ '\.json', cur\);/, "SAVE;"],
     ],
   },
+  // validateDraftShape light shape gate (issue #69): identical
+  // copies in Handle TG Update, Prepare Draft, Compose Message and
+  // Handle Pangram Results (all sp-tg-moderation) - every draft-file
+  // write path validates before the tmp+rename
+  "draft-shape": { expect: 4 },
   // the guarded-write snapshot comparator: sameDraftSnapshot (an arrow
   // helper in Handle TG Update) vs the inline sameSnapshot const in
   // Compose Message - same field list, different binding names and
@@ -412,6 +417,35 @@ for (const [group, cfg] of Object.entries(GROUPS)) {
     classes.size === 1 ? " identical" : ` in ${classes.size} shapes, token sets equal`,
     members.map((m) => m.where).join(", "),
   );
+}
+
+// cross-group platform guard (issue #69 review): DRAFT_PLATFORMS
+// inside the draft-shape copies is a fifth spelling of the platform
+// list, living outside the enabled-platforms marker - its token set
+// must equal the enabled-platforms set minus the 'all' fan-out
+// token, so a platform added on either side fails here instead of
+// drifting silently
+{
+  const tok = (b) => [...new Set(b.lines.join("\n").match(PLATFORM_TOKEN_RE) || [])].sort();
+  const ep = blocks.find((b) => b.group === "enabled-platforms");
+  const want = ep ? tok(ep).filter((t) => t !== "all") : [];
+  let drift = 0;
+  for (const m of blocks.filter((b) => b.group === "draft-shape")) {
+    const got = tok(m);
+    if (got.join(",") !== want.join(",")) {
+      console.log(
+        "FAIL draft-shape %s: platform tokens %s != enabled-platforms %s (minus 'all')",
+        m.where,
+        got.join(","),
+        want.join(","),
+      );
+      drift++;
+      bad++;
+    }
+  }
+  if (ep && !drift) {
+    console.log("ok   draft-shape: platform set matches enabled-platforms minus 'all'");
+  }
 }
 
 // a marker group with no GROUPS entry would silently go unchecked -
