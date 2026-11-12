@@ -6,8 +6,9 @@ The composite 'rubric+judge' scorer in sp-humanizer-eval blends the
 LLM judge's fluency verdict into the deterministic rubric floor, so
 the judge must be VALIDATED against the fixture tiers before its
 score is trusted: clean_human must rank better than borderline,
-borderline better than ai_flop - on the judge's own polarity
-(0-100, HIGHER = WORSE fluency, same as ai_score).
+borderline better than ai_flop, ai_flop better than broken_fluency -
+on the judge's own polarity (0-100, HIGHER = WORSE fluency, same as
+ai_score).
 
   J1  role contract: roles/fluency-judge.yaml parses, points at an
       existing prompts/fluency-judge.txt, and declares the strict
@@ -19,14 +20,17 @@ borderline better than ai_flop - on the judge's own polarity
       severity and an issue with an unexpected property - the same
       shape the gateway's ajv enforces server-side;
   J3  recorded verdicts: the checked-in per-tier responses validate
-      and rank clean_human < borderline < ai_flop (worse) on the EN
-      fixtures - the regression floor the live model must beat;
+      and rank clean_human < borderline < ai_flop < broken_fluency
+      (worse) on the EN fixtures - the regression floor the live model
+      must beat;
   J4  --live only: POSTs the REAL role to $LLM_GATEWAY_URL/run for
       every EN fixture cell, validates each live verdict against the
-      contract, asserts ai_flop scores strictly worse than clean_human
-      and warns (not fails) when the strict 3-way order doesn't hold -
-      borderline/en is fluent prose, so live ordering there can legit
-      drift; prints the report.
+      contract, hard-fails unless broken_fluency scores strictly worse
+      than clean_human (a fluency judge MUST separate genuinely broken
+      grammar from fluent text), and warns (not fails) when the slop
+      ordering doesn't hold - ai_flop and borderline/en are both
+      fluent prose, so live ordering there can legit drift; prints the
+      report.
 
 Default mode is mock/recorded - NO network, CI-safe. Live validation
 against the real gateway is opt-in:
@@ -51,7 +55,7 @@ LIVE = "--live" in sys.argv[1:]
 GATEWAY = os.environ.get("LLM_GATEWAY_URL", "http://127.0.0.1:8787").rstrip("/")
 JUDGE_ROLE = os.environ.get("JUDGE_ROLE", "fluency-judge").strip() or "fluency-judge"
 
-TIERS = ("clean_human", "borderline", "ai_flop")
+TIERS = ("clean_human", "borderline", "ai_flop", "broken_fluency")
 SEVERITIES = ("minor", "major", "fatal")
 
 failures = []
@@ -221,6 +225,31 @@ RECORDED = {
             },
         ],
     },
+    "broken_fluency": {
+        "score": 90,
+        "rationale": "Severe grammatical breakage throughout: "
+        "subject-verb disagreement, missing and wrong articles, "
+        "garbled word order and tense chaos on nearly every sentence. "
+        "The text is understandable in intent but does not parse as "
+        "fluent English anywhere.",
+        "issues": [
+            {
+                "span": "The deploy was goes yesterday",
+                "problem": "subject-verb disagreement and broken tense",
+                "severity": "fatal",
+            },
+            {
+                "span": "there was not no way for forward the requests",
+                "problem": "double negation and garbled infinitive phrase",
+                "severity": "fatal",
+            },
+            {
+                "span": None,
+                "problem": "missing articles across the whole text",
+                "severity": "major",
+            },
+        ],
+    },
 }
 
 
@@ -273,21 +302,34 @@ if LIVE:
     if verdicts is not None:
         report(verdicts)
         scores = {t: verdicts[t]["score"] for t in TIERS}
-        # Hard fail only when the judge can't separate the obvious
-        # extremes: ai_flop must score strictly worse than clean_human.
-        # The strict 3-way order (clean < borderline < ai_flop) is a
-        # WARNING, not a fail: borderline/en is fluent prose, so a live
-        # model may legitimately place it near (or even below) clean.
+        # Hard fail only on the FLUENCY axis the judge exists to catch:
+        # broken_fluency is genuinely broken grammar and MUST score
+        # strictly worse than clean_human. The full ordering
+        # (clean_human < borderline < ai_flop < broken_fluency) is a
+        # WARNING, not a fail: slop can be perfectly fluent, so a live
+        # model that scores ai_flop at or below clean_human is
+        # reporting a legit fluency outcome - but a judge that also
+        # ranks slop at-or-worse than broken grammar has lost the
+        # fluency axis entirely, so the whole 4-way order is the drift
+        # signal.
         check(
-            "J4 live: ai_flop scores strictly worse than clean_human",
-            scores["ai_flop"] > scores["clean_human"],
+            "J4 live: broken_fluency scores strictly worse than clean_human",
+            scores["broken_fluency"] > scores["clean_human"],
             scores,
         )
-        if not scores["clean_human"] < scores["borderline"] < scores["ai_flop"]:
+        if not (
+            scores["clean_human"]
+            < scores["borderline"]
+            < scores["ai_flop"]
+            < scores["broken_fluency"]
+        ):
             print(
-                "warn J4 live: strict order clean < borderline < ai_flop "
-                f"not held - borderline is fluent prose, treat as drift "
-                f"signal not failure: {scores}"
+                "warn J4 live: strict 4-way order clean < borderline "
+                "< ai_flop < broken_fluency not held - slop can be "
+                "fluent so slop-tier inversions are legit drift, but a "
+                "judge ranking slop at-or-worse than broken grammar is "
+                "blind on its own axis: "
+                f"{scores}"
             )
 else:
     verdicts = run_tiers(judge_mock)
@@ -298,6 +340,11 @@ else:
         scores["clean_human"] < scores["borderline"] < scores["ai_flop"],
         scores,
     )
+    check(
+        "J3 recorded: broken_fluency scores strictly worst (> ai_flop)",
+        scores["broken_fluency"] > scores["ai_flop"],
+        scores,
+    )
     # the composite blend in Eval Tick: max(rubric, round(judge*0.8)) -
     # the judge floor ordering must survive the dampening too, so the
     # recorded verdicts also rank after *0.8
@@ -305,6 +352,11 @@ else:
     check(
         "J3 recorded: tier order survives the 0.8 blend dampening",
         damped["clean_human"] < damped["borderline"] < damped["ai_flop"],
+        damped,
+    )
+    check(
+        "J3 recorded: broken_fluency stays worst after dampening",
+        damped["broken_fluency"] > damped["ai_flop"],
         damped,
     )
 
