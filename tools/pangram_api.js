@@ -122,10 +122,15 @@ const request = async (key, opts) => {
       lastErr = e;
       if (e?.pangramFatal) throw e;
       if (attempt < MAX_ATTEMPTS) {
-        let delay = 500 * 2 ** (attempt - 1);
         const ra = retryAfterMs(e);
-        if (ra !== null) delay = Math.min(ra, RETRY_AFTER_CAP_MS);
-        await sleep(delay * (0.5 + Math.random()));
+        // a server-provided Retry-After is slept VERBATIM (capped) -
+        // jittering it can under-sleep the wait the server asked for;
+        // jitter applies only to the computed exponential backoff
+        await sleep(
+          ra !== null
+            ? Math.min(ra, RETRY_AFTER_CAP_MS)
+            : 500 * 2 ** (attempt - 1) * (0.5 + Math.random()),
+        );
       }
     } finally {
       clearTimeout(timer);

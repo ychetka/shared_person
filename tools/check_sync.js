@@ -163,15 +163,15 @@ const GROUPS = {
     ],
   },
   // scrubSecrets secret masking: Generate Drafts (sp-content-gen),
-  // Handle TG Update and Handle Pangram Results (sp-tg-moderation),
-  // Resolve Chat + Webhook (sp-tg-setup) and Analytics Tick
-  // (sp-analytics). The >=8 length floor lives inside the loop in all
-  // five copies; SECRET_VALUES collection itself legitimately differs
-  // per node and stays outside the markers. Publish Tick's
-  // scrub/KNOWN_TOKENS is INTENTIONALLY divergent (a dynamic token
-  // set plus access_token= form masking) and must NOT get a copy
-  // here
-  "scrub-secrets": { expect: 5 },
+  // Prepare Draft, Handle TG Update and Handle Pangram Results
+  // (sp-tg-moderation), Resolve Chat + Webhook (sp-tg-setup) and
+  // Analytics Tick (sp-analytics). The >=8 length floor lives inside
+  // the loop in all six copies; SECRET_VALUES collection itself
+  // legitimately differs per node and stays outside the markers.
+  // Publish Tick's scrub/KNOWN_TOKENS is INTENTIONALLY divergent (a
+  // dynamic token set plus access_token= form masking) and must NOT
+  // get a copy here
+  "scrub-secrets": { expect: 6 },
   // Pangram AI-check warn-gate prelude (issue #76): the PANGRAM_*
   // env reads, the whitespace-split word count, the text FNV-1a and
   // the daily-credits counter loader - identical copies in Prepare
