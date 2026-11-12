@@ -199,6 +199,11 @@ steps:
   # tags and the publish button live. This click is BEFORE the
   # publish boundary - it navigates to the next fill screen, it does
   # not publish - so it stays ungated and runs in dry-runs too.
+  # the settings button lives below the fold; _ONSCREEN rejects
+  # off-viewport candidates.
+  - action: scroll
+    amount: 3
+    direction: down
   - action: click_dom
     url: habr.com
     target: "Далее к настройкам"
