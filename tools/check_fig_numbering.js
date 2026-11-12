@@ -154,7 +154,8 @@ const runScenario = async (sc) => {
       if (opts.url === "http://127.0.0.1:8787/run") {
         const role = opts.body?.role;
         runs.push({ role, input: String(opts.body?.input || "") });
-        const n = (callsPerRole[role] = (callsPerRole[role] || 0) + 1);
+        callsPerRole[role] = (callsPerRole[role] || 0) + 1;
+        const n = callsPerRole[role];
         // stateful stubs (S12): criticSeq replays per-call verdicts,
         // writerRewrite is what the role returns on its second call
         // (the verifier-driven rewrite pass)
