@@ -62,6 +62,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
+# cell text is writer-supplied prose, not math: a literal '$$' (or any
+# unmatched '$') in a matrix/table cell used to raise a mathtext
+# ParseException and kill the whole chart render. Writers never emit
+# TeX on purpose, so disabling mathtext parsing is strictly safer.
+matplotlib.rcParams["text.parse_math"] = False
+
 # --- style -----------------------------------------------------------------
 
 BG = "#0d1117"
