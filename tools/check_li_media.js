@@ -13,7 +13,8 @@
 //       feedshare-image, owner LINKEDIN_PERSON_URN,
 //       serviceRelationships OWNER/urn:li:userGeneratedContent), a
 //       binary PUT of the file bytes to the returned uploadUrl with
-//       'Authorization: Bearer', then ugcPosts carries
+//       'Authorization: Bearer', a bounded GET poll on the asset URN
+//       until it reports READY (issue #58), then ugcPosts carries
 //       shareMediaCategory IMAGE and media[] = {status:READY,
 //       media:<asset urn verbatim>, title:{text:<filename>}};
 //   S3  a per-file upload failure is NON-FATAL like the VK driver:
@@ -30,7 +31,14 @@
 //   S7  all media failed + no text fails the file instead of posting
 //       an empty share;
 //   S8  dry_run:true runs claim -> media resolve -> param build with
-//       zero LinkedIn calls and reports media_resolved counts.
+//       zero LinkedIn calls and reports media_resolved counts;
+//   S9  a malformed registerUpload answer (no uploadUrl) is a LOCAL
+//       classification error -> per-file terminal, no requeue
+//       (issue #58);
+//   S10 an asset that stays PROCESSING through 5 availability polls
+//       is a per-file terminal drop, not a requeue (issue #58);
+//   S11 a status-less asset GET answer is inconclusive - two in a
+//       row end the poll and the file proceeds to attach.
 //
 // Sandbox contract: the Code node sees require('fs'), $env.NAME and
 // this.helpers.httpRequest - all stubbed here. fs is a small
@@ -274,6 +282,7 @@ const runTick = async (sc) => {
       if (key === "POST https://api.linkedin.com/v2/assets?action=registerUpload") {
         regN++;
         if (sc.regFail?.(regN, opts)) throw sc.regFail(regN, opts);
+        if (sc.regAnswer) return sc.regAnswer(regN, opts);
         return {
           value: {
             asset: `urn:li:digitalmediaAsset:TST${regN}`,
@@ -288,6 +297,19 @@ const runTick = async (sc) => {
       if (opts.method === "PUT" && String(opts.url).startsWith("https://uploads.li.test/")) {
         if (sc.putFail?.(opts)) throw sc.putFail(opts);
         return "";
+      }
+      // asset availability poll (issue #58): the driver GETs the
+      // asset URN after the PUT until it reports a READY-ish status.
+      // sc.assetGet(opts, n) overrides the answer per call - return a
+      // body or throw an error.
+      if (opts.method === "GET" && opts.url.startsWith("https://api.linkedin.com/v2/assets/")) {
+        const assetGetN = calls.filter((c) => c.method === "GET" && c.url === opts.url).length;
+        if (sc.assetGet) {
+          const r = sc.assetGet(opts, assetGetN);
+          if (r instanceof Error) throw r;
+          return r;
+        }
+        return { status: "READY" };
       }
       if (key === "POST https://api.linkedin.com/v2/ugcPosts") {
         if (sc.ugcFail) throw sc.ugcFail(opts);
@@ -385,12 +407,14 @@ const main = async () => {
       (c) => `${c.method} ${c.url.startsWith("https://uploads.li.test") ? "<uploadUrl>" : c.url}`,
     );
     check(
-      "S2 call order: register,PUT x2 -> ugcPosts -> verify GET",
+      "S2 call order: register,PUT,assetGET x2 -> ugcPosts -> verify GET",
       eq(kinds, [
         "POST https://api.linkedin.com/v2/assets?action=registerUpload",
         "PUT <uploadUrl>",
+        "GET https://api.linkedin.com/v2/assets/urn%3Ali%3AdigitalmediaAsset%3ATST1",
         "POST https://api.linkedin.com/v2/assets?action=registerUpload",
         "PUT <uploadUrl>",
+        "GET https://api.linkedin.com/v2/assets/urn%3Ali%3AdigitalmediaAsset%3ATST2",
         "POST https://api.linkedin.com/v2/ugcPosts",
         "GET https://api.linkedin.com/v2/ugcPosts/urn%3Ali%3Ashare%3A777001",
       ]),
@@ -651,6 +675,100 @@ const main = async () => {
       JSON.stringify(dr),
     );
     check("S8 dry-run: file lands in done/", at(fakeFs, "done").includes("d1.json"));
+  }
+
+  // S9: a malformed registerUpload answer (asset urn but no
+  // uploadMechanism/uploadUrl) is a LOCAL classification error, not
+  // transport loss (issue #58): per-file terminal, the file does NOT
+  // requeue, and the post publishes text-only with the drop named.
+  {
+    const { calls, fakeFs, ledger } = await runTick({
+      env: { PUBLISH_SIMULATE: "0" },
+      payload: {
+        id: "d1",
+        platform: "linkedin",
+        post_id: "p1",
+        text: "body surviving a malformed register answer",
+        media: ["materials/photos/fig1.png"],
+      },
+      media: MEDIA,
+      regAnswer: (n) => ({ value: { asset: `urn:li:digitalmediaAsset:TST${n}` } }),
+    });
+    const pub = ledger.find((r) => r && r.status === "published");
+    check(
+      "S9 malformed answer: per-file terminal, post still publishes",
+      !!pub &&
+        pub.media_attached === 0 &&
+        Array.isArray(pub.media_failed) &&
+        pub.media_failed.some((m) => m.includes("malformed registerUpload")) &&
+        at(fakeFs, "done").includes("d1.json") &&
+        !at(fakeFs, ".").includes("d1.json") &&
+        calls.some((c) => c.url.endsWith("/v2/ugcPosts") && c.method === "POST"),
+      JSON.stringify(pub),
+    );
+  }
+
+  // S10: an asset that never reports READY is a per-file terminal
+  // drop, not a requeue (issue #58): 5 polls of a definite
+  // PROCESSING status exhaust the budget and the drop is named.
+  {
+    const { calls, ledger, results } = await runTick({
+      env: { PUBLISH_SIMULATE: "0", LI_ASSET_POLL_MS: "100" },
+      payload: {
+        id: "d1",
+        platform: "linkedin",
+        post_id: "p1",
+        text: "body surviving a stuck asset",
+        media: ["materials/photos/fig1.png"],
+      },
+      media: MEDIA,
+      assetGet: () => ({ status: "PROCESSING" }),
+    });
+    const assetPolls = calls.filter((c) => c.method === "GET" && c.url.includes("/v2/assets/urn"));
+    const pub = ledger.find((r) => r && r.status === "published");
+    check(
+      "S10 stuck asset: 5 polls then per-file terminal, post publishes",
+      assetPolls.length === 5 &&
+        !!pub &&
+        pub.media_attached === 0 &&
+        Array.isArray(pub.media_failed) &&
+        pub.media_failed.some((m) => m.includes("never reported READY")) &&
+        calls.some((c) => c.url.endsWith("/v2/ugcPosts") && c.method === "POST"),
+      JSON.stringify({ polls: assetPolls.length, pub }),
+    );
+    check(
+      "S10 stuck asset: no requeue - claim consumed, not re-queued",
+      !results.some((r) => r.includes("RETRY")),
+      JSON.stringify(results),
+    );
+  }
+
+  // S11: a status-less asset GET answer is inconclusive - two in a
+  // row stop the poll and the file proceeds to attach (issue #58's
+  // tolerance arm for id-only asset reads).
+  {
+    const { calls, ledger } = await runTick({
+      env: { PUBLISH_SIMULATE: "0", LI_ASSET_POLL_MS: "100" },
+      payload: {
+        id: "d1",
+        platform: "linkedin",
+        post_id: "p1",
+        text: "id-only asset shape",
+        media: ["materials/photos/fig1.png"],
+      },
+      media: MEDIA,
+      assetGet: () => ({ id: "urn:li:digitalmediaAsset:TST1" }),
+    });
+    const assetPolls = calls.filter((c) => c.method === "GET" && c.url.includes("/v2/assets/urn"));
+    const pub = ledger.find((r) => r && r.status === "published");
+    check(
+      "S11 status-less asset: proceeds after 2 inconclusive polls",
+      assetPolls.length === 2 &&
+        !!pub &&
+        pub.media_attached === 1 &&
+        pub.media_failed === undefined,
+      JSON.stringify({ polls: assetPolls.length, pub }),
+    );
   }
 
   console.log(fails ? `li-media: ${fails} check(s) failed` : "li-media: all checks pass");
