@@ -1,10 +1,20 @@
 {
+  "repo": "ychetka/shared_person",
   "text_language": "en",
+  "protected_paths": [
+    ".devin/",
+    ".windsurfrules"
+  ],
   "cyrillic_paths": [
     ".devin/agents/",
     "docs/patches/",
-    "controller-manager/",
     "fixtures/humanizer/",
-    "prompts/"
+    "hands-agent/recipes/",
+    "n8n/workflows/",
+    "prompts/",
+    "docs/habr-driver-spec.md",
+    "docs/habr-account-state.md",
+    "eyes-agent/templates/",
+    ".devin/scripts/session_audit.sh"
   ]
 }
