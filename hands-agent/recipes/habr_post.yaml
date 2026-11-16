@@ -31,9 +31,18 @@ name: habr_post
 #                 banned - media verification happens via metrics on
 #                 REAL posts. The retract block stays for operator
 #                 drill runs only.
+#   publish_go  - the publish-arm latch. EVERY step from the CLICK
+#                 BOUNDARY onward is gated on {publish_go}; the DSL
+#                 `if:` semantics are empty-means-skip and missing
+#                 params format to '', so a task without publish_go
+#                 fills the composer, takes the proof shots and stops
+#                 before the click. The sp-publish driver sets
+#                 publish_go: true; manual proof runs drop the param.
+#                 The result records publish_armed (empty = dry).
 #
-# Result: {ok, url, retracted?, media_attached?, abort_reason?,
-# last_step, publish_step} - url comes from the post-publish /json
+# Result: {ok, url, publish_armed, retracted?, media_attached?,
+# abort_reason?, last_step, publish_step} - url comes from the
+# post-publish /json
 # tab-listing read-back (tab_url -> emit page url), which IS the
 # verification the driver records.
 #
@@ -214,15 +223,30 @@ steps:
     value: 1
     if: "{image_path}"
   # ---------- PUBLISH CLICK (the boundary) ----------
+  # publish_go latch: an absent/empty flag skips everything from here
+  # down; a dry run's last artifact is habr_2_filled.png.
+  # publish_armed lands in every result (empty = dry, typed true =
+  # armed) so the driver can classify the run without parsing logs.
+  - action: emit
+    key: publish_armed
+    # `from:` carries the ctx value typed - publish_go: true lands as
+    # YAML true, a missing flag as '' which formats to the documented
+    # dry-run marker (value: "{publish_go}" would format the bool
+    # through str() into the string "True").
+    from: publish_go
   - action: locate
     target: "the green publish button (RU label 'Publish')"
     hint: "primary action button, usually bottom-right of the composer"
+    if: "{publish_go}"
   - action: click
     marks: publish
+    if: "{publish_go}"
   - action: wait
     seconds: 8
+    if: "{publish_go}"
   - action: shot
     name: habr_3_published.png
+    if: "{publish_go}"
   # ---------- URL read-back (the verification) ----------
   # /json tab listing -> OUR tab's url/title, bound by the target id
   # the open_tab_bg step recorded - a bare 'habr.com' substring could
@@ -232,9 +256,11 @@ steps:
     id: "{tab_id}"
     url: "habr.com"
     into: page
+    if: "{publish_go}"
   - action: emit
     key: url
     value: "{page}"
+    if: "{publish_go}"
   # ---------- test retract (optional, drill runs only) ----------
   # 'unpublish' on Habr = the article's edit menu 'В черновики'
   # (back to drafts). Emit retracted so the driver records

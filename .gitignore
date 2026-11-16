@@ -39,3 +39,5 @@ hands-agent/queue/inbox/
 hands-agent/queue/failed/
 # consumed-result bookkeeping files are runtime artifacts, not VCS content
 hands-agent/queue/done/*.consumed
+# done/ is runtime audit output too; already-tracked legacy pngs stay tracked
+hands-agent/queue/done/
