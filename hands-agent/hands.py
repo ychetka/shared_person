@@ -11,6 +11,7 @@ import random
 import subprocess
 import time
 
+os.environ.setdefault("GDK_BACKEND", "x11")
 ENV = dict(os.environ)
 ENV["DISPLAY"] = os.environ.get("HANDS_DISPLAY", ":1")
 ENV["XAUTHORITY"] = os.environ.get("HANDS_XAUTHORITY", os.path.expanduser("~/.Xauthority"))

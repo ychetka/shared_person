@@ -331,7 +331,7 @@ def run_recipe(name, params):
                     # pass through typed - only strings get {param}
                     # formatting
                     emitted[str(st["key"])] = (
-                        ctx.get(st["from"]) if "from" in st else st.get("value", "")
+                        ctx.get(st["from"], "") if "from" in st else st.get("value", "")
                     )
                 elif act == "fail":
                     # explicit recipe abort, typically `if:`-gated

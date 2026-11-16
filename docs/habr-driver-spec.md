@@ -25,14 +25,14 @@ answered CDP again). The recipe now implements that trick as the
 OS-level `open_tab_bg` action (the original CDP `open_tab` was
 removed under the issue #127 read-only directive - see 2.4).
 Composer fill is now live-verified end-to-end through the
-settings screen: the 2026-11-12 dry-run on the logged-in audit
-profile completed `ok:true` with `last_step=38 < publish_step=39`
+filled composer: the 2026-11-12 dry-run on the logged-in audit
+profile completed `ok:true` with `last_step=34 < publish_step=36`
 and `publish_armed:""` - background tab load -> all
 blocked-surface probes clean -> title/body locate+click+paste ->
-scroll -> settings screen -> `habr_2_settings.png` -> hub entry
+hub entry -> `habr_2_filled.png`
 (procedure in 2.4). One known gap
 before any armed run: the 'Хабы' click+paste resolved and
-executed, but the hub did NOT stick in the field - the settings
+executed, but the hub did NOT stick in the field - the filled
 shot shows an empty 'Выберите хабы', because Habr's hub picker is
 an autocomplete requiring the suggestion entry to be
 clicked/selected, not just text pasted. The current recipe
