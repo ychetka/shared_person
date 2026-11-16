@@ -182,10 +182,24 @@ const GROUPS = {
   // the daily-credits counter loader - identical copies in Prepare
   // Draft (fresh-check enqueue) and Handle Pangram Results (result
   // replies, credit re-sync, the text-hash re-check), both
-  // sp-tg-moderation, plus Gate Pangram (sp-writer-dispatch, issue
-  // #143 - same env contract, different verdict use). A drifted copy
-  // would split the gate's accounting between the readers
-  "pangram-gate": { expect: 3 },
+  // sp-tg-moderation, plus Gate Pangram and Handle Submission
+  // (sp-writer-dispatch, issues #143/#147 - same env contract,
+  // different verdict use; the /calibrate sampler reads it too).
+  // A drifted copy would split the gate's accounting between the
+  // readers
+  "pangram-gate": { expect: 4 },
+  // the Pangram REST client helpers (pangramSleep/pangramHttpStatus/
+  // pangramRetryAfterMs/pangramApiReq/pangramApiCheck): identical
+  // request contract, retry semantics and error_class vocabulary in
+  // Prepare Draft (sp-tg-moderation, issue #125), Gate Pangram and
+  // Handle Submission (sp-writer-dispatch, issues #143/#147 - the
+  // /calibrate scan must return the same shape the gate consumes).
+  // Whole-line comments differ per copy (each documents its own
+  // caller consequence), so they are stripped before comparing
+  "pangram-api-client": {
+    expect: 3,
+    normalize: [[/^[ \t]*\/\/[^\n]*(?:\n|$)/gm, ""]],
+  },
   // the 5MB per-file media cap: Prepare Draft and Fan Out Album (both
   // sp-tg-moderation), plus Handle Submission (sp-writer-dispatch,
   // issue #143 - the writer draft download caps at the same bound
