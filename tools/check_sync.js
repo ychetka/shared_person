@@ -187,13 +187,16 @@ const GROUPS = {
   // would split the gate's accounting between the readers
   "pangram-gate": { expect: 3 },
   // the 5MB per-file media cap: Prepare Draft and Fan Out Album (both
-  // sp-tg-moderation). Fan Out Album's re-read fallback must cap at
-  // exactly the bound Prepare Draft filtered the album's paths by -
-  // the paired binaries arrive pre-capped, but a bare literal on each
-  // side could drift (issue #60 review). The copies sit at different
-  // nesting depths, so leading indentation is stripped
+  // sp-tg-moderation), plus Handle Submission (sp-writer-dispatch,
+  // issue #143 - the writer draft download caps at the same bound
+  // before getFile burns a fetch). Fan Out Album's re-read fallback
+  // must cap at exactly the bound Prepare Draft filtered the album's
+  // paths by - the paired binaries arrive pre-capped, but a bare
+  // literal on each side could drift (issue #60 review). The copies
+  // sit at different nesting depths, so leading indentation is
+  // stripped
   "media-cap": {
-    expect: 2,
+    expect: 3,
     normalize: [[/^\s+/gm, ""]],
   },
   // media path resolution against the read-only materials mount
