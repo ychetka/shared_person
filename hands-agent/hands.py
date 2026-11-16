@@ -11,9 +11,13 @@ import random
 import subprocess
 import time
 
+os.environ.setdefault("GDK_BACKEND", "x11")
 ENV = dict(os.environ)
 ENV["DISPLAY"] = os.environ.get("HANDS_DISPLAY", ":1")
 ENV["XAUTHORITY"] = os.environ.get("HANDS_XAUTHORITY", os.path.expanduser("~/.Xauthority"))
+# GDK prefers wayland when available; the clipboard owner must serve the
+# X11 CLIPBOARD that Xwayland-served Chrome pastes.
+ENV["GDK_BACKEND"] = "x11"
 
 
 def _xd(*args):
@@ -99,7 +103,10 @@ def key(*keys):
 
 
 def scroll(amount=3, direction="down"):
-    _xd("click", "5" if direction == "down" else "4", "--repeat", amount)
+    # xdotool parses anything after the button number as a NEW command, so
+    # `click 5 --repeat 3` fails with "Unknown command: --repeat". Options
+    # must precede the button: `click --repeat 3 5`.
+    _xd("click", "--repeat", amount, "5" if direction == "down" else "4")
 
 
 def set_clipboard(text):
